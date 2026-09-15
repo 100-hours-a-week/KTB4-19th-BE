@@ -48,8 +48,8 @@ public class Complaint extends BaseTimeEntity {
     @JoinColumn(name = "building_id", nullable = false)
     private Building building;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "attachment_id")
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "attachment_id", unique = true)
     private File attachment;
 
     @Column(name = "title", nullable = false, length = 50)
