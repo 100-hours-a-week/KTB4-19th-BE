@@ -2,21 +2,17 @@
 
 Java 25 / Spring Boot 4.1.1 / Spring Security / JPA / MySQL 8.
 
-## 로컬 실행
+## 로컬 개발 실행
 
-MySQL localhost:3306에 `zipsai` 데이터베이스를 생성한다.
-
-```sql
-CREATE DATABASE IF NOT EXISTS zipsai CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-```
-
-`.env.properties.example`을 `.env.properties`로 복사하고 DB_PASSWORD와 JWT_SECRET을 설정한다. 이 파일은 Git에서 제외한다. 개발 PC에는 요청받은 로컬 설정을 준비했다.
+팀 공통 개발 환경은 Docker Compose를 사용한다. Docker Desktop을 실행한 뒤 프로젝트 루트에서 아래 명령을 실행하면 MySQL 8.4.11과 Spring Boot 백엔드가 함께 시작된다. MySQL은 root / mysql로 접속하며, `zipsai` 데이터베이스를 자동 생성한다.
 
 ```sh
-./gradlew bootRun --args='--spring.profiles.active=local'
+docker compose up --build
 ```
 
-Flyway가 테이블을 생성하고 JPA가 스키마를 검증한다. 기본 포트는 8080이다. local 프로필만 HTTP 개발용 Secure=false 쿠키를 사용한다. 배포 환경은 DB_PASSWORD/JWT_SECRET/DB_URL/DB_USERNAME/CORS_ALLOWED_ORIGINS 환경변수를 사용하며 HTTPS Secure 쿠키가 기본값이다.
+백엔드 기본 주소는 http://localhost:8080 이고, MySQL 포트는 호스트의 3307이다. 중지하려면 `docker compose down`을 실행한다. 데이터 볼륨을 포함해 초기화하려면 `docker compose down -v`를 실행한다.
+
+환경변수 기본값은 [`.env.example`](.env.example)에 정의되어 있다. 필요하면 이를 `.env`로 복사해 포트를 조정할 수 있다. 로컬에서 백엔드를 직접 실행할 경우 MySQL 컨테이너만 먼저 시작하고, 동일한 접속 정보를 `.env.properties`에 설정한 뒤 `./gradlew bootRun --args='--spring.profiles.active=local'`을 실행한다. `.env.properties.example`을 복사해 시작할 수 있다. Flyway가 테이블을 생성하고 JPA가 스키마를 검증한다.
 
 ## 구현 API
 
