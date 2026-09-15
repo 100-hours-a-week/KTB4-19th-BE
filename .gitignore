@@ -36,5 +36,8 @@ out/
 ### VS Code ###
 .vscode/
 
+AGENTS.md
+.agents/
+
 # Local credentials
 .env.properties
