@@ -1,11 +1,14 @@
 package com.homes.zipsai;
 
-import com.homes.zipsai.auth.AuthProperties;
-import com.homes.zipsai.security.RequestGuard;
+import static org.assertj.core.api.Assertions.assertThat;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.*;
+
+import com.homes.zipsai.global.security.AuthProperties;
+import com.homes.zipsai.global.security.RequestGuard;
+
 import tools.jackson.databind.json.JsonMapper;
-import static org.assertj.core.api.Assertions.assertThat;
 
 class RequestGuardTests {
     @Test void sixthRequestIsRejectedWithRetryAfter() throws Exception {

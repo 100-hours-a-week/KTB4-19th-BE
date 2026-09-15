@@ -5,8 +5,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.web.servlet.MockMvc;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -168,7 +166,7 @@ class AuthApiTests {
         String email = email(); signup(email); String token = access(login(email));
         patchMe(token, "{\"agreements\":[{\"termsType\":\"MARKETING\",\"isAgreed\":true}]}")
             .andExpect(status().isOk()).andExpect(jsonPath("$.data.agreements[0].isAgreed").value(true));
-        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject("select count(*) from User_agreements a join Users u on a.user_id=u.user_id where u.email=? and a.terms_type='MARKETING'", Integer.class, email)).isEqualTo(2);
+        org.assertj.core.api.Assertions.assertThat(jdbc.queryForObject("select count(*) from User_agreements a join Users u on a.user_id=u.user_id join terms t on a.terms_id=t.terms_id where u.email=? and t.terms_type='MARKETING'", Integer.class, email)).isEqualTo(2);
     }
     @org.springframework.boot.test.context.TestConfiguration
     static class ProbeConfig {
