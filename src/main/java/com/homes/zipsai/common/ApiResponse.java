@@ -1,4 +1,4 @@
-package com.homes.zipsai_backend.common;
+package com.homes.zipsai.common;
 
 import java.util.LinkedHashMap;
 import java.util.Map;

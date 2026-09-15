@@ -1,7 +1,8 @@
-package com.homes.zipsai_backend.auth;
+package com.homes.zipsai.auth;
 
-import com.homes.zipsai_backend.common.ApiException;
-import com.homes.zipsai_backend.user.*;
+import com.homes.zipsai.common.ApiException;
+import com.homes.zipsai.user.*;
+import com.homes.zipsai.user.*;
 import java.time.Instant;
 import java.util.*;
 import org.springframework.dao.DataIntegrityViolationException;

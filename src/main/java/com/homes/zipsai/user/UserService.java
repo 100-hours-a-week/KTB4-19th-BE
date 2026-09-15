@@ -1,7 +1,9 @@
-package com.homes.zipsai_backend.user;
+package com.homes.zipsai.user;
 
-import com.homes.zipsai_backend.auth.*;
-import com.homes.zipsai_backend.common.ApiException;
+import com.homes.zipsai.auth.AuthPrincipal;
+import com.homes.zipsai.auth.TokenService;
+import com.homes.zipsai.auth.*;
+import com.homes.zipsai.common.ApiException;
 import java.util.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

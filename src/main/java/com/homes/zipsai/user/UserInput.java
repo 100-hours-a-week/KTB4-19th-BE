@@ -1,6 +1,6 @@
-package com.homes.zipsai_backend.user;
+package com.homes.zipsai.user;
 
-import com.homes.zipsai_backend.common.ApiException;
+import com.homes.zipsai.common.ApiException;
 import java.util.*;
 import java.util.regex.Pattern;
 import tools.jackson.databind.JsonNode;

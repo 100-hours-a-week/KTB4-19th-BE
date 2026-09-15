@@ -1,4 +1,4 @@
-package com.homes.zipsai_backend;
+package com.homes.zipsai;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;

@@ -1,7 +1,7 @@
-package com.homes.zipsai_backend.user;
+package com.homes.zipsai.user;
 
-import com.homes.zipsai_backend.auth.AuthPrincipal;
-import com.homes.zipsai_backend.common.ApiResponse;
+import com.homes.zipsai.auth.AuthPrincipal;
+import com.homes.zipsai.common.ApiResponse;
 import java.util.Map;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;

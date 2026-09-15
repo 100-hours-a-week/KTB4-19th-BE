@@ -1,6 +1,6 @@
-package com.homes.zipsai_backend.auth;
+package com.homes.zipsai.auth;
 
-import com.homes.zipsai_backend.common.ApiResponse;
+import com.homes.zipsai.common.ApiResponse;
 import jakarta.servlet.http.HttpServletResponse;
 import java.time.Duration;
 import java.time.Instant;

@@ -1,6 +1,6 @@
-package com.homes.zipsai_backend.auth;
+package com.homes.zipsai.auth;
 
-import com.homes.zipsai_backend.user.User;
+import com.homes.zipsai.user.User;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;

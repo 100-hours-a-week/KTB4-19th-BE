@@ -1,4 +1,4 @@
-package com.homes.zipsai_backend.user;
+package com.homes.zipsai.user;
 
 import java.util.Optional;
 import jakarta.persistence.LockModeType;

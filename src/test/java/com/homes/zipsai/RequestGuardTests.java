@@ -1,7 +1,7 @@
-package com.homes.zipsai_backend;
+package com.homes.zipsai;
 
-import com.homes.zipsai_backend.auth.AuthProperties;
-import com.homes.zipsai_backend.security.RequestGuard;
+import com.homes.zipsai.auth.AuthProperties;
+import com.homes.zipsai.security.RequestGuard;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.*;
 import tools.jackson.databind.json.JsonMapper;

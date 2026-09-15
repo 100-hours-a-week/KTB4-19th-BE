@@ -1,8 +1,17 @@
-package com.homes.zipsai_backend.security;
+package com.homes.zipsai.security;
 
-import com.homes.zipsai_backend.auth.*;
-import com.homes.zipsai_backend.common.*;
-import com.homes.zipsai_backend.user.*;
+import com.homes.zipsai.auth.AuthPrincipal;
+import com.homes.zipsai.auth.AuthProperties;
+import com.homes.zipsai.auth.RefreshSession;
+import com.homes.zipsai.auth.RefreshSessionRepository;
+import com.homes.zipsai.common.ApiException;
+import com.homes.zipsai.common.ApiResponse;
+import com.homes.zipsai.user.User;
+import com.homes.zipsai.user.UserRepository;
+import com.homes.zipsai.user.UserStatus;
+import com.homes.zipsai.auth.*;
+import com.homes.zipsai.common.*;
+import com.homes.zipsai.user.*;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import java.nio.charset.StandardCharsets;
 import java.util.List;

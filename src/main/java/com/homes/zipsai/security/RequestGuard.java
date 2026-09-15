@@ -1,7 +1,9 @@
-package com.homes.zipsai_backend.security;
+package com.homes.zipsai.security;
 
-import com.homes.zipsai_backend.auth.AuthProperties;
-import com.homes.zipsai_backend.common.*;
+import com.homes.zipsai.auth.AuthProperties;
+import com.homes.zipsai.common.ApiException;
+import com.homes.zipsai.common.ApiResponse;
+import com.homes.zipsai.common.*;
 import jakarta.servlet.*;
 import jakarta.servlet.http.*;
 import java.io.IOException;

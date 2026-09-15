@@ -1,4 +1,4 @@
-package com.homes.zipsai_backend.auth;
+package com.homes.zipsai.auth;
 
 import java.time.Duration;
 import java.util.List;

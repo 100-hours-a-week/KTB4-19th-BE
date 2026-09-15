@@ -1,4 +1,4 @@
-package com.homes.zipsai_backend.user;
+package com.homes.zipsai.user;
 
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
