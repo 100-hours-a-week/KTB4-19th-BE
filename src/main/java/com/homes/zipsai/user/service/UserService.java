@@ -6,7 +6,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.homes.zipsai.auth.service.TokenService;
-import com.homes.zipsai.global.exception.ApiException;
+import com.homes.zipsai.global.exception.ConflictException;
+import com.homes.zipsai.global.exception.UnauthorizedException;
+import com.homes.zipsai.global.exception.ValidationFailedException.Reason;
 import com.homes.zipsai.global.security.AuthPrincipal;
 import com.homes.zipsai.user.domain.TermsType;
 import com.homes.zipsai.user.domain.User;
@@ -28,8 +30,8 @@ public class UserService {
         this.users = users; this.tokens = tokens; this.terms = terms;
     }
     public User active(Long id) {
-        User user = users.findById(id).orElseThrow(ApiException::unauthorized);
-        if (user.getStatus() != UserStatus.ACTIVE) throw ApiException.unauthorized();
+        User user = users.findById(id).orElseThrow(UnauthorizedException::new);
+        if (user.getStatus() != UserStatus.ACTIVE) throw new UnauthorizedException();
         return user;
     }
     @Transactional(readOnly = true)
@@ -55,16 +57,21 @@ public class UserService {
     @Transactional
     public Map<String, Object> patch(AuthPrincipal principal, JsonNode body) {
         UserInput.fields(body, Set.of("userRole", "userName", "phone", "agreements"));
-        User user = users.findLocked(principal.userId()).orElseThrow(ApiException::unauthorized);
-        if (user.getStatus() != UserStatus.ACTIVE) throw ApiException.unauthorized();
+        User user = users.findLocked(principal.userId()).orElseThrow(UnauthorizedException::new);
+        if (user.getStatus() != UserStatus.ACTIVE) throw new UnauthorizedException();
         Map<String, Object> result = new LinkedHashMap<>(); result.put("userId", user.getId());
         if (body.has("userRole")) {
             UserRole role;
-            try { role = UserRole.valueOf(UserInput.text(body, "userRole", true)); }
-            catch (IllegalArgumentException e) { throw UserInput.invalid("userRole", "허용되지 않은 역할입니다."); }
-            if (role == UserRole.NONE) throw UserInput.invalid("userRole", "허용되지 않은 역할입니다.");
+            try {
+                role = UserRole.valueOf(UserInput.text(body, "userRole", true));
+            } catch (IllegalArgumentException exception) {
+                throw UserInput.invalid("userRole", Reason.INVALID_USER_ROLE);
+            }
+            if (role == UserRole.NONE) {
+                throw UserInput.invalid("userRole", Reason.INVALID_USER_ROLE);
+            }
             if (user.getRole() != UserRole.NONE && user.getRole() != role)
-                throw new ApiException(409, "ROLE_ALREADY_ASSIGNED", "이미 역할이 설정된 계정입니다.", Map.of("field", "userRole", "reason", "역할은 최초 1회만 설정할 수 있습니다."));
+                throw new ConflictException(ConflictException.Reason.ROLE_ALREADY_ASSIGNED);
             if (user.getRole() != role) user.selectRole(role);
             result.put("userRole", role);
             result.put("accessToken", tokens.access(user, principal.sessionId())); result.put("tokenType", "Bearer");
