@@ -1,6 +1,6 @@
 # zipsAI Backend
 
-Java 25 / Spring Boot 4.1.1 / Spring Security / JPA / MySQL 8.
+Java 25 / Spring Boot 4.1.1 / Spring Security / JPA / MySQL 8.4.11.
 
 ## 로컬 개발 실행
 
@@ -56,7 +56,7 @@ docker compose up --build
 ./gradlew build
 ```
 
-테스트는 H2 MySQL 모드에서 실제 Security filter·Controller·Service·JPA를 통합 검증한다. MySQL 8.0.46에서 Flyway v1 적용 및 실제 HTTP 가입→로그인→역할 선택→재발급→로그아웃, 이전 토큰 거부를 검증했다.
+테스트는 H2 MySQL 모드에서 실제 Security filter·Controller·Service·JPA를 통합 검증한다. MySQL 8.4.11에서 Flyway v1 적용 및 실제 HTTP 가입→로그인→역할 선택→재발급→로그아웃, 이전 토큰 거부를 검증했다.
 
 ## 명세 적용 및 확인 필요
 
