@@ -8,6 +8,8 @@ import com.homes.zipsai.auth.dto.LoginRequest;
 import com.homes.zipsai.auth.dto.LoginResponse;
 import com.homes.zipsai.auth.dto.ReissueResponse;
 import com.homes.zipsai.auth.dto.SignupResponse;
+import com.homes.zipsai.user.domain.UserRole;
+import com.homes.zipsai.user.dto.UserResponse;
 import jakarta.servlet.http.HttpServletResponse;
 
 import lombok.RequiredArgsConstructor;
@@ -50,11 +52,28 @@ public class AuthController {
         cookie(response, "", 0);
         return ApiResponse.data(null);
     }
-    @SuppressWarnings("unchecked")
+
+    private UserResponse toUserResponse(Object value) {
+        if (!(value instanceof Map<?, ?> user)) {
+            throw new IllegalStateException("user 응답 형식이 올바르지 않습니다.");
+        }
+
+        return new UserResponse(
+            (Long) user.get("userId"),
+            (String) user.get("email"),
+            (UserRole) user.get("userRole"),
+            (String) user.get("userName"),
+            (String) user.get("phone")
+        );
+    }
+
     private ApiResponse<LoginResponse> result(AuthService.Tokens tokens, HttpServletResponse response) {
         cookie(response, tokens.refreshToken(), Math.max(0, Duration.between(Instant.now(), tokens.expiresAt()).toSeconds()));
         Map<String, Object> data = tokens.data();
-        return ApiResponse.data(new LoginResponse((String) data.get("accessToken"), (String) data.get("tokenType"), (Map<String, Object>) data.get("user")));
+
+        UserResponse user = toUserResponse(data.get("user"));
+
+        return ApiResponse.data(new LoginResponse((String) data.get("accessToken"), (String) data.get("tokenType"), user));
     }
     private void cookie(HttpServletResponse response, String value, long age) {
         response.addHeader(HttpHeaders.SET_COOKIE, ResponseCookie.from("refreshToken", value).httpOnly(true)
