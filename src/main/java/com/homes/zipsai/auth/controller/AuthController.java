@@ -50,6 +50,7 @@ public class AuthController {
         cookie(response, "", 0);
         return ApiResponse.data(null);
     }
+    @SuppressWarnings("unchecked")
     private ApiResponse<LoginResponse> result(AuthService.Tokens tokens, HttpServletResponse response) {
         cookie(response, tokens.refreshToken(), Math.max(0, Duration.between(Instant.now(), tokens.expiresAt()).toSeconds()));
         Map<String, Object> data = tokens.data();
