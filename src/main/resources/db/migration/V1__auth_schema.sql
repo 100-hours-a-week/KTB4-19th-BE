@@ -12,23 +12,36 @@ CREATE TABLE Users (
     deleted_at DATETIME(6) NULL,
     CONSTRAINT uk_users_email UNIQUE (email)
 );
+CREATE TABLE Terms (
+    terms_id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    terms_type VARCHAR(20) NOT NULL,
+    version INT NOT NULL,
+    title VARCHAR(100) NOT NULL,
+    content TEXT NOT NULL,
+    effective_at DATE NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    deleted_at DATETIME(6) NULL,
+    CONSTRAINT uk_terms_type_version UNIQUE (terms_type, version)
+);
 CREATE TABLE User_agreements (
     agreement_id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     user_id BIGINT NOT NULL,
-    terms_type VARCHAR(10) NOT NULL,
+    terms_id BIGINT NOT NULL,
     is_agreed BOOLEAN NOT NULL,
     agreed_at DATETIME(6) NULL,
     created_at DATETIME(6) NOT NULL,
     updated_at DATETIME(6) NOT NULL,
     deleted_at DATETIME(6) NULL,
     CONSTRAINT fk_agreements_user FOREIGN KEY (user_id) REFERENCES Users(user_id),
+    CONSTRAINT fk_agreements_terms FOREIGN KEY (terms_id) REFERENCES Terms(terms_id),
     INDEX idx_agreements_user (user_id, agreement_id)
 );
 CREATE TABLE Refresh_sessions (
     session_id VARCHAR(36) NOT NULL PRIMARY KEY,
     user_id BIGINT NOT NULL,
     token_hash VARCHAR(64) NOT NULL,
-    expires_at TIMESTAMP(6) NOT NULL,
+    expires_at DATETIME(6) NOT NULL,
     revoked BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT uk_refresh_hash UNIQUE (token_hash),
     CONSTRAINT fk_refresh_user FOREIGN KEY (user_id) REFERENCES Users(user_id),
