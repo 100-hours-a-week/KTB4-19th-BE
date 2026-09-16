@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 
+import com.homes.zipsai.auth.dto.LoginRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 import org.springframework.http.*;
@@ -29,18 +30,18 @@ public class AuthController {
         return ResponseEntity.status(201).body(Map.of("message", "user_created", "data", Map.of("userId", auth.signup(body))));
     }
     @PostMapping("/login")
-    public Map<String, Object> login(@RequestBody JsonNode body, HttpServletResponse response) {
-        return result(auth.login(body), response);
+    public ApiResponse<Map<String, Object>> login(@RequestBody LoginRequest loginRequest, HttpServletResponse response) {
+        return result(auth.login(loginRequest), response);
     }
     @PostMapping("/reissue")
-    public Map<String, Object> reissue(@CookieValue(name = "refreshToken", required = false) String refresh, HttpServletResponse response) {
+    public ApiResponse<Map<String, Object>> reissue(@CookieValue(name = "refreshToken", required = false) String refresh, HttpServletResponse response) {
         return result(auth.reissue(refresh), response);
     }
     @PostMapping("/logout")
-    public Map<String, Object> logout(@AuthenticationPrincipal AuthPrincipal principal, HttpServletResponse response) {
+    public ApiResponse<Void> logout(@AuthenticationPrincipal AuthPrincipal principal, HttpServletResponse response) {
         auth.logout(principal); cookie(response, "", 0); return ApiResponse.data(null);
     }
-    private Map<String, Object> result(AuthService.Tokens tokens, HttpServletResponse response) {
+    private ApiResponse<Map<String, Object>> result(AuthService.Tokens tokens, HttpServletResponse response) {
         cookie(response, tokens.refreshToken(), Math.max(0, Duration.between(Instant.now(), tokens.expiresAt()).toSeconds()));
         return ApiResponse.data(tokens.data());
     }

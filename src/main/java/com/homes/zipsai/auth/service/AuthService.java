@@ -3,6 +3,7 @@ package com.homes.zipsai.auth.service;
 import java.time.Instant;
 import java.util.*;
 
+import com.homes.zipsai.auth.dto.LoginRequest;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -63,10 +64,9 @@ public class AuthService {
         return new ApiException(409, "EMAIL_ALREADY_EXISTS", "이미 사용 중인 이메일입니다.", Map.of("field", "email", "reason", "이미 가입된 이메일입니다."));
     }
     public record Tokens(Map<String, Object> data, String refreshToken, Instant expiresAt) {}
-    public Tokens login(JsonNode body) {
-        UserInput.fields(body, Set.of("email", "password"));
-        String email = UserInput.email(UserInput.text(body, "email", true));
-        String password = UserInput.password(UserInput.text(body, "password", true));
+    public Tokens login(LoginRequest loginRequest) {
+        String email = UserInput.email(loginRequest.getEmail());
+        String password = UserInput.password(loginRequest.getPassword());
         User user = users.findByEmail(email).orElse(null);
         boolean matches = passwords.matches(password, user == null ? dummyHash : user.getPassword());
         if (user == null || !matches || user.getStatus() != UserStatus.ACTIVE)
@@ -76,8 +76,12 @@ public class AuthService {
             RefreshSession session = new RefreshSession(UUID.randomUUID().toString(), user.getId(), TokenService.hash(raw), Instant.now().plus(properties.refreshTtl()));
             sessions.save(session);
             Map<String, Object> data = new LinkedHashMap<>();
-            data.put("accessToken", tokens.access(user, session.getId())); data.put("tokenType", "Bearer");
-            Map<String, Object> view = UserService.profile(user); view.remove("phone"); view.put("email", user.getEmail()); data.put("user", view);
+            data.put("accessToken", tokens.access(user, session.getId()));
+            data.put("tokenType", "Bearer");
+            Map<String, Object> view = UserService.profile(user);
+            view.remove("phone");
+            view.put("email", user.getEmail());
+            data.put("user", view);
             return new Tokens(data, raw, session.getExpiresAt());
         });
     }

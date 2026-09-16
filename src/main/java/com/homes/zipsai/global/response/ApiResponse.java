@@ -1,20 +1,11 @@
 package com.homes.zipsai.global.response;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 import com.homes.zipsai.global.exception.ApiException;
 
-public final class ApiResponse {
-    private ApiResponse() {}
-    public static Map<String, Object> data(Object value) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("data", value); return result;
-    }
-    public static Map<String, Object> error(ApiException e) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("message", e.getMessage());
-        result.put("error", Map.of("code", e.code, "details", e.details));
-        result.put("data", null); return result;
-    }
+public record ApiResponse<T>(String message, T data, ErrorResponse error) {
+    public record ErrorResponse(String code, Object details) {}
+    public static <T> ApiResponse<T> data(T value) { return new ApiResponse<>(null, value, null); }
+    public static <T> ApiResponse<T> success(T value) { return new ApiResponse<>("success", value, null); }
+    public static ApiResponse<Void> error(ApiException e) { return new ApiResponse<>(e.getMessage(), null, new ErrorResponse(e.code, e.details)); }
 }
