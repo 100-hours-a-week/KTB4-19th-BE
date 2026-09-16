@@ -24,6 +24,8 @@ import org.springframework.web.cors.*;
 import com.homes.zipsai.auth.domain.RefreshSession;
 import com.homes.zipsai.auth.repository.RefreshSessionRepository;
 import com.homes.zipsai.global.exception.ApiException;
+import com.homes.zipsai.global.exception.ForbiddenException;
+import com.homes.zipsai.global.exception.UnauthorizedException;
 import com.homes.zipsai.global.response.ApiResponse;
 import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.domain.UserStatus;
@@ -52,18 +54,18 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/residents/**").hasRole("RESIDENT")
                 .anyRequest().authenticated())
             .exceptionHandling(e -> e
-                .authenticationEntryPoint((request, response, ex) -> write(response, json, ApiException.unauthorized()))
-                .accessDeniedHandler((request, response, ex) -> write(response, json, ApiException.forbidden())))
+                .authenticationEntryPoint((request, response, ex) -> write(response, json, new UnauthorizedException()))
+                .accessDeniedHandler((request, response, ex) -> write(response, json, new ForbiddenException())))
             .oauth2ResourceServer(o -> o
-                .authenticationEntryPoint((request, response, ex) -> write(response, json, ApiException.unauthorized()))
+                .authenticationEntryPoint((request, response, ex) -> write(response, json, new UnauthorizedException()))
                 .jwt(j -> j.jwtAuthenticationConverter(jwt -> {
                     try {
                         long id = Long.parseLong(jwt.getSubject());
-                        User user = users.findById(id).orElseThrow(ApiException::unauthorized);
-                        RefreshSession session = sessions.findById(jwt.getClaimAsString("sid")).orElseThrow(ApiException::unauthorized);
+                        User user = users.findById(id).orElseThrow(UnauthorizedException::new);
+                        RefreshSession session = sessions.findById(jwt.getClaimAsString("sid")).orElseThrow(UnauthorizedException::new);
                         Number version = jwt.getClaim("ver");
                         if (version == null || user.getAuthVersion() != version.longValue() || user.getStatus() != UserStatus.ACTIVE
-                            || !session.active() || !session.getUserId().equals(id)) throw ApiException.unauthorized();
+                            || !session.active() || !session.getUserId().equals(id)) throw new UnauthorizedException();
                         return new UsernamePasswordAuthenticationToken(new AuthPrincipal(id, session.getId()), null,
                             List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole().name())));
                     } catch (ApiException | IllegalArgumentException e) {

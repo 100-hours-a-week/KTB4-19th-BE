@@ -10,7 +10,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import com.homes.zipsai.auth.domain.RefreshSession;
 import com.homes.zipsai.auth.repository.RefreshSessionRepository;
-import com.homes.zipsai.global.exception.ApiException;
+import com.homes.zipsai.global.exception.ConflictException;
+import com.homes.zipsai.global.exception.InvalidCredentialsException;
+import com.homes.zipsai.global.exception.UnauthorizedException;
+import com.homes.zipsai.global.exception.ValidationFailedException.Reason;
 import com.homes.zipsai.global.security.AuthPrincipal;
 import com.homes.zipsai.global.security.AuthProperties;
 import com.homes.zipsai.user.domain.User;
@@ -42,7 +45,10 @@ public class AuthService {
         UserInput.fields(body, Set.of("email", "password", "passwordConfirm", "userName", "phone", "agreements"));
         String email = UserInput.email(UserInput.text(body, "email", true));
         String password = UserInput.password(UserInput.text(body, "password", true));
-        if (!password.equals(UserInput.text(body, "passwordConfirm", true))) throw UserInput.invalid("passwordConfirm", "비밀번호가 일치하지 않습니다.");
+        if (!password.equals(UserInput.text(body, "passwordConfirm", true))) {
+            throw UserInput.invalid(
+                    "passwordConfirm", Reason.PASSWORD_CONFIRMATION_MISMATCH);
+        }
         String name = UserInput.name(UserInput.text(body, "userName", false));
         String phone = UserInput.phone(UserInput.text(body, "phone", false));
         var agreements = UserInput.agreements(body, true);
@@ -59,8 +65,8 @@ public class AuthService {
             throw e;
         }
     }
-    private ApiException duplicate() {
-        return new ApiException(409, "EMAIL_ALREADY_EXISTS", "이미 사용 중인 이메일입니다.", Map.of("field", "email", "reason", "이미 가입된 이메일입니다."));
+    private ConflictException duplicate() {
+        return new ConflictException(ConflictException.Reason.EMAIL_ALREADY_EXISTS);
     }
     public record Tokens(Map<String, Object> data, String refreshToken, Instant expiresAt) {}
     public Tokens login(JsonNode body) {
@@ -70,7 +76,7 @@ public class AuthService {
         User user = users.findByEmail(email).orElse(null);
         boolean matches = passwords.matches(password, user == null ? dummyHash : user.getPassword());
         if (user == null || !matches || user.getStatus() != UserStatus.ACTIVE)
-            throw new ApiException(401, "UNAUTHORIZED", "인증이 필요합니다.", Map.of("reason", "이메일 또는 비밀번호가 일치하지 않습니다."));
+            throw new InvalidCredentialsException();
         return tx.execute(status -> {
             String raw = tokens.refresh();
             RefreshSession session = new RefreshSession(UUID.randomUUID().toString(), user.getId(), TokenService.hash(raw), Instant.now().plus(properties.refreshTtl()));
@@ -82,20 +88,20 @@ public class AuthService {
         });
     }
     public Tokens reissue(String raw) {
-        if (raw == null || raw.isBlank() || raw.length() > 100) throw ApiException.unauthorized();
+        if (raw == null || raw.isBlank() || raw.length() > 100) throw new UnauthorizedException();
         return tx.execute(status -> {
-            RefreshSession session = sessions.findLockedByHash(TokenService.hash(raw)).orElseThrow(ApiException::unauthorized);
-            if (!session.active()) throw ApiException.unauthorized();
-            User user = users.findById(session.getUserId()).orElseThrow(ApiException::unauthorized);
-            if (user.getStatus() != UserStatus.ACTIVE) throw ApiException.unauthorized();
+            RefreshSession session = sessions.findLockedByHash(TokenService.hash(raw)).orElseThrow(UnauthorizedException::new);
+            if (!session.active()) throw new UnauthorizedException();
+            User user = users.findById(session.getUserId()).orElseThrow(UnauthorizedException::new);
+            if (user.getStatus() != UserStatus.ACTIVE) throw new UnauthorizedException();
             String next = tokens.refresh(); session.rotate(TokenService.hash(next));
             return new Tokens(Map.of("accessToken", tokens.access(user, session.getId()), "tokenType", "Bearer"), next, session.getExpiresAt());
         });
     }
     public void logout(AuthPrincipal principal) {
         tx.executeWithoutResult(status -> {
-            RefreshSession session = sessions.findLockedById(principal.sessionId()).orElseThrow(ApiException::unauthorized);
-            if (!session.getUserId().equals(principal.userId())) throw ApiException.unauthorized();
+            RefreshSession session = sessions.findLockedById(principal.sessionId()).orElseThrow(UnauthorizedException::new);
+            if (!session.getUserId().equals(principal.userId())) throw new UnauthorizedException();
             session.revoke();
         });
     }
