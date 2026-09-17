@@ -16,6 +16,7 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 
 import com.homes.zipsai.global.domain.BaseTimeEntity;
+import com.homes.zipsai.global.exception.ConflictException;
 
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -57,5 +58,33 @@ public class InvitationCode extends BaseTimeEntity {
         this.code = code;
         this.status = InvitationCodeStatus.ACTIVE;
         this.expiresAt = expiresAt;
+    }
+
+    public boolean isExpired(LocalDateTime now) {
+        return status == InvitationCodeStatus.ACTIVE && !now.isBefore(expiresAt);
+    }
+
+    public boolean expireIfExpired(LocalDateTime now) {
+        if (!isExpired(now)) {
+            return false;
+        }
+        status = InvitationCodeStatus.EXPIRED;
+        return true;
+    }
+
+    public void expire() {
+        if (status == InvitationCodeStatus.ACTIVE) {
+            status = InvitationCodeStatus.EXPIRED;
+        }
+    }
+
+    public void use() {
+        if (status == InvitationCodeStatus.USED) {
+            throw new ConflictException(ConflictException.Reason.INVITATION_CODE_ALREADY_USED);
+        }
+        if (status == InvitationCodeStatus.EXPIRED) {
+            throw new ConflictException(ConflictException.Reason.INVITATION_CODE_EXPIRED);
+        }
+        status = InvitationCodeStatus.USED;
     }
 }

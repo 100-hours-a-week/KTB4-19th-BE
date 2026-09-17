@@ -15,6 +15,7 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 
 import com.homes.zipsai.global.domain.BaseTimeEntity;
+import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.user.domain.User;
 
 import lombok.AccessLevel;
@@ -57,5 +58,35 @@ public class Room extends BaseTimeEntity {
         this.building = building;
         this.roomNo = roomNo;
         this.status = RoomStatus.EMPTY;
+    }
+
+    public void invite() {
+        if (status == RoomStatus.LIVING) {
+            throw new ConflictException(ConflictException.Reason.ROOM_OCCUPIED);
+        }
+        status = RoomStatus.INVITED;
+    }
+
+    public void cancelInvitation() {
+        if (status != RoomStatus.INVITED) {
+            throw new ConflictException(ConflictException.Reason.INVITATION_CANCEL_NOT_ALLOWED);
+        }
+        status = RoomStatus.EMPTY;
+    }
+
+    public void connect(User resident) {
+        if (resident == null || status != RoomStatus.INVITED || this.resident != null) {
+            throw new ConflictException(ConflictException.Reason.ROOM_CONNECTION_CONFLICT);
+        }
+        this.resident = resident;
+        status = RoomStatus.LIVING;
+    }
+
+    public void moveOutResident() {
+        if (status != RoomStatus.LIVING || resident == null) {
+            throw new ConflictException(ConflictException.Reason.RESIDENT_NOT_FOUND_IN_ROOM);
+        }
+        resident = null;
+        status = RoomStatus.EMPTY;
     }
 }
