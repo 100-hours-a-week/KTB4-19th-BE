@@ -50,6 +50,7 @@ public class SecurityConfig {
                 .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/auth/signup", "/api/v1/auth/login", "/api/v1/auth/reissue").permitAll()
                 .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/users/email-availability", "/api/v1/terms", "/api/v1/terms/*").permitAll()
+                .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                 .requestMatchers("/api/v1/managers/**").hasRole("MANAGER")
                 .requestMatchers("/api/v1/residents/**").hasRole("RESIDENT")
                 .anyRequest().authenticated())
