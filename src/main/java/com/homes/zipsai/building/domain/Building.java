@@ -38,7 +38,8 @@ public class Building extends BaseTimeEntity {
     @Column(name = "road_address", nullable = false, length = 200)
     private String roadAddress;
 
-    @Column(name = "building_name", nullable = false, length = 20)
+    // 건물명은 등록 화면에서 선택 입력이므로 null을 허용합니다.
+    @Column(name = "building_name", length = 20)
     private String buildingName;
 
     @Builder
