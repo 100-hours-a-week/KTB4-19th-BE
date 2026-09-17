@@ -11,10 +11,12 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import com.homes.zipsai.conversation.dto.request.ConversationCreateRequest;
+import com.homes.zipsai.conversation.dto.request.ConversationStatusUpdateRequest;
 import com.homes.zipsai.conversation.dto.request.MessageSendRequest;
 import com.homes.zipsai.conversation.dto.response.ConversationCreateResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationListResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationMessagesResponse;
+import com.homes.zipsai.conversation.dto.response.ConversationStatusResponse;
 import com.homes.zipsai.conversation.dto.response.MessageSendResponse;
 import com.homes.zipsai.conversation.service.ConversationMessageService;
 import com.homes.zipsai.conversation.service.ConversationService;
@@ -74,6 +76,18 @@ public class ResidentConversationController {
     ) {
         return ResponseEntity.ok(
             ApiResponse.data(conversationService.getMessages(principal.userId(), conversationId, cursor, size)));
+    }
+
+    @Operation(summary = "대화 종료",
+        description = "진행 중인 대화를 사용자가 직접 종료한다. 이미 종료된 대화에 다시 요청해도 200을 반환한다.")
+    @PatchMapping("/{conversationId}")
+    public ResponseEntity<ApiResponse<ConversationStatusResponse>> resolveConversation(
+        @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal,
+        @PathVariable @Positive(message = "1 이상의 정수여야 합니다.") Long conversationId,
+        @Valid @RequestBody ConversationStatusUpdateRequest request
+    ) {
+        return ResponseEntity.ok(
+            ApiResponse.data(conversationService.resolveConversation(principal.userId(), conversationId)));
     }
 
     @Operation(summary = "메시지 전송",

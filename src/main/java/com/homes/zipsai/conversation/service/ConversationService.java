@@ -24,6 +24,7 @@ import com.homes.zipsai.conversation.domain.SenderType;
 import com.homes.zipsai.conversation.dto.response.ConversationListItemResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationListResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationMessagesResponse;
+import com.homes.zipsai.conversation.dto.response.ConversationStatusResponse;
 import com.homes.zipsai.conversation.dto.response.MessageResponse;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
@@ -87,6 +88,14 @@ public class ConversationService {
 
         Complaint complaint = findComplaints(List.of(conversation)).get(conversationId);
         return ConversationMessagesResponse.of(conversation, complaint, messages, hasNext, nextCursor);
+    }
+
+    @Transactional
+    public ConversationStatusResponse resolveConversation(Long userId, Long conversationId) {
+        Conversation conversation = getOwnedConversation(userId, conversationId);
+        conversation.resolve();
+        conversationRepository.flush();
+        return ConversationStatusResponse.from(conversation);
     }
 
     @Transactional
