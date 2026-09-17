@@ -4,10 +4,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 
-import com.homes.zipsai.auth.dto.LoginRequest;
-import com.homes.zipsai.auth.dto.LoginResponse;
-import com.homes.zipsai.auth.dto.ReissueResponse;
-import com.homes.zipsai.auth.dto.SignupResponse;
+import com.homes.zipsai.auth.dto.*;
 import com.homes.zipsai.user.domain.UserRole;
 import com.homes.zipsai.user.dto.UserResponse;
 import jakarta.servlet.http.HttpServletResponse;
@@ -22,8 +19,6 @@ import com.homes.zipsai.global.response.ApiResponse;
 import com.homes.zipsai.global.security.AuthPrincipal;
 import com.homes.zipsai.global.security.AuthProperties;
 
-import tools.jackson.databind.JsonNode;
-
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/v1/auth")
@@ -32,8 +27,8 @@ public class AuthController {
     private final AuthProperties properties;
     // V3_P1_1: 가입 후 로그인 화면으로 이동한다.
     @PostMapping("/signup")
-    public ResponseEntity<ApiResponse<SignupResponse>> signup(@RequestBody JsonNode body) {
-        return ResponseEntity.status(201).body(ApiResponse.data(new SignupResponse(authService.signup(body))));
+    public ResponseEntity<ApiResponse<SignupResponse>> signup(@RequestBody SignupRequest request) {
+        return ResponseEntity.status(201).body(ApiResponse.data(new SignupResponse(authService.signup(request))));
     }
     @PostMapping("/login")
     public ApiResponse<LoginResponse> login(@RequestBody LoginRequest loginRequest, HttpServletResponse response) {

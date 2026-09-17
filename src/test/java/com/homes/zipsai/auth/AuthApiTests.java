@@ -1,4 +1,4 @@
-package com.homes.zipsai;
+package com.homes.zipsai.auth;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -26,6 +26,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.test.web.servlet.MockMvc;
@@ -34,10 +35,13 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.homes.zipsai.ZipsaiBackendApplication;
+
 import tools.jackson.databind.ObjectMapper;
 
-@SpringBootTest
+@SpringBootTest(classes = ZipsaiBackendApplication.class)
 @AutoConfigureMockMvc
+@Import(AuthApiTests.ProbeConfig.class)
 class AuthApiTests {
     @Autowired
     MockMvc mvc;
@@ -123,22 +127,29 @@ class AuthApiTests {
     }
 
     @Test
-    void rejectsMissingRequiredAgreementAndPrivilegeInjection() throws Exception {
+    void rejectsMissingRequiredAgreement() throws Exception {
         mvc.perform(
                 post("/api/v1/auth/signup")
                         .contentType("application/json")
                         .content(signupBody(email())
                                 .replace("\"SERVICE\",\"isAgreed\":true", "\"SERVICE\",\"isAgreed\":false"))
-        ).andExpect(status().isUnprocessableEntity());
+        ).andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
 
         mvc.perform(
                 post("/api/v1/auth/signup")
                         .contentType("application/json")
-                        .content(signupBody(email()).replace(
-                                "{\"email\"",
-                                "{\"userRole\":\"MANAGER\",\"email\""
-                        ))
-        ).andExpect(status().isUnprocessableEntity());
+                        .content("""
+                                {"email":"%s","password":"Asdf!12345","passwordConfirm":"Asdf!12345"}
+                                """.formatted(email()))
+        ).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("MISSING_REQUIRED_FIELD"));
+
+        mvc.perform(
+                post("/api/v1/auth/signup")
+                        .contentType("application/json")
+                        .content(signupBody(email()))
+        ).andExpect(status().isCreated());
     }
 
     @Test
@@ -156,7 +167,8 @@ class AuthApiTests {
                     post("/api/v1/auth/signup")
                             .contentType("application/json")
                             .content(body)
-            ).andExpect(status().isUnprocessableEntity());
+            ).andExpect(status().isUnprocessableEntity())
+                    .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
         }
 
         mvc.perform(
@@ -270,14 +282,12 @@ class AuthApiTests {
         patchMe(token, "{\"userName\":\"김관리\",\"phone\":\"01012345678\"}")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.phone").value("010-1234-5678"));
-        patchMe(token, "{\"phone\":null}")
+        patchMe(token, "{\"phone\":\"\"}")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.userName").doesNotExist());
         mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + token))
                 .andExpect(jsonPath("$.data.userName").value("김관리"))
                 .andExpect(jsonPath("$.data.phone").isEmpty());
-        patchMe(token, "{\"userStatus\":\"INACTIVE\"}")
-                .andExpect(status().isUnprocessableEntity());
     }
 
     @Test

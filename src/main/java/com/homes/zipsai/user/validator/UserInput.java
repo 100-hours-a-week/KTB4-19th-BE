@@ -1,11 +1,9 @@
 package com.homes.zipsai.user.validator;
 
-import java.util.EnumMap;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.regex.Pattern;
 
+import com.homes.zipsai.auth.dto.AgreementRequest;
 import com.homes.zipsai.global.exception.MissingFieldException;
 import com.homes.zipsai.global.exception.ValidationFailedException;
 import com.homes.zipsai.global.exception.ValidationFailedException.Reason;
@@ -107,45 +105,50 @@ public final class UserInput {
                 + digits.substring(digits.length() - 4);
     }
 
-    public static Map<TermsType, Boolean> agreements(JsonNode body, boolean signup) {
-        JsonNode array = body.get("agreements");
-        if (array == null || array.isNull()) {
-            if (signup || body.has("agreements")) {
+    public static Map<TermsType, Boolean> agreements(List<AgreementRequest> agreements, boolean signup) {
+        if (agreements == null) {
+            if (signup) {
                 throw missing("agreements");
             }
             return Map.of();
         }
-        if (!array.isArray()) {
-            throw invalid("agreements", Reason.AGREEMENTS_NOT_ARRAY);
-        }
+
         Map<TermsType, Boolean> result = new EnumMap<>(TermsType.class);
-        for (JsonNode item : array) {
-            fields(item, Set.of("termsType", "isAgreed"));
-            TermsType type;
-            try {
-                type = TermsType.valueOf(text(item, "termsType", true));
-            } catch (IllegalArgumentException exception) {
-                throw invalid("termsType", Reason.INVALID_TERMS_TYPE);
+
+        for (AgreementRequest item : agreements) {
+            if (item == null) {
+                throw invalid("agreements", Reason.INVALID_TERMS_TYPE);
             }
-            JsonNode agreed = item.get("isAgreed");
-            if (agreed == null || !agreed.isBoolean()) {
+
+            TermsType type = item.termsType();
+            if (type == null) {
+                throw missing("termsType");
+            }
+
+            Boolean agreed = item.isAgreed();
+            if (agreed == null) {
                 throw invalid("isAgreed", Reason.IS_AGREED_NOT_BOOLEAN);
             }
-            if (result.put(type, agreed.asBoolean()) != null) {
+
+            if (result.put(type, agreed) != null) {
                 throw invalid("agreements", Reason.DUPLICATE_TERMS_TYPE);
             }
-            if (type != TermsType.MARKETING && !agreed.asBoolean()) {
+
+            if (type != TermsType.MARKETING && !agreed) {
                 throw invalid("agreements", Reason.REQUIRED_TERMS_NOT_AGREED);
             }
         }
+
         if (signup
-                && (!Boolean.TRUE.equals(result.get(TermsType.SERVICE))
-                        || !Boolean.TRUE.equals(result.get(TermsType.PRIVACY)))) {
+            && (!Boolean.TRUE.equals(result.get(TermsType.SERVICE))
+            || !Boolean.TRUE.equals(result.get(TermsType.PRIVACY)))) {
             throw invalid("agreements", Reason.REQUIRED_TERMS_NOT_AGREED);
         }
+
         if (signup) {
             result.putIfAbsent(TermsType.MARKETING, false);
         }
+
         return result;
     }
 }
