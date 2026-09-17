@@ -1,6 +1,8 @@
 package com.homes.zipsai.conversation.controller;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 
 import org.springframework.http.HttpStatus;
@@ -11,8 +13,11 @@ import org.springframework.web.bind.annotation.*;
 import com.homes.zipsai.conversation.dto.request.ConversationCreateRequest;
 import com.homes.zipsai.conversation.dto.request.MessageSendRequest;
 import com.homes.zipsai.conversation.dto.response.ConversationCreateResponse;
+import com.homes.zipsai.conversation.dto.response.ConversationListResponse;
+import com.homes.zipsai.conversation.dto.response.ConversationMessagesResponse;
 import com.homes.zipsai.conversation.dto.response.MessageSendResponse;
 import com.homes.zipsai.conversation.service.ConversationMessageService;
+import com.homes.zipsai.conversation.service.ConversationService;
 import com.homes.zipsai.global.response.ApiResponse;
 import com.homes.zipsai.global.security.AuthPrincipal;
 
@@ -27,7 +32,23 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class ResidentConversationController {
 
+    private final ConversationService conversationService;
     private final ConversationMessageService conversationMessageService;
+
+    @Operation(summary = "대화 목록 조회",
+        description = "본인 대화를 최근 메시지 시각 내림차순으로 size개 반환한다. 다음 목록은 nextCursor로 조회한다.")
+    @GetMapping
+    public ResponseEntity<ApiResponse<ConversationListResponse>> getConversations(
+        @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal,
+        @Parameter(description = "대화 제목 검색어") @RequestParam(required = false) String keyword,
+        @Parameter(description = "이전 응답의 nextCursor") @RequestParam(required = false) String cursor,
+        @Parameter(description = "조회 개수 (최대 100)")
+        @RequestParam(defaultValue = "20") @Min(value = 1, message = "1 이상이어야 합니다.")
+        @Max(value = 100, message = "100 이하여야 합니다.") int size
+    ) {
+        return ResponseEntity.ok(
+            ApiResponse.data(conversationService.getConversations(principal.userId(), keyword, cursor, size)));
+    }
 
     @Operation(summary = "대화 시작 (첫 메시지 전송)",
         description = "첫 메시지를 전송할 때 대화를 생성하고 AI 응답을 함께 반환한다. AI 호출이 실패하면 대화를 만들지 않는다.")
@@ -38,6 +59,21 @@ public class ResidentConversationController {
     ) {
         ConversationCreateResponse created = conversationMessageService.createConversation(principal.userId(), request);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.data(created));
+    }
+
+    @Operation(summary = "채팅방 메세지 조회",
+        description = "최신 메시지부터 size개를 오래된 순으로 반환한다. 더 과거 메시지는 nextCursor로 조회한다.")
+    @GetMapping("/{conversationId}/messages")
+    public ResponseEntity<ApiResponse<ConversationMessagesResponse>> getMessages(
+        @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal,
+        @PathVariable @Positive(message = "1 이상의 정수여야 합니다.") Long conversationId,
+        @Parameter(description = "마지막으로 조회한 가장 오래된 messageId")
+        @RequestParam(required = false) @Positive(message = "1 이상의 정수여야 합니다.") Long cursor,
+        @RequestParam(defaultValue = "20") @Min(value = 1, message = "1 이상이어야 합니다.")
+        @Max(value = 100, message = "100 이하여야 합니다.") int size
+    ) {
+        return ResponseEntity.ok(
+            ApiResponse.data(conversationService.getMessages(principal.userId(), conversationId, cursor, size)));
     }
 
     @Operation(summary = "메시지 전송",
