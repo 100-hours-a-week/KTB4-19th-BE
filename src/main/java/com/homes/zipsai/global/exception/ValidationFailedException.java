@@ -13,6 +13,7 @@ public class ValidationFailedException extends UnprocessableEntityException {
         INVALID_USER_NAME_LENGTH("이름은 1~7자여야 합니다."),
         INVALID_PHONE_FORMAT("연락처 형식이 올바르지 않습니다."),
         INVALID_ID("1 이상의 정수여야 합니다."),
+        INVALID_INVITATION_CODE("6자리 영문 대문자·숫자 조합이어야 합니다."),
         AGREEMENTS_NOT_ARRAY("배열이어야 합니다."),
         INVALID_TERMS_TYPE("허용되지 않은 약관 타입입니다."),
         IS_AGREED_NOT_BOOLEAN("동의 여부는 boolean이어야 합니다."),
