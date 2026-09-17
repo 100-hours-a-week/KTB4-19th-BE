@@ -1,24 +1,29 @@
 package com.homes.zipsai.global.exception;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.MethodParameter;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.BindException;
-import org.springframework.validation.BindingResult;
+import org.springframework.validation.Errors;
 import org.springframework.validation.FieldError;
 import org.springframework.validation.ObjectError;
+import org.springframework.validation.method.ParameterErrors;
+import org.springframework.validation.method.ParameterValidationResult;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingPathVariableException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -35,9 +40,42 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<?> requestBodyValidation(MethodArgumentNotValidException exception) {
-        boolean missingRequiredField = exception.getFieldErrors().stream()
+        return bodyValidation(exception.getBindingResult());
+    }
+
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    public ResponseEntity<?> methodValidation(HandlerMethodValidationException exception) {
+        if (exception.isForReturnValue()) {
+            return unexpected(exception);
+        }
+        List<Map<String, String>> queryViolations = new ArrayList<>();
+        List<Map<String, String>> pathViolations = new ArrayList<>();
+        for (ParameterValidationResult result : exception.getParameterValidationResults()) {
+            if (result instanceof ParameterErrors errors) {
+                return bodyValidation(errors);
+            }
+            MethodParameter parameter = result.getMethodParameter();
+            for (var error : result.getResolvableErrors()) {
+                Map<String, String> violation = Map.of(
+                        "field", parameter.getParameterName(),
+                        "reason", error.getDefaultMessage());
+                if (parameter.hasParameterAnnotation(PathVariable.class)) {
+                    pathViolations.add(violation);
+                } else {
+                    queryViolations.add(violation);
+                }
+            }
+        }
+        if (!queryViolations.isEmpty()) {
+            return handle(new InvalidQueryParameterException(queryViolations));
+        }
+        return handle(new ValidationFailedException(pathViolations));
+    }
+
+    private ResponseEntity<?> bodyValidation(Errors bindingResult) {
+        boolean missingRequiredField = bindingResult.getFieldErrors().stream()
                 .anyMatch(ApiExceptionHandler::isMissingRequiredField);
-        List<Map<String, String>> violations = violations(exception.getBindingResult());
+        List<Map<String, String>> violations = violations(bindingResult);
         return missingRequiredField
                 ? handle(new MissingFieldException(violations))
                 : handle(new ValidationFailedException(violations));
@@ -98,7 +136,7 @@ public class ApiExceptionHandler {
         return handle(new InternalServerException());
     }
 
-    private static List<Map<String, String>> violations(BindingResult bindingResult) {
+    private static List<Map<String, String>> violations(Errors bindingResult) {
         List<Map<String, String>> fieldViolations = bindingResult.getFieldErrors().stream()
                 .map(error -> Map.of(
                         "field", error.getField(),
