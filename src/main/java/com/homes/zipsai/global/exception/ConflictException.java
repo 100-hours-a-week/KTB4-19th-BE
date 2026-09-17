@@ -20,6 +20,21 @@ public class ConflictException extends ApiException {
                 "이미 민원이 접수된 대화입니다.",
                 "conversationId",
                 "하나의 대화에서는 민원을 한 번만 접수할 수 있습니다."),
+        COMPLAINT_NOT_READY(
+                "COMPLAINT_NOT_READY",
+                "접수할 내용이 아직 정리되지 않았습니다.",
+                "conversationId",
+                "대화에서 접수 내용을 정리한 뒤 확인 카드에서 접수해 주세요."),
+        CONVERSATION_AWAITING_CONFIRMATION(
+                "CONVERSATION_AWAITING_CONFIRMATION",
+                "접수 확인 중에는 메시지를 보낼 수 없습니다.",
+                "conversationId",
+                "접수 확인 카드에서 민원을 접수하거나 내용을 수정해 주세요."),
+        CONVERSATION_BUSY(
+                "CONVERSATION_BUSY",
+                "이전 메시지를 처리하고 있습니다. 잠시 후 다시 시도해 주세요.",
+                "conversationId",
+                "직전 메시지에 대한 응답이 끝난 뒤 다시 보내 주세요."),
         CONVERSATION_CLOSED(
                 "CONVERSATION_CLOSED",
                 "종료된 대화에는 메시지를 보낼 수 없습니다.",

@@ -44,7 +44,6 @@ public class MessageFileGroup extends BaseTimeEntity {
     @JoinColumn(name = "attachment_id", nullable = false)
     private File attachment;
 
-    // 메시지 내 이미지 순서 (1~3)
     @Column(name = "file_group_seq", nullable = false)
     private int fileGroupSeq;
 

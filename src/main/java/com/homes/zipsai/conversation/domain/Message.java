@@ -25,6 +25,8 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Message extends BaseTimeEntity {
 
+    public static final int CONTENT_MAX_LENGTH = 800;
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "message_id")
@@ -34,7 +36,7 @@ public class Message extends BaseTimeEntity {
     @JoinColumn(name = "conversation_id", nullable = false)
     private Conversation conversation;
 
-    @Column(name = "content", nullable = false, length = 200)
+    @Column(name = "content", nullable = false, length = CONTENT_MAX_LENGTH)
     private String content;
 
     @Enumerated(EnumType.STRING)
