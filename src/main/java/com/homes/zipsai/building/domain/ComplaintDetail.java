@@ -1,5 +1,7 @@
 package com.homes.zipsai.building.domain;
 
+import java.time.OffsetDateTime;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -40,8 +42,8 @@ public class ComplaintDetail extends BaseTimeEntity {
     private String symptom;
 
     // AI 추출 발생 시점
-    @Column(name = "occurred_time", nullable = false, length = 50)
-    private String occurredTime;
+    @Column(name = "occurred_time")
+    private OffsetDateTime occurredTime;
 
     // AI 생성 민원 요약
     @Column(name = "ai_summary", nullable = false, length = 200)
@@ -52,7 +54,7 @@ public class ComplaintDetail extends BaseTimeEntity {
     private String comment;
 
     @Builder
-    public ComplaintDetail(Complaint complaint, String location, String symptom, String occurredTime,
+    public ComplaintDetail(Complaint complaint, String location, String symptom, OffsetDateTime occurredTime,
                            String aiSummary) {
         this.complaint = complaint;
         this.location = location;

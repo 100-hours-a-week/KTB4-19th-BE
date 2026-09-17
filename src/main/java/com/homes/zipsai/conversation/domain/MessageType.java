@@ -2,5 +2,6 @@ package com.homes.zipsai.conversation.domain;
 
 public enum MessageType {
     TEXT,
-    IMAGE
+    IMAGE,
+    SUMMARY_CARD
 }
