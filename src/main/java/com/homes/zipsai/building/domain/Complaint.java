@@ -59,7 +59,6 @@ public class Complaint extends BaseTimeEntity {
     @Column(name = "complaint_status", nullable = false, length = 20)
     private ComplaintStatus status;
 
-    // AI가 민원 생성 시 산정한 긴급도 (0~10)
     @Column(name = "urgency", nullable = false, columnDefinition = "TINYINT")
     private int urgency;
 

@@ -20,7 +20,12 @@ public class ValidationFailedException extends UnprocessableEntityException {
         DUPLICATE_TERMS_TYPE("약관 타입이 중복되었습니다."),
         REQUIRED_TERMS_NOT_AGREED("필수 약관은 동의해야 합니다."),
         PASSWORD_CONFIRMATION_MISMATCH("비밀번호가 일치하지 않습니다."),
-        INVALID_USER_ROLE("허용되지 않은 역할입니다.");
+        INVALID_USER_ROLE("허용되지 않은 역할입니다."),
+        // 건물 등록 요청의 길이 제한을 넘겼을 때 사용하는 검증 사유입니다.
+        BUILDING_NAME_TOO_LONG("건물명은 20자 이하여야 합니다."),
+        ROAD_ADDRESS_TOO_LONG("주소는 200자 이하여야 합니다."),
+        EMPTY_ROOM_NO("호실 번호는 비워둘 수 없습니다."),
+        ROOM_NO_TOO_LONG("호실 번호는 5자 이하여야 합니다.");
 
         private final String message;
 

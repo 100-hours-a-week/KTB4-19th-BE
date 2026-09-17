@@ -4,6 +4,9 @@ import java.time.Instant;
 import java.util.*;
 
 import com.homes.zipsai.auth.dto.LoginRequest;
+import com.homes.zipsai.auth.dto.SignupRequest;
+import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -24,9 +27,8 @@ import com.homes.zipsai.user.repository.UserRepository;
 import com.homes.zipsai.user.service.UserService;
 import com.homes.zipsai.user.validator.UserInput;
 
-import tools.jackson.databind.JsonNode;
-
 @Service
+@RequiredArgsConstructor
 public class AuthService {
     private final UserRepository users;
     private final TermsRepository terms;
@@ -35,24 +37,23 @@ public class AuthService {
     private final TokenService tokens;
     private final AuthProperties properties;
     private final TransactionTemplate tx;
-    private final String dummyHash;
-    public AuthService(UserRepository users, RefreshSessionRepository sessions, PasswordEncoder passwords,
-                       TokenService tokens, AuthProperties properties, TransactionTemplate tx,
-                       TermsRepository terms) {
-        this.users = users; this.terms = terms; this.sessions = sessions; this.passwords = passwords; this.tokens = tokens;
-        this.properties = properties; this.tx = tx; dummyHash = passwords.encode("dummy-password");
+    private String dummyHash;
+
+    @PostConstruct
+    void init() {
+        dummyHash = passwords.encode("dummy-password");
     }
-    public Long signup(JsonNode body) {
-        UserInput.fields(body, Set.of("email", "password", "passwordConfirm", "userName", "phone", "agreements"));
-        String email = UserInput.email(UserInput.text(body, "email", true));
-        String password = UserInput.password(UserInput.text(body, "password", true));
-        if (!password.equals(UserInput.text(body, "passwordConfirm", true))) {
+
+    public Long signup(SignupRequest request) {
+        String email = UserInput.email(request.email());
+        String password = UserInput.password(request.password());
+        if (!password.equals(request.passwordConfirm())) {
             throw UserInput.invalid(
                     "passwordConfirm", Reason.PASSWORD_CONFIRMATION_MISMATCH);
         }
-        String name = UserInput.name(UserInput.text(body, "userName", false));
-        String phone = UserInput.phone(UserInput.text(body, "phone", false));
-        var agreements = UserInput.agreements(body, true);
+        String name = UserInput.name(request.userName());
+        String phone = UserInput.phone(request.phone());
+        var agreements = UserInput.agreements(request.agreements(), true);
         if (users.existsByEmail(email)) throw duplicate();
         String hash = passwords.encode(password);
         try {
@@ -71,8 +72,8 @@ public class AuthService {
     }
     public record Tokens(Map<String, Object> data, String refreshToken, Instant expiresAt) {}
     public Tokens login(LoginRequest loginRequest) {
-        String email = UserInput.email(loginRequest.getEmail());
-        String password = UserInput.password(loginRequest.getPassword());
+        String email = UserInput.email(loginRequest.email());
+        String password = UserInput.password(loginRequest.password());
         User user = users.findByEmail(email).orElse(null);
         boolean matches = passwords.matches(password, user == null ? dummyHash : user.getPassword());
         if (user == null || !matches || user.getStatus() != UserStatus.ACTIVE)

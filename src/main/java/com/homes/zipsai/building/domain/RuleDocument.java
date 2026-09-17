@@ -40,15 +40,12 @@ public class RuleDocument extends BaseTimeEntity {
     @Column(name = "document_title", nullable = false, length = 20)
     private String title;
 
-    // AI 전처리로 텍스트화한 문서 내용
     @Column(name = "content", nullable = false, columnDefinition = "TEXT")
     private String content;
 
-    // 같은 제목의 문서를 수정할 때마다 증가
     @Column(name = "version", nullable = false)
     private int version;
 
-    // 최신 버전 또는 유효한 규칙 문서 여부
     @Column(name = "is_valid", nullable = false)
     private boolean valid;
 

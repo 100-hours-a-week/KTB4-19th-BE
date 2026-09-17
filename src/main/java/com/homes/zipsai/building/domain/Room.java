@@ -41,7 +41,6 @@ public class Room extends BaseTimeEntity {
     @JoinColumn(name = "building_id", nullable = false)
     private Building building;
 
-    // 입주민, 공실이면 null
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", unique = true)
     private User resident;
@@ -80,6 +79,10 @@ public class Room extends BaseTimeEntity {
         }
         this.resident = resident;
         status = RoomStatus.LIVING;
+    }
+
+    public void moveIn(User resident) {
+        connect(resident);
     }
 
     public void moveOutResident() {

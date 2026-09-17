@@ -7,11 +7,10 @@ import org.springframework.web.bind.annotation.*;
 
 import com.homes.zipsai.global.response.ApiResponse;
 import com.homes.zipsai.global.security.AuthPrincipal;
+import com.homes.zipsai.user.dto.UserPatchRequest;
 import com.homes.zipsai.user.repository.UserRepository;
 import com.homes.zipsai.user.service.UserService;
 import com.homes.zipsai.user.validator.UserInput;
-
-import tools.jackson.databind.JsonNode;
 
 @RestController @RequestMapping("/api/v1/users")
 public class UserController {
@@ -27,7 +26,7 @@ public class UserController {
     public ApiResponse<Map<String, Object>> me(@AuthenticationPrincipal AuthPrincipal principal) { return ApiResponse.data(service.me(principal.userId())); }
     // V3_P2: NONE에서 최초 한 번만 역할을 선택한다.
     @PatchMapping("/me")
-    public ApiResponse<Map<String, Object>> patch(@AuthenticationPrincipal AuthPrincipal principal, @RequestBody JsonNode body) {
-        return ApiResponse.data(service.patch(principal, body));
+    public ApiResponse<Map<String, Object>> patch(@AuthenticationPrincipal AuthPrincipal principal, @RequestBody UserPatchRequest request) {
+        return ApiResponse.data(service.patch(principal, request));
     }
 }

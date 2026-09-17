@@ -41,7 +41,6 @@ public class InvitationCode extends BaseTimeEntity {
     @JoinColumn(name = "room_id", nullable = false)
     private Room room;
 
-    // 혼동 문자(I, 1, O, 0)를 제외한 6자리 코드
     @Column(name = "code", nullable = false, columnDefinition = "CHAR(6)")
     private String code;
 

@@ -29,16 +29,15 @@ public class Building extends BaseTimeEntity {
     @Column(name = "building_id")
     private Long id;
 
-    // 건물 관리자 (관리자 1명당 건물 1개)
     @OneToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "user_id", nullable = false, unique = true)
     private User manager;
 
-    // 주소검색 API 결과
     @Column(name = "road_address", nullable = false, length = 200)
     private String roadAddress;
 
-    @Column(name = "building_name", nullable = false, length = 20)
+    // 건물명은 등록 화면에서 선택 입력이므로 null을 허용합니다.
+    @Column(name = "building_name", length = 20)
     private String buildingName;
 
     @Builder

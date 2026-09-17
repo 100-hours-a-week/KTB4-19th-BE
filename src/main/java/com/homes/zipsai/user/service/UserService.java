@@ -15,11 +15,10 @@ import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.domain.UserAgreement;
 import com.homes.zipsai.user.domain.UserRole;
 import com.homes.zipsai.user.domain.UserStatus;
+import com.homes.zipsai.user.dto.UserPatchRequest;
 import com.homes.zipsai.user.repository.TermsRepository;
 import com.homes.zipsai.user.repository.UserRepository;
 import com.homes.zipsai.user.validator.UserInput;
-
-import tools.jackson.databind.JsonNode;
 
 @Service
 public class UserService {
@@ -55,18 +54,12 @@ public class UserService {
         }).toList();
     }
     @Transactional
-    public Map<String, Object> patch(AuthPrincipal principal, JsonNode body) {
-        UserInput.fields(body, Set.of("userRole", "userName", "phone", "agreements"));
+    public Map<String, Object> patch(AuthPrincipal principal, UserPatchRequest request) {
         User user = users.findLocked(principal.userId()).orElseThrow(UnauthorizedException::new);
         if (user.getStatus() != UserStatus.ACTIVE) throw new UnauthorizedException();
         Map<String, Object> result = new LinkedHashMap<>(); result.put("userId", user.getId());
-        if (body.has("userRole")) {
-            UserRole role;
-            try {
-                role = UserRole.valueOf(UserInput.text(body, "userRole", true));
-            } catch (IllegalArgumentException exception) {
-                throw UserInput.invalid("userRole", Reason.INVALID_USER_ROLE);
-            }
+        if (request.userRole() != null) {
+            UserRole role = request.userRole();
             if (role == UserRole.NONE) {
                 throw UserInput.invalid("userRole", Reason.INVALID_USER_ROLE);
             }
@@ -76,10 +69,10 @@ public class UserService {
             result.put("userRole", role);
             result.put("accessToken", tokens.access(user, principal.sessionId())); result.put("tokenType", "Bearer");
         }
-        if (body.has("userName")) { user.changeUserName(UserInput.name(UserInput.text(body, "userName", false))); result.put("userName", user.getUserName()); }
-        if (body.has("phone")) { user.changePhone(UserInput.phone(UserInput.text(body, "phone", false))); result.put("phone", user.getPhone()); }
-        Map<TermsType, Boolean> updates = UserInput.agreements(body, false);
-        if (body.has("agreements")) {
+        if (request.userName() != null) { user.changeUserName(UserInput.name(request.userName())); result.put("userName", user.getUserName()); }
+        if (request.phone() != null) { user.changePhone(UserInput.phone(request.phone())); result.put("phone", user.getPhone()); }
+        Map<TermsType, Boolean> updates = UserInput.agreements(request.agreements(), false);
+        if (request.agreements() != null) {
             for (var entry : updates.entrySet()) {
                 boolean unchanged = agreementViews(user).stream().anyMatch(a -> a.get("termsType") == entry.getKey() && a.get("isAgreed").equals(entry.getValue()));
                 if (!unchanged) user.agree(terms.getLatest(entry.getKey()), entry.getValue());
