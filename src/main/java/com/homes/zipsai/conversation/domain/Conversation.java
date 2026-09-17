@@ -55,11 +55,9 @@ public class Conversation extends BaseTimeEntity {
     @Column(name = "conversation_status", nullable = false, length = 20)
     private ConversationStatus status;
 
-    // 질의는 첫 메시지 앞부분, 민원은 AI 요약 제목
     @Column(name = "conversation_title", length = 100)
     private String title;
 
-    // 최근 대화 정렬 및 미응답 대화 종료 추적 용도
     @Column(name = "last_message_at")
     private LocalDateTime lastMessageAt;
 
