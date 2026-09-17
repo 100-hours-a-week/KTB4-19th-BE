@@ -58,4 +58,19 @@ public class Room extends BaseTimeEntity {
         this.roomNo = roomNo;
         this.status = RoomStatus.EMPTY;
     }
+
+    public void invite() {
+        if (status != RoomStatus.EMPTY) {
+            throw new IllegalStateException("공실만 초대할 수 있습니다.");
+        }
+        this.status = RoomStatus.INVITED;
+    }
+
+    public void moveIn(User resident) {
+        if (status != RoomStatus.INVITED) {
+            throw new IllegalStateException("초대 중인 호실만 입주 처리할 수 있습니다.");
+        }
+        this.resident = resident;
+        this.status = RoomStatus.LIVING;
+    }
 }
