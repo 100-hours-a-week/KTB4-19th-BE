@@ -16,7 +16,7 @@ public record AiConverseRequest(
     Long buildingId,
     ResidentContext residentContext,
     Long conversationId,
-    TraceId traceId,
+    String traceId,
     AiRoute currentRoute,
     AiConversationState conversationState,
     MessagePayload message,
@@ -35,7 +35,7 @@ public record AiConverseRequest(
             room.getBuilding().getId(),
             new ResidentContext(room.getId(), room.getResident().getId()),
             conversation.getId(),
-            new TraceId(residentMessage.getId()),
+            residentMessage.getTraceId(),
             conversation.getCurrentRoute(),
             conversation.getConversationState(),
             new MessagePayload(residentMessage.getId(), residentMessage.getContent(), List.of()),
@@ -45,10 +45,6 @@ public record AiConverseRequest(
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record ResidentContext(Long roomId, Long residentId) {
-    }
-
-    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-    public record TraceId(Long residentMessageId) {
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)

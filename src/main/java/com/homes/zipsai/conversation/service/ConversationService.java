@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Service;
@@ -106,7 +107,8 @@ public class ConversationService {
             .type(ConversationType.INQUIRY)
             .title(TextUtils.truncate(content, TITLE_MAX_LENGTH))
             .build());
-        Message residentMessage = saveMessage(conversation, content, SenderType.RESIDENT, MessageType.TEXT);
+        Message residentMessage = saveMessage(conversation, content, SenderType.RESIDENT, MessageType.TEXT,
+            UUID.randomUUID().toString());
         AiConverseRequest aiRequest = AiConverseRequest.of(room, conversation, residentMessage, List.of());
         return new PendingAiReply(conversation, MessageResponse.from(residentMessage), true, null, aiRequest);
     }
@@ -118,7 +120,8 @@ public class ConversationService {
         Room room = residentRoomService.getLivingRoom(userId);
         List<Message> history = messageRepository.findAllByConversationId(conversationId);
         LocalDateTime previousLastMessageAt = conversation.getLastMessageAt();
-        Message residentMessage = saveMessage(conversation, content, SenderType.RESIDENT, MessageType.TEXT);
+        Message residentMessage = saveMessage(conversation, content, SenderType.RESIDENT, MessageType.TEXT,
+            UUID.randomUUID().toString());
         AiConverseRequest aiRequest = AiConverseRequest.of(room, conversation, residentMessage, history);
         return new PendingAiReply(conversation, MessageResponse.from(residentMessage), false, previousLastMessageAt,
             aiRequest);
@@ -130,7 +133,8 @@ public class ConversationService {
         conversation.applyAiResponse(aiResponse.route(), aiResponse.nextState(), aiResponse.complaintDraft());
         MessageType messageType = conversation.isReadyToConfirmComplaint() ? MessageType.SUMMARY_CARD : MessageType.TEXT;
         String reply = TextUtils.truncate(aiResponse.reply(), Message.CONTENT_MAX_LENGTH);
-        return MessageResponse.from(saveMessage(conversation, reply, SenderType.ASSISTANT, messageType));
+        String traceId = pendingReply.aiRequest().traceId();
+        return MessageResponse.from(saveMessage(conversation, reply, SenderType.ASSISTANT, messageType, traceId));
     }
 
     @Transactional
@@ -165,12 +169,13 @@ public class ConversationService {
     }
 
     private Message saveMessage(Conversation conversation, String content, SenderType senderType,
-                                MessageType messageType) {
+                                MessageType messageType, String traceId) {
         Message message = messageRepository.save(Message.builder()
             .conversation(conversation)
             .content(content)
             .senderType(senderType)
             .messageType(messageType)
+            .traceId(traceId)
             .build());
         conversation.updateLastMessageAt(message.getCreatedAt());
         return message;
