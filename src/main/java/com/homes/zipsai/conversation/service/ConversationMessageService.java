@@ -32,8 +32,8 @@ public class ConversationMessageService {
     public ConversationCreateResponse createConversation(Long userId, ConversationCreateRequest request) {
         PendingAiReply pendingReply = conversationService.saveFirstMessage(userId, request.content());
         MessageResponse assistantMessage = askAiAndSaveReply(pendingReply);
-        return ConversationCreateResponse.of(pendingReply.conversation(), pendingReply.residentMessage(),
-            assistantMessage);
+        return ConversationCreateResponse.of(
+            pendingReply.conversation(), pendingReply.residentMessage(), assistantMessage);
     }
 
     public MessageSendResponse sendMessage(Long userId, Long conversationId, MessageSendRequest request) {
@@ -41,8 +41,8 @@ public class ConversationMessageService {
             throw new ConflictException(ConflictException.Reason.CONVERSATION_BUSY);
         }
         try {
-            PendingAiReply pendingReply =
-                conversationService.saveNextMessage(userId, conversationId, request.content());
+            PendingAiReply pendingReply = conversationService.saveNextMessage(
+                userId, conversationId, request.content());
             MessageResponse assistantMessage = askAiAndSaveReply(pendingReply);
             return MessageSendResponse.of(conversationId, pendingReply.residentMessage(), assistantMessage);
         } finally {

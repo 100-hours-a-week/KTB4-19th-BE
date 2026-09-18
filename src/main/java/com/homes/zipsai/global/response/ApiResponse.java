@@ -5,12 +5,13 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.homes.zipsai.global.exception.ApiException;
 
 public record ApiResponse<T>(
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    String message,
-    T data,
-    ErrorResponse error) {
-    public record ErrorResponse(String code, Object details) {
-    }
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        String message,
+        T data,
+        ErrorResponse error
+) {
+
+    public record ErrorResponse(String code, Object details) {}
 
     public static <T> ApiResponse<T> data(T value) {
         return new ApiResponse<>(null, value, null);
