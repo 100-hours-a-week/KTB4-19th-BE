@@ -1,7 +1,5 @@
 package com.homes.zipsai.conversation;
 
-import static org.hamcrest.Matchers.endsWith;
-import static org.hamcrest.Matchers.matchesPattern;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -56,26 +54,20 @@ class ResidentConversationApiTest {
             .andExpect(jsonPath("$.data.assistantMessage.summaryCard").doesNotExist())
             .andReturn().getResponse().getContentAsString().transform(this::conversationId);
 
-        sendMessage(token, conversationId, "안방 천장 가운데요")
+        sendMessage(token, conversationId, "  안방 천장 가운데요  ")
             .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.assistantMessage.messageType").value("TEXT"))
-            .andExpect(jsonPath("$.data.assistantMessage.summaryCard").doesNotExist());
-        sendMessage(token, conversationId, "  어제 저녁부터요  ")
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.content").value("어제 저녁부터요"))
+            .andExpect(jsonPath("$.data.content").value("안방 천장 가운데요"))
             .andExpect(jsonPath("$.data.assistantMessage.messageType").value("SUMMARY_CARD"))
             .andExpect(jsonPath("$.data.assistantMessage.summaryCard.location").value("안방 천장 가운데요"))
-            .andExpect(jsonPath("$.data.assistantMessage.summaryCard.occurredTime")
-                .value(matchesPattern("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*")))
-            .andExpect(jsonPath("$.data.assistantMessage.summaryCard.symptom").value("천장에서 물이 새요"));
+            .andExpect(jsonPath("$.data.assistantMessage.summaryCard.symptom").value("천장에서 물이 새요"))
+            .andExpect(jsonPath("$.data.assistantMessage.summaryCard.occurredTime").value(nullValue()));
 
         mvc.perform(get(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", bearer(token)))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.messages[4].summaryCard").doesNotExist())
-            .andExpect(jsonPath("$.data.messages[5].messageType").value("SUMMARY_CARD"))
-            .andExpect(jsonPath("$.data.messages[5].summaryCard.location").value("안방 천장 가운데요"))
-            .andExpect(jsonPath("$.data.messages[5].summaryCard.symptom").value("천장에서 물이 새요"))
-            .andExpect(jsonPath("$.data.messages[5].summaryCard.occurredTime").value(endsWith("+09:00")));
+            .andExpect(jsonPath("$.data.messages[2].summaryCard").doesNotExist())
+            .andExpect(jsonPath("$.data.messages[3].messageType").value("SUMMARY_CARD"))
+            .andExpect(jsonPath("$.data.messages[3].summaryCard.location").value("안방 천장 가운데요"))
+            .andExpect(jsonPath("$.data.messages[3].summaryCard.symptom").value("천장에서 물이 새요"));
 
         sendMessage(token, conversationId, "네 접수해주세요")
             .andExpect(status().isConflict())
@@ -84,7 +76,7 @@ class ResidentConversationApiTest {
 
         mvc.perform(get(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", bearer(token)))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.messages.length()").value(6))
+            .andExpect(jsonPath("$.data.messages.length()").value(4))
             .andExpect(jsonPath("$.data.messages[0].content").value("천장에서 물이 새요"))
             .andExpect(jsonPath("$.data.hasNext").value(false))
             .andExpect(jsonPath("$.data.complaintId").value(nullValue()));
@@ -110,9 +102,9 @@ class ResidentConversationApiTest {
         mvc.perform(get(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", bearer(token)))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.complaintId").isNumber())
-            .andExpect(jsonPath("$.data.messages.length()").value(6))
-            .andExpect(jsonPath("$.data.messages[5].messageType").value("SUMMARY_CARD"))
-            .andExpect(jsonPath("$.data.messages[5].summaryCard.occurredTime").value(startsWith("2026-09-15T20:00")));
+            .andExpect(jsonPath("$.data.messages.length()").value(4))
+            .andExpect(jsonPath("$.data.messages[3].messageType").value("SUMMARY_CARD"))
+            .andExpect(jsonPath("$.data.messages[3].summaryCard.occurredTime").value(startsWith("2026-09-15T20:00")));
 
         sendMessage(token, conversationId, "추가 문의요")
             .andExpect(status().isConflict())
@@ -328,7 +320,6 @@ class ResidentConversationApiTest {
         long conversationId = conversationId(startConversation(token, symptom)
             .andReturn().getResponse().getContentAsString());
         sendMessage(token, conversationId, "공동현관 앞이요");
-        sendMessage(token, conversationId, "어제 저녁부터요");
         return conversationId;
     }
 

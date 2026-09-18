@@ -13,6 +13,10 @@ public record AiComplaintDraft(String location, String symptom, OffsetDateTime o
         occurredAt = occurredAt == null ? null : occurredAt.atZoneSameInstant(KST).toOffsetDateTime();
     }
 
+    public static AiComplaintDraft qaCard(String question) {
+        return new AiComplaintDraft(null, question, null);
+    }
+
     public AiComplaintDraft withEdits(AiComplaintDraft edits) {
         return new AiComplaintDraft(
             edits.location() != null ? edits.location() : location,
