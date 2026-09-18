@@ -73,16 +73,12 @@ public class Room extends BaseTimeEntity {
         status = RoomStatus.EMPTY;
     }
 
-    public void connect(User resident) {
+    public void moveIn(User resident) {
         if (resident == null || status != RoomStatus.INVITED || this.resident != null) {
             throw new ConflictException(ConflictException.Reason.ROOM_CONNECTION_CONFLICT);
         }
         this.resident = resident;
         status = RoomStatus.LIVING;
-    }
-
-    public void moveIn(User resident) {
-        connect(resident);
     }
 
     public void moveOutResident() {

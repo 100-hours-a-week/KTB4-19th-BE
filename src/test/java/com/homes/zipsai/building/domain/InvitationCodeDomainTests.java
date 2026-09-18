@@ -68,7 +68,7 @@ class InvitationCodeDomainTests {
         room.invite();
         assertThat(room.getStatus()).isEqualTo(RoomStatus.INVITED);
 
-        room.connect(resident);
+        room.moveIn(resident);
         assertThat(room.getStatus()).isEqualTo(RoomStatus.LIVING);
         assertThat(room.getResident()).isSameAs(resident);
         assertConflict(room::invite, ConflictException.Reason.ROOM_OCCUPIED);
@@ -86,7 +86,7 @@ class InvitationCodeDomainTests {
     @Test
     void movingOutReturnsLivingRoomToEmptyAndClearsResident() {
         room.invite();
-        room.connect(resident);
+        room.moveIn(resident);
 
         room.moveOutResident();
 
@@ -97,15 +97,15 @@ class InvitationCodeDomainTests {
     @Test
     void invalidCancellationAndConnectionUseApiContractConflicts() {
         assertConflict(room::cancelInvitation, ConflictException.Reason.INVITATION_CANCEL_NOT_ALLOWED);
-        assertConflict(() -> room.connect(resident), ConflictException.Reason.ROOM_CONNECTION_CONFLICT);
-        assertConflict(() -> room.connect(null), ConflictException.Reason.ROOM_CONNECTION_CONFLICT);
+        assertConflict(() -> room.moveIn(resident), ConflictException.Reason.ROOM_CONNECTION_CONFLICT);
+        assertConflict(() -> room.moveIn(null), ConflictException.Reason.ROOM_CONNECTION_CONFLICT);
         assertConflict(room::moveOutResident, ConflictException.Reason.RESIDENT_NOT_FOUND_IN_ROOM);
 
         room.invite();
-        room.connect(resident);
+        room.moveIn(resident);
         assertConflict(room::cancelInvitation, ConflictException.Reason.INVITATION_CANCEL_NOT_ALLOWED);
         assertConflict(
-                () -> room.connect(new User("another@example.com", "password", "다른 입주민", null)),
+                () -> room.moveIn(new User("another@example.com", "password", "다른 입주민", null)),
                 ConflictException.Reason.ROOM_CONNECTION_CONFLICT);
     }
 

@@ -40,7 +40,7 @@ public class RoomConnectionService {
         }
 
         Room room = invitationCode.getRoom();
-        room.connect(resident);
+        room.moveIn(resident);
         invitationCode.use();
         return new RoomConnectionResponse(room.getBuilding().getBuildingName(), room.getRoomNo());
     }
