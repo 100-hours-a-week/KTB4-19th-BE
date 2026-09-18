@@ -96,4 +96,21 @@ public class RoomService {
     private ConflictException alreadyExists() {
         return new ConflictException(ConflictException.Reason.ROOM_ALREADY_EXISTS);
     }
+
+    @Transactional
+    public void moveOutResident(Long managerId, Long roomId) {
+        validateId(roomId);
+        Room room = rooms.findByIdWithBuildingAndManager(roomId)
+                .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.ROOM));
+        if (!room.getBuilding().getManager().getId().equals(managerId)) {
+            throw new ForbiddenException();
+        }
+        room.moveOutResident();
+    }
+
+    private void validateId(Long roomId) {
+        if (roomId == null || roomId <= 0) {
+            throw new ValidationFailedException("roomId", Reason.INVALID_ID);
+        }
+    }
 }
