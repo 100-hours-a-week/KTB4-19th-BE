@@ -250,7 +250,10 @@ class ResidentConversationApiTest {
             .andReturn().getResponse().getContentAsString();
         String cursor = json.readTree(firstPage).path("data").path("nextCursor").asText();
 
-        mvc.perform(get(CONVERSATIONS).param("size", "2").param("cursor", cursor).header("Authorization", bearer(token)))
+        mvc.perform(get(CONVERSATIONS)
+                .param("size", "2")
+                .param("cursor", cursor)
+                .header("Authorization", bearer(token)))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.hasNext").value(false))
             .andExpect(jsonPath("$.data.nextCursor").value(nullValue()))

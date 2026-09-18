@@ -1,6 +1,10 @@
 package com.homes.zipsai.user.validator;
 
-import java.util.*;
+import java.util.EnumMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import com.homes.zipsai.auth.dto.AgreementRequest;
@@ -31,7 +35,7 @@ public final class UserInput {
     }
 
     public static void fields(JsonNode body, Set<String> allowed) {
-        if (body == null || !body.isObject() || body.isEmpty()) {
+        if (body == null || !body.isObject() || body.size() == 0) {
             throw missing("body");
         }
         for (String field : body.propertyNames()) {
@@ -49,13 +53,13 @@ public final class UserInput {
             }
             return null;
         }
-        if (!value.isTextual()) {
+        if (!value.isString()) {
             throw invalid(field, Reason.EXPECTED_STRING);
         }
-        if (required && value.asText().isBlank()) {
+        if (required && value.stringValue().isBlank()) {
             throw missing(field);
         }
-        return value.asText();
+        return value.stringValue();
     }
 
     public static String email(String value) {

@@ -13,6 +13,8 @@ public record ConversationStatusUpdateRequest(
 ) {
 
     public ConversationStatusUpdateRequest {
-        conversationStatus = conversationStatus == null || conversationStatus.isBlank() ? null : conversationStatus.strip();
+        conversationStatus = conversationStatus == null || conversationStatus.isBlank()
+            ? null
+            : conversationStatus.strip();
     }
 }
