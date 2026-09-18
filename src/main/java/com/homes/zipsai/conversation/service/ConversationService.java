@@ -128,7 +128,9 @@ public class ConversationService {
     public MessageResponse saveAiReply(PendingAiReply pendingReply, AiConverseResponse aiResponse) {
         Conversation conversation = conversationRepository.getReferenceById(pendingReply.conversation().getId());
         conversation.applyAiResponse(aiResponse.route(), aiResponse.nextState(), aiResponse.complaintDraft());
-        MessageType messageType = conversation.isReadyToConfirmComplaint() ? MessageType.SUMMARY_CARD : MessageType.TEXT;
+        MessageType messageType = conversation.isReadyToConfirmComplaint()
+            ? MessageType.SUMMARY_CARD
+            : MessageType.TEXT;
         String reply = TextUtils.truncate(aiResponse.reply(), Message.CONTENT_MAX_LENGTH);
         return MessageResponse.from(saveMessage(conversation, reply, SenderType.ASSISTANT, messageType));
     }

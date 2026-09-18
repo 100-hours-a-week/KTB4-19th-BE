@@ -29,6 +29,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
@@ -51,6 +52,9 @@ class AuthApiTests {
 
     @Autowired
     JdbcTemplate jdbc;
+
+    @Autowired
+    JwtDecoder jwtDecoder;
 
     private String email() {
         return UUID.randomUUID() + "@example.com";
@@ -89,7 +93,7 @@ class AuthApiTests {
         return json.readTree(result.getResponse().getContentAsString())
                 .path("data")
                 .path("accessToken")
-                .asText();
+                .stringValue();
     }
 
     private Cookie refresh(MvcResult result) {
@@ -133,7 +137,7 @@ class AuthApiTests {
                         .contentType("application/json")
                         .content(signupBody(email())
                                 .replace("\"SERVICE\",\"isAgreed\":true", "\"SERVICE\",\"isAgreed\":false"))
-        ).andExpect(status().isUnprocessableEntity())
+        ).andExpect(status().is(422))
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
 
         mvc.perform(
@@ -167,7 +171,7 @@ class AuthApiTests {
                     post("/api/v1/auth/signup")
                             .contentType("application/json")
                             .content(body)
-            ).andExpect(status().isUnprocessableEntity())
+            ).andExpect(status().is(422))
                     .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
         }
 
@@ -190,6 +194,11 @@ class AuthApiTests {
         String email = email();
         signup(email);
         MvcResult loginResult = login(email);
+        var claims = jwtDecoder.decode(access(loginResult));
+        Assertions.assertThat(claims.getSubject()).isNotBlank();
+        Assertions.assertThat(claims.getClaimAsString("role")).isEqualTo("NONE");
+        Assertions.assertThat(claims.hasClaim("sid")).isFalse();
+        Assertions.assertThat(claims.hasClaim("ver")).isFalse();
 
         Assertions.assertThat(
                 jdbc.queryForObject("select password from Users where email=?", String.class, email)
@@ -226,7 +235,7 @@ class AuthApiTests {
     }
 
     @Test
-    void refreshRotatesAndLogoutRevokesAccessAndRefresh() throws Exception {
+    void refreshRotatesAndLogoutRevokesRefreshButAccessRemainsValidUntilExpiry() throws Exception {
         String email = email();
         signup(email);
         MvcResult loginResult = login(email);
@@ -236,11 +245,13 @@ class AuthApiTests {
 
         mvc.perform(post("/api/v1/auth/reissue").cookie(refresh(loginResult)))
                 .andExpect(status().isUnauthorized());
-        mvc.perform(post("/api/v1/auth/logout").header("Authorization", "Bearer " + access(rotated)))
+        mvc.perform(post("/api/v1/auth/logout")
+                        .header("Authorization", "Bearer " + access(rotated))
+                        .cookie(refresh(rotated)))
                 .andExpect(status().isOk())
                 .andExpect(cookie().maxAge("refreshToken", 0));
         mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + access(rotated)))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isOk());
         mvc.perform(post("/api/v1/auth/reissue").cookie(refresh(rotated)))
                 .andExpect(status().isUnauthorized());
         mvc.perform(post("/api/v1/auth/reissue"))
@@ -248,7 +259,7 @@ class AuthApiTests {
     }
 
     @Test
-    void roleSelectionIsOneTimeAndInvalidatesOldAccess() throws Exception {
+    void roleSelectionIsOneTimeAndExistingAccessKeepsItsSignedRoleUntilExpiry() throws Exception {
         String email = email();
         signup(email);
         MvcResult loginResult = login(email);
@@ -262,7 +273,9 @@ class AuthApiTests {
         String token = access(selected);
 
         mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + oldToken))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/managers/probe").header("Authorization", "Bearer " + oldToken))
+                .andExpect(status().isForbidden());
         patchMe(token, "{\"userRole\":\"MANAGER\"}").andExpect(status().isOk());
         patchMe(token, "{\"userRole\":\"RESIDENT\"}")
                 .andExpect(status().isConflict())
@@ -297,7 +310,7 @@ class AuthApiTests {
         String token = access(login(email));
 
         patchMe(token, "{\"userRole\":\"MANAGER\",\"phone\":\"bad\"}")
-                .andExpect(status().isUnprocessableEntity());
+                .andExpect(status().is(422));
         mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.userRole").value("NONE"));
@@ -316,13 +329,18 @@ class AuthApiTests {
     }
 
     @Test
-    void inactiveAccountCannotUseExistingTokens() throws Exception {
+    void inactiveAccountAccessTokenRemainsValidUntilExpiryButCannotRefresh() throws Exception {
         String email = email();
         signup(email);
         MvcResult loginResult = login(email);
+        MvcResult selected = patchMe(access(loginResult), "{\"userRole\":\"MANAGER\"}")
+                .andExpect(status().isOk())
+                .andReturn();
 
         jdbc.update("update Users set user_status='INACTIVE' where email=?", email);
-        mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + access(loginResult)))
+        mvc.perform(get("/api/v1/managers/probe").header("Authorization", "Bearer " + access(selected)))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + access(selected)))
                 .andExpect(status().isUnauthorized());
         mvc.perform(post("/api/v1/auth/reissue").cookie(refresh(loginResult)))
                 .andExpect(status().isUnauthorized());
@@ -384,10 +402,13 @@ class AuthApiTests {
     }
 
     @Test
-    void expiredSessionCannotRefreshOrAuthenticate() throws Exception {
+    void expiredRefreshSessionCannotRefreshButAccessTokenStillAuthenticates() throws Exception {
         String email = email();
         signup(email);
         MvcResult loginResult = login(email);
+        MvcResult selected = patchMe(access(loginResult), "{\"userRole\":\"MANAGER\"}")
+                .andExpect(status().isOk())
+                .andReturn();
 
         jdbc.update(
                 "update Refresh_sessions set expires_at=? "
@@ -397,8 +418,8 @@ class AuthApiTests {
         );
         mvc.perform(post("/api/v1/auth/reissue").cookie(refresh(loginResult)))
                 .andExpect(status().isUnauthorized());
-        mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + access(loginResult)))
-                .andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/managers/probe").header("Authorization", "Bearer " + access(selected)))
+                .andExpect(status().isOk());
     }
 
     @Test
