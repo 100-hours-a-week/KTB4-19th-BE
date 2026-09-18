@@ -1,8 +1,8 @@
 package com.homes.zipsai.user.controller;
 
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -24,7 +24,6 @@ import com.homes.zipsai.user.service.UserService;
 public class UserController {
 
     private final UserService service;
-
 
     @GetMapping("/email-availability")
     public ResponseEntity<ApiResponse<EmailAvailabilityResponse>> available(
