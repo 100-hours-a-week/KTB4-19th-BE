@@ -33,17 +33,7 @@ public record ComplaintCreateRequest(
     List<Long> attachmentIds
 ) {
 
-    public ComplaintCreateRequest {
-        location = blankToNull(location);
-        symptom = blankToNull(symptom);
-        attachmentIds = attachmentIds == null ? List.of() : List.copyOf(attachmentIds);
-    }
-
     public AiComplaintDraft toDraftEdits() {
         return new AiComplaintDraft(location, symptom, occurredTime);
-    }
-
-    private static String blankToNull(String value) {
-        return value == null || value.isBlank() ? null : value.strip();
     }
 }

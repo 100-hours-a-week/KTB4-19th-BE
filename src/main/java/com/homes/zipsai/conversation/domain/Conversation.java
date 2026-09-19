@@ -16,7 +16,8 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
 import com.homes.zipsai.conversation.ai.AiComplaintDraft;
-import com.homes.zipsai.conversation.ai.AiConversationState;
+import com.homes.zipsai.conversation.ai.AiComplaintState;
+import com.homes.zipsai.conversation.ai.AiConverseResponse;
 import com.homes.zipsai.conversation.ai.AiRoute;
 import com.homes.zipsai.global.domain.BaseTimeEntity;
 import com.homes.zipsai.global.exception.ConflictException;
@@ -67,7 +68,7 @@ public class Conversation extends BaseTimeEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "ai_conversation_state", length = 20)
-    private AiConversationState conversationState;
+    private AiComplaintState complaintState;
 
     @Column(name = "draft_location", length = LOCATION_MAX_LENGTH)
     private String draftLocation;
@@ -113,15 +114,23 @@ public class Conversation extends BaseTimeEntity {
         this.lastMessageAt = messageAt;
     }
 
-    public void applyAiResponse(AiRoute route, AiConversationState nextState, AiComplaintDraft draft) {
+    public void applyAiResponse(AiConverseResponse response) {
         if (!isActive()) {
             return;
         }
-        this.currentRoute = route;
-        this.conversationState = nextState;
-        if (draft != null) {
-            storeDraft(draft);
+        this.currentRoute = response.route();
+
+        String qaCardQuestion = response.qaCardQuestion();
+        AiComplaintDraft draftPatch = response.draftPatch();
+        if (qaCardQuestion != null) {
+            storeDraft(new AiComplaintDraft(null, qaCardQuestion, null));
+        } else if (draftPatch != null) {
+            storeDraft(currentDraft().withEdits(draftPatch));
         }
+
+        this.complaintState = response.isConversationComplete()
+            ? AiComplaintState.READY_TO_CONFIRM
+            : response.nextComplaintState();
     }
 
     public AiComplaintDraft currentDraft() {
@@ -129,7 +138,7 @@ public class Conversation extends BaseTimeEntity {
     }
 
     public boolean isReadyToConfirmComplaint() {
-        return currentRoute == AiRoute.COMPLAINT && conversationState == AiConversationState.READY_TO_CONFIRM;
+        return complaintState == AiComplaintState.READY_TO_CONFIRM;
     }
 
     public void resolve() {
@@ -138,7 +147,7 @@ public class Conversation extends BaseTimeEntity {
         }
         this.status = ConversationStatus.RESOLVED;
         this.currentRoute = null;
-        this.conversationState = null;
+        this.complaintState = null;
     }
 
     public void markComplaintCreated(String complaintTitle, AiComplaintDraft confirmedDraft) {
@@ -146,7 +155,7 @@ public class Conversation extends BaseTimeEntity {
         this.status = ConversationStatus.COMPLAINT_CREATED;
         this.title = complaintTitle;
         this.currentRoute = null;
-        this.conversationState = null;
+        this.complaintState = null;
         storeDraft(confirmedDraft);
     }
 

@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Service;
@@ -106,7 +107,7 @@ public class ConversationService {
             .type(ConversationType.INQUIRY)
             .title(TextUtils.truncate(content, TITLE_MAX_LENGTH))
             .build());
-        Message residentMessage = saveMessage(conversation, content, SenderType.RESIDENT, MessageType.TEXT);
+        Message residentMessage = saveResidentMessage(conversation, content);
         AiConverseRequest aiRequest = AiConverseRequest.of(room, conversation, residentMessage, List.of());
         return new PendingAiReply(conversation, MessageResponse.from(residentMessage), true, null, aiRequest);
     }
@@ -118,7 +119,7 @@ public class ConversationService {
         Room room = residentRoomService.getLivingRoom(userId);
         List<Message> history = messageRepository.findAllByConversationId(conversationId);
         LocalDateTime previousLastMessageAt = conversation.getLastMessageAt();
-        Message residentMessage = saveMessage(conversation, content, SenderType.RESIDENT, MessageType.TEXT);
+        Message residentMessage = saveResidentMessage(conversation, content);
         AiConverseRequest aiRequest = AiConverseRequest.of(room, conversation, residentMessage, history);
         return new PendingAiReply(conversation, MessageResponse.from(residentMessage), false, previousLastMessageAt,
             aiRequest);
@@ -127,10 +128,15 @@ public class ConversationService {
     @Transactional
     public MessageResponse saveAiReply(PendingAiReply pendingReply, AiConverseResponse aiResponse) {
         Conversation conversation = conversationRepository.getReferenceById(pendingReply.conversation().getId());
-        conversation.applyAiResponse(aiResponse.route(), aiResponse.nextState(), aiResponse.complaintDraft());
-        MessageType messageType = conversation.isReadyToConfirmComplaint() ? MessageType.SUMMARY_CARD : MessageType.TEXT;
+        conversation.applyAiResponse(aiResponse);
+        MessageType messageType = MessageType.TEXT;
+        if (conversation.isReadyToConfirmComplaint()) {
+            messageType = MessageType.SUMMARY_CARD;
+        }
         String reply = TextUtils.truncate(aiResponse.reply(), Message.CONTENT_MAX_LENGTH);
-        return MessageResponse.from(saveMessage(conversation, reply, SenderType.ASSISTANT, messageType));
+        String traceId = pendingReply.aiRequest().traceId();
+        Message assistantMessage = saveMessage(conversation, reply, SenderType.ASSISTANT, messageType, traceId);
+        return MessageResponse.from(assistantMessage);
     }
 
     @Transactional
@@ -164,13 +170,19 @@ public class ConversationService {
         return complaints;
     }
 
+    private Message saveResidentMessage(Conversation conversation, String content) {
+        String traceId = UUID.randomUUID().toString();
+        return saveMessage(conversation, content, SenderType.RESIDENT, MessageType.TEXT, traceId);
+    }
+
     private Message saveMessage(Conversation conversation, String content, SenderType senderType,
-                                MessageType messageType) {
+                                MessageType messageType, String traceId) {
         Message message = messageRepository.save(Message.builder()
             .conversation(conversation)
             .content(content)
             .senderType(senderType)
             .messageType(messageType)
+            .traceId(traceId)
             .build());
         conversation.updateLastMessageAt(message.getCreatedAt());
         return message;
