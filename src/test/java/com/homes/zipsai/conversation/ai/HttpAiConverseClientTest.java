@@ -24,7 +24,8 @@ import com.homes.zipsai.global.exception.TooManyRequestsException;
 class HttpAiConverseClientTest {
 
     private static final String BASE_URL = "http://ai.test";
-    private static final String CONVERSE_URL = BASE_URL + "/api/v3/ai/converse";
+    private static final String CONVERSE_PATH = "/api/v3/ai/converse";
+    private static final String CONVERSE_URL = BASE_URL + CONVERSE_PATH;
     private static final String TRACE_ID = "6f6d8b2e-0b0b-4a1e-9f2a-3f9d5c1a7e11";
 
     private MockRestServiceServer server;
@@ -34,7 +35,7 @@ class HttpAiConverseClientTest {
     void setUp() {
         RestClient.Builder builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
-        client = new HttpAiConverseClient(builder, BASE_URL);
+        client = new HttpAiConverseClient(builder, BASE_URL, CONVERSE_PATH);
     }
 
     @Test

@@ -21,19 +21,21 @@ import com.homes.zipsai.global.exception.TooManyRequestsException;
 public class HttpAiConverseClient implements AiConverseClient {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(HttpAiConverseClient.class);
-    private static final String CONVERSE_PATH = "/api/v3/ai/converse";
 
     private final RestClient restClient;
+    private final String conversePath;
 
-    public HttpAiConverseClient(RestClient.Builder builder, @Value("${app.ai.base-url}") String baseUrl) {
+    public HttpAiConverseClient(RestClient.Builder builder, @Value("${app.ai.base-url}") String baseUrl,
+                                @Value("${app.ai.converse-path}") String conversePath) {
         this.restClient = builder.baseUrl(baseUrl).build();
+        this.conversePath = conversePath;
     }
 
     @Override
     public AiConverseResponse converse(AiConverseRequest request) {
         try {
             return restClient.post()
-                .uri(CONVERSE_PATH)
+                .uri(conversePath)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(request)
                 .retrieve()
