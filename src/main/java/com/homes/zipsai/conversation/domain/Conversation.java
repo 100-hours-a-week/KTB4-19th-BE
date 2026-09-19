@@ -121,10 +121,11 @@ public class Conversation extends BaseTimeEntity {
         this.currentRoute = response.route();
 
         String qaCardQuestion = response.qaCardQuestion();
+        AiComplaintDraft draftPatch = response.draftPatch();
         if (qaCardQuestion != null) {
-            storeDraft(AiComplaintDraft.qaCard(qaCardQuestion));
-        } else if (response.draftPatch() != null) {
-            storeDraft(currentDraft().withEdits(response.draftPatch()));
+            storeDraft(new AiComplaintDraft(null, qaCardQuestion, null));
+        } else if (draftPatch != null) {
+            storeDraft(currentDraft().withEdits(draftPatch));
         }
 
         this.complaintState = response.isConversationComplete()

@@ -35,17 +35,13 @@ public record AiConverseRequest(
             residentMessage.getTraceId(),
             conversation.getCurrentRoute(),
             conversation.getComplaintState(),
-            MessagePayload.from(residentMessage),
+            new MessagePayload(String.valueOf(residentMessage.getId()), residentMessage.getContent(), List.of()),
             history.stream().map(HistoryMessage::from).toList(),
             ComplaintDraftPayload.from(conversation.currentDraft()));
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record MessagePayload(String messageId, String text, List<String> imageUrls) {
-
-        static MessagePayload from(Message message) {
-            return new MessagePayload(String.valueOf(message.getId()), message.getContent(), List.of());
-        }
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
