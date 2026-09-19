@@ -1,9 +1,9 @@
 package com.homes.zipsai.global.config;
 
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,9 +61,11 @@ public class LocalDummyDataInitializer implements ApplicationRunner {
             .buildingName("A타워")
             .roadAddress("서울 강남구 역삼동 123-4")
             .build());
-        Map<String, Room> rooms = ROOM_NOS.stream()
-            .map(roomNo -> roomRepository.save(Room.builder().building(building).roomNo(roomNo).build()))
-            .collect(Collectors.toMap(Room::getRoomNo, room -> room));
+        Map<String, Room> rooms = new HashMap<>();
+        for (String roomNo : ROOM_NOS) {
+            Room room = roomRepository.save(Room.builder().building(building).roomNo(roomNo).build());
+            rooms.put(roomNo, room);
+        }
 
         moveIn(rooms.get("302"), createUser("resident@zipsai.com", "박입주", "010-9876-5432", UserRole.RESIDENT));
         moveIn(rooms.get("301"), createUser("resident2@zipsai.com", "이입주", "010-2222-3333", UserRole.RESIDENT));

@@ -54,7 +54,7 @@ class ResidentConversationApiTest {
             .andExpect(jsonPath("$.data.assistantMessage.summaryCard").doesNotExist())
             .andReturn().getResponse().getContentAsString().transform(this::conversationId);
 
-        sendMessage(token, conversationId, "  안방 천장 가운데요  ")
+        sendMessage(token, conversationId, "안방 천장 가운데요")
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.data.content").value("안방 천장 가운데요"))
             .andExpect(jsonPath("$.data.assistantMessage.messageType").value("SUMMARY_CARD"))
@@ -168,8 +168,8 @@ class ResidentConversationApiTest {
     @Test
     void validatesRequestBodyPathAndQuery() throws Exception {
         startConversation(token, "   ")
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.error.code").value("MISSING_REQUIRED_FIELD"))
+            .andExpect(status().isUnprocessableContent())
+            .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
             .andExpect(jsonPath("$.error.details.violations[0].field").value("content"))
             .andExpect(jsonPath("$.data").value(nullValue()));
         startConversation(token, "가".repeat(201))
@@ -192,8 +192,8 @@ class ResidentConversationApiTest {
             .andExpect(jsonPath("$.error.code").value("INVALID_QUERY_PARAMETER"))
             .andExpect(jsonPath("$.error.details.violations[0].field").value("cursor"));
         sendMessage(token, 1L, "   ")
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.error.code").value("MISSING_REQUIRED_FIELD"))
+            .andExpect(status().isUnprocessableContent())
+            .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
             .andExpect(jsonPath("$.error.details.violations[0].field").value("content"));
         createComplaint(token, "{}")
             .andExpect(status().isBadRequest())

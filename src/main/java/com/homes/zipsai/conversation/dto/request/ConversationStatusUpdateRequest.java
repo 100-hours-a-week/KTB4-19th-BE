@@ -11,10 +11,4 @@ public record ConversationStatusUpdateRequest(
     @Pattern(regexp = "RESOLVED", message = "허용되지 않은 상태값입니다.")
     String conversationStatus
 ) {
-
-    public ConversationStatusUpdateRequest {
-        if (conversationStatus != null) {
-            conversationStatus = conversationStatus.isBlank() ? null : conversationStatus.strip();
-        }
-    }
 }
