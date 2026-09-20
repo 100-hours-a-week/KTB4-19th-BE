@@ -31,7 +31,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 
-@Tag(name = "입주민 민원", description = "입주민이 AI 대화를 민원으로 접수한다.")
+@Tag(name = "입주민 민원", description = "입주민이 민원을 접수하고 조회한다.")
 @RestController
 @RequestMapping("/api/v1/residents/me/complaints")
 @RequiredArgsConstructor
