@@ -1,22 +1,17 @@
 package com.homes.zipsai.global.security;
 
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 
 import javax.crypto.spec.SecretKeySpec;
 
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
-import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
@@ -25,19 +20,10 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
-import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-import com.homes.zipsai.auth.domain.RefreshSession;
-import com.homes.zipsai.auth.repository.RefreshSessionRepository;
-import com.homes.zipsai.global.exception.ApiException;
 import com.homes.zipsai.global.exception.ForbiddenException;
 import com.homes.zipsai.global.exception.UnauthorizedException;
-import com.homes.zipsai.global.response.ApiResponse;
-import com.homes.zipsai.user.domain.User;
-import com.homes.zipsai.user.domain.UserStatus;
-import com.homes.zipsai.user.repository.UserRepository;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 
 import tools.jackson.databind.ObjectMapper;
@@ -74,12 +60,13 @@ public class SecurityConfig {
             HttpSecurity http,
             AuthProperties properties,
             ObjectMapper json,
-            UserRepository users,
-            RefreshSessionRepository sessions
+            AccessTokenAuthenticationConverter accessTokenAuthenticationConverter,
+            CorsConfigurationSource corsConfigurationSource,
+            SecurityErrorResponseWriter errorResponseWriter
     ) throws Exception {
         http.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .csrf(csrf -> csrf.disable())
-                .cors(cors -> cors.configurationSource(cors(properties)))
+                .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 .formLogin(form -> form.disable())
                 .httpBasic(basic -> basic.disable())
                 .logout(logout -> logout.disable())
@@ -101,42 +88,16 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/managers/**").hasRole("MANAGER")
                         .requestMatchers("/api/v1/residents/**").hasRole("RESIDENT")
                         .anyRequest().authenticated())
-                .exceptionHandling(exception -> exception
+                        .exceptionHandling(exception -> exception
                         .authenticationEntryPoint((request, response, cause) ->
-                                write(response, json, new UnauthorizedException()))
+                                errorResponseWriter.write(response, new UnauthorizedException()))
                         .accessDeniedHandler((request, response, cause) ->
-                                write(response, json, new ForbiddenException())))
+                                errorResponseWriter.write(response, new ForbiddenException())))
                 .oauth2ResourceServer(resourceServer -> resourceServer
                         .authenticationEntryPoint((request, response, cause) ->
-                                write(response, json, new UnauthorizedException()))
-                        .jwt(jwt -> jwt.jwtAuthenticationConverter(token -> {
-                            try {
-                                long userId = Long.parseLong(token.getSubject());
-                                User user = users.findById(userId)
-                                        .orElseThrow(UnauthorizedException::new);
-                                String sessionId = token.getClaimAsString("sid");
-                                RefreshSession session = sessions.findById(sessionId)
-                                        .orElseThrow(UnauthorizedException::new);
-                                Number version = token.getClaim("ver");
-                                if (version == null
-                                        || user.getAuthVersion() != version.longValue()
-                                        || user.getStatus() != UserStatus.ACTIVE
-                                        || !session.active()
-                                        || !session.getUserId().equals(userId)) {
-                                    throw new UnauthorizedException();
-                                }
-                                return new UsernamePasswordAuthenticationToken(
-                                        new AuthPrincipal(userId, session.getId()),
-                                        null,
-                                        List.of(new SimpleGrantedAuthority(
-                                                "ROLE_" + user.getRole().name()))
-                        );
-                            } catch (ApiException | IllegalArgumentException exception) {
-                                throw new OAuth2AuthenticationException(
-                                        new OAuth2Error("invalid_token")
-                                );
-                            }
-                        })))
+                                errorResponseWriter.write(response, new UnauthorizedException()))
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(
+                                accessTokenAuthenticationConverter)))
                 .addFilterBefore(
                         new RequestGuard(properties, json),
                         UsernamePasswordAuthenticationFilter.class
@@ -144,26 +105,4 @@ public class SecurityConfig {
         return http.build();
     }
 
-    private CorsConfigurationSource cors(AuthProperties properties) {
-        CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(properties.allowedOrigins());
-        configuration.setAllowCredentials(true);
-        configuration.setAllowedMethods(List.of("GET", "POST", "PATCH", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
-        configuration.setExposedHeaders(List.of("Retry-After"));
-
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", configuration);
-        return source;
-    }
-
-    private void write(
-            jakarta.servlet.http.HttpServletResponse response,
-            ObjectMapper json,
-            ApiException exception
-    ) throws java.io.IOException {
-        response.setStatus(exception.status);
-        response.setContentType("application/json;charset=UTF-8");
-        response.getWriter().write(json.writeValueAsString(ApiResponse.error(exception)));
-    }
 }

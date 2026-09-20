@@ -226,7 +226,7 @@ class AuthApiTests {
     }
 
     @Test
-    void refreshRotatesAndLogoutRevokesAccessAndRefresh() throws Exception {
+    void refreshRotatesAndLogoutRevokesRefreshOnly() throws Exception {
         String email = email();
         signup(email);
         MvcResult loginResult = login(email);
@@ -240,7 +240,7 @@ class AuthApiTests {
                 .andExpect(status().isOk())
                 .andExpect(cookie().maxAge("refreshToken", 0));
         mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + access(rotated)))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isOk());
         mvc.perform(post("/api/v1/auth/reissue").cookie(refresh(rotated)))
                 .andExpect(status().isUnauthorized());
         mvc.perform(post("/api/v1/auth/reissue"))
@@ -248,7 +248,7 @@ class AuthApiTests {
     }
 
     @Test
-    void roleSelectionIsOneTimeAndInvalidatesOldAccess() throws Exception {
+    void roleSelectionIsOneTimeAndLeavesOldAccessTokenValid() throws Exception {
         String email = email();
         signup(email);
         MvcResult loginResult = login(email);
@@ -262,7 +262,7 @@ class AuthApiTests {
         String token = access(selected);
 
         mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + oldToken))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isOk());
         patchMe(token, "{\"userRole\":\"MANAGER\"}").andExpect(status().isOk());
         patchMe(token, "{\"userRole\":\"RESIDENT\"}")
                 .andExpect(status().isConflict())
@@ -398,7 +398,7 @@ class AuthApiTests {
         mvc.perform(post("/api/v1/auth/reissue").cookie(refresh(loginResult)))
                 .andExpect(status().isUnauthorized());
         mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + access(loginResult)))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isOk());
     }
 
     @Test
