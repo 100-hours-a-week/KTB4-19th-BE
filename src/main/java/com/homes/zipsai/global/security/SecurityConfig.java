@@ -1,89 +1,108 @@
 package com.homes.zipsai.global.security;
 
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 
 import javax.crypto.spec.SecretKeySpec;
 
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.context.annotation.*;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.oauth2.core.*;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.*;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtValidators;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.web.cors.*;
+import org.springframework.web.cors.CorsConfigurationSource;
 
-import com.homes.zipsai.auth.domain.RefreshSession;
-import com.homes.zipsai.auth.repository.RefreshSessionRepository;
-import com.homes.zipsai.global.exception.ApiException;
 import com.homes.zipsai.global.exception.ForbiddenException;
 import com.homes.zipsai.global.exception.UnauthorizedException;
-import com.homes.zipsai.global.response.ApiResponse;
-import com.homes.zipsai.user.domain.User;
-import com.homes.zipsai.user.domain.UserStatus;
-import com.homes.zipsai.user.repository.UserRepository;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 
 import tools.jackson.databind.ObjectMapper;
 
-@Configuration @EnableMethodSecurity @EnableConfigurationProperties(AuthProperties.class)
+@Configuration
+@EnableMethodSecurity
+@EnableConfigurationProperties(AuthProperties.class)
 public class SecurityConfig {
-    @Bean PasswordEncoder passwordEncoder() { return new BCryptPasswordEncoder(); }
-    @Bean JwtEncoder jwtEncoder(AuthProperties p) { return new NimbusJwtEncoder(new ImmutableSecret<>(p.secret().getBytes(StandardCharsets.UTF_8))); }
-    @Bean JwtDecoder jwtDecoder(AuthProperties p) {
-        NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(new SecretKeySpec(p.secret().getBytes(StandardCharsets.UTF_8), "HmacSHA256")).macAlgorithm(MacAlgorithm.HS256).build();
-        decoder.setJwtValidator(JwtValidators.createDefaultWithIssuer("zipsai")); return decoder;
+
+    @Bean
+    PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
     }
-    @Bean SecurityFilterChain security(HttpSecurity http, AuthProperties p, ObjectMapper json, UserRepository users, RefreshSessionRepository sessions) throws Exception {
-        http.sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .csrf(c -> c.disable()).cors(c -> c.configurationSource(cors(p)))
-            .formLogin(c -> c.disable()).httpBasic(c -> c.disable()).logout(c -> c.disable())
-            .authorizeHttpRequests(a -> a
-                .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
-                .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/auth/signup", "/api/v1/auth/login", "/api/v1/auth/reissue").permitAll()
-                .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/v1/users/email-availability", "/api/v1/terms", "/api/v1/terms/*").permitAll()
-                .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
-                .requestMatchers("/api/v1/managers/**").hasRole("MANAGER")
-                .requestMatchers("/api/v1/residents/**").hasRole("RESIDENT")
-                .anyRequest().authenticated())
-            .exceptionHandling(e -> e
-                .authenticationEntryPoint((request, response, ex) -> write(response, json, new UnauthorizedException()))
-                .accessDeniedHandler((request, response, ex) -> write(response, json, new ForbiddenException())))
-            .oauth2ResourceServer(o -> o
-                .authenticationEntryPoint((request, response, ex) -> write(response, json, new UnauthorizedException()))
-                .jwt(j -> j.jwtAuthenticationConverter(jwt -> {
-                    try {
-                        long id = Long.parseLong(jwt.getSubject());
-                        User user = users.findById(id).orElseThrow(UnauthorizedException::new);
-                        RefreshSession session = sessions.findById(jwt.getClaimAsString("sid")).orElseThrow(UnauthorizedException::new);
-                        Number version = jwt.getClaim("ver");
-                        if (version == null || user.getAuthVersion() != version.longValue() || user.getStatus() != UserStatus.ACTIVE
-                            || !session.active() || !session.getUserId().equals(id)) throw new UnauthorizedException();
-                        return new UsernamePasswordAuthenticationToken(new AuthPrincipal(id, session.getId()), null,
-                            List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole().name())));
-                    } catch (ApiException | IllegalArgumentException e) {
-                        throw new OAuth2AuthenticationException(new OAuth2Error("invalid_token"));
-                    }
-                })))
-            .addFilterBefore(new RequestGuard(p, json), UsernamePasswordAuthenticationFilter.class);
+
+    @Bean
+    JwtEncoder jwtEncoder(AuthProperties properties) {
+        byte[] secret = properties.secret().getBytes(StandardCharsets.UTF_8);
+        return new NimbusJwtEncoder(new ImmutableSecret<>(secret));
+    }
+
+    @Bean
+    JwtDecoder jwtDecoder(AuthProperties properties) {
+        byte[] secret = properties.secret().getBytes(StandardCharsets.UTF_8);
+        SecretKeySpec secretKey = new SecretKeySpec(secret, "HmacSHA256");
+        NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(secretKey)
+                .macAlgorithm(MacAlgorithm.HS256)
+                .build();
+        decoder.setJwtValidator(JwtValidators.createDefaultWithIssuer("zipsai"));
+        return decoder;
+    }
+
+    @Bean
+    SecurityFilterChain security(
+            HttpSecurity http,
+            AuthProperties properties,
+            ObjectMapper json,
+            AccessTokenAuthenticationConverter accessTokenAuthenticationConverter,
+            CorsConfigurationSource corsConfigurationSource,
+            SecurityErrorResponseWriter errorResponseWriter
+    ) throws Exception {
+        http.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .csrf(csrf -> csrf.disable())
+                .cors(cors -> cors.configurationSource(corsConfigurationSource))
+                .formLogin(form -> form.disable())
+                .httpBasic(basic -> basic.disable())
+                .logout(logout -> logout.disable())
+                .authorizeHttpRequests(authorize -> authorize
+                        .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
+                        .requestMatchers(
+                                org.springframework.http.HttpMethod.POST,
+                                "/api/v1/auth/signup",
+                                "/api/v1/auth/login",
+                                "/api/v1/auth/reissue"
+                        ).permitAll()
+                        .requestMatchers(
+                                org.springframework.http.HttpMethod.GET,
+                                "/api/v1/users/email-availability",
+                                "/api/v1/terms",
+                                "/api/v1/terms/*"
+                        ).permitAll()
+                        .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                        .requestMatchers("/api/v1/managers/**").hasRole("MANAGER")
+                        .requestMatchers("/api/v1/residents/**").hasRole("RESIDENT")
+                        .anyRequest().authenticated())
+                        .exceptionHandling(exception -> exception
+                        .authenticationEntryPoint((request, response, cause) ->
+                                errorResponseWriter.write(response, new UnauthorizedException()))
+                        .accessDeniedHandler((request, response, cause) ->
+                                errorResponseWriter.write(response, new ForbiddenException())))
+                .oauth2ResourceServer(resourceServer -> resourceServer
+                        .authenticationEntryPoint((request, response, cause) ->
+                                errorResponseWriter.write(response, new UnauthorizedException()))
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(
+                                accessTokenAuthenticationConverter)))
+                .addFilterBefore(
+                        new RequestGuard(properties, json),
+                        UsernamePasswordAuthenticationFilter.class
+            );
         return http.build();
     }
-    private CorsConfigurationSource cors(AuthProperties p) {
-        CorsConfiguration c = new CorsConfiguration(); c.setAllowedOrigins(p.allowedOrigins()); c.setAllowCredentials(true);
-        c.setAllowedMethods(List.of("GET", "POST", "PATCH", "DELETE", "OPTIONS"));
-        c.setAllowedHeaders(List.of("Authorization", "Content-Type")); c.setExposedHeaders(List.of("Retry-After"));
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource(); source.registerCorsConfiguration("/**", c); return source;
-    }
-    private void write(jakarta.servlet.http.HttpServletResponse response, ObjectMapper json, ApiException e) throws java.io.IOException {
-        response.setStatus(e.status); response.setContentType("application/json;charset=UTF-8");
-        response.getWriter().write(json.writeValueAsString(ApiResponse.error(e)));
-    }
+
 }
