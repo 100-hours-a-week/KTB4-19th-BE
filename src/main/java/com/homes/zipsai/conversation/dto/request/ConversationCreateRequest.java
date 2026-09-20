@@ -8,7 +8,7 @@ import jakarta.validation.constraints.Size;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 public record ConversationCreateRequest(
-    @Schema(description = "첫 메시지 (앞뒤 공백 제거 후 200자 이하)", example = "천장에서 물이 새요")
+    @Schema(description = "첫 메시지 (200자 이하)", example = "천장에서 물이 새요")
     @NotBlank
     @Size(max = 200, message = "메시지는 200자 이하여야 합니다.")
     String content,
@@ -17,9 +17,4 @@ public record ConversationCreateRequest(
     @Size(max = 3, message = "첨부 사진은 3장 이하여야 합니다.")
     List<Long> attachmentIds
 ) {
-
-    public ConversationCreateRequest {
-        content = content == null || content.isBlank() ? null : content.strip();
-        attachmentIds = attachmentIds == null ? List.of() : List.copyOf(attachmentIds);
-    }
 }

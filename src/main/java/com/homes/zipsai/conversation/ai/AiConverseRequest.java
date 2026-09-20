@@ -14,11 +14,12 @@ import tools.jackson.databind.annotation.JsonNaming;
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record AiConverseRequest(
     Long buildingId,
-    ResidentContext residentContext,
-    Long conversationId,
-    TraceId traceId,
+    String roomNo,
+    String residentId,
+    String conversationId,
+    String traceId,
     AiRoute currentRoute,
-    AiConversationState conversationState,
+    AiComplaintState currentComplaintState,
     MessagePayload message,
     List<HistoryMessage> conversationHistory,
     ComplaintDraftPayload complaintDraft
@@ -26,46 +27,42 @@ public record AiConverseRequest(
 
     public static AiConverseRequest of(Room room, Conversation conversation, Message residentMessage,
                                        List<Message> history) {
-        AiComplaintDraft draft = conversation.currentDraft();
-        ComplaintDraftPayload draftPayload = null;
-        if (!draft.isEmpty()) {
-            draftPayload = new ComplaintDraftPayload(draft.location(), draft.symptom(), draft.occurredAt(), List.of());
-        }
         return new AiConverseRequest(
             room.getBuilding().getId(),
-            new ResidentContext(room.getId(), room.getResident().getId()),
-            conversation.getId(),
-            new TraceId(residentMessage.getId()),
+            room.getRoomNo(),
+            String.valueOf(room.getResident().getId()),
+            String.valueOf(conversation.getId()),
+            residentMessage.getTraceId(),
             conversation.getCurrentRoute(),
-            conversation.getConversationState(),
-            new MessagePayload(residentMessage.getId(), residentMessage.getContent(), List.of()),
+            conversation.getComplaintState(),
+            new MessagePayload(String.valueOf(residentMessage.getId()), residentMessage.getContent(), List.of()),
             history.stream().map(HistoryMessage::from).toList(),
-            draftPayload);
+            ComplaintDraftPayload.from(conversation.currentDraft()));
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-    public record ResidentContext(Long roomId, Long residentId) {
+    public record MessagePayload(String messageId, String text, List<String> imageUrls) {
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-    public record TraceId(Long residentMessageId) {
-    }
-
-    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-    public record MessagePayload(Long messageId, String text, List<String> imageUrls) {
-    }
-
-    public record HistoryMessage(AiTurnRole role, String content) {
+    public record HistoryMessage(String messageId, AiTurnRole role, String text, List<String> imageUrls) {
 
         static HistoryMessage from(Message message) {
             AiTurnRole role = message.getSenderType() == SenderType.RESIDENT ? AiTurnRole.USER : AiTurnRole.ASSISTANT;
-            return new HistoryMessage(role, message.getContent());
+            return new HistoryMessage(String.valueOf(message.getId()), role, message.getContent(), List.of());
         }
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record ComplaintDraftPayload(String location, String symptom, OffsetDateTime occurredAt,
                                         List<String> imageUrls) {
+
+        static ComplaintDraftPayload from(AiComplaintDraft draft) {
+            if (draft.isEmpty()) {
+                return null;
+            }
+            return new ComplaintDraftPayload(draft.location(), draft.symptom(), draft.occurredAt(), List.of());
+        }
 
         public AiComplaintDraft toDraft() {
             return new AiComplaintDraft(location, symptom, occurredAt);

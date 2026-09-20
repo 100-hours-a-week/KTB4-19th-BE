@@ -6,6 +6,7 @@ import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.MessageSourceResolvable;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -55,7 +56,7 @@ public class ApiExceptionHandler {
                 return bodyValidation(errors);
             }
             MethodParameter parameter = result.getMethodParameter();
-            for (var error : result.getResolvableErrors()) {
+            for (MessageSourceResolvable error : result.getResolvableErrors()) {
                 Map<String, String> violation = Map.of(
                         "field", parameter.getParameterName(),
                         "reason", error.getDefaultMessage());
