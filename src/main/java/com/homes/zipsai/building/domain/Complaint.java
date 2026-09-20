@@ -31,6 +31,8 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Complaint extends BaseTimeEntity {
 
+    public static final int URGENCY_THRESHOLD = 9;
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "complaint_id")
@@ -79,5 +81,12 @@ public class Complaint extends BaseTimeEntity {
         this.status = ComplaintStatus.PENDING;
         this.urgency = urgency;
         this.roomNo = roomNo;
+    }
+
+    public void changeStatus(ComplaintStatus status) {
+        this.status = status;
+        if (status == ComplaintStatus.DONE) {
+            this.resolvedAt = LocalDateTime.now();
+        }
     }
 }
