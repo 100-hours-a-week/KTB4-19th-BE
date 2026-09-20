@@ -22,6 +22,8 @@ import com.homes.zipsai.building.dto.response.ComplaintCreateResponse;
 import com.homes.zipsai.building.dto.response.ComplaintDetailResponse;
 import com.homes.zipsai.building.dto.response.ComplaintListResponse;
 import com.homes.zipsai.building.dto.response.ComplaintStatusUpdateResponse;
+import com.homes.zipsai.building.dto.response.ResidentComplaintDetailResponse;
+import com.homes.zipsai.building.dto.response.ResidentComplaintListResponse;
 import com.homes.zipsai.building.repository.BuildingRepository;
 import com.homes.zipsai.building.repository.ComplaintDetailRepository;
 import com.homes.zipsai.building.repository.ComplaintRepository;
@@ -112,6 +114,37 @@ public class ComplaintService {
         Page<Complaint> complaints = complaintRepository.findManagerComplaints(
             building.getId(), normalizedKeyword, statuses, urgentOnly, Complaint.URGENCY_THRESHOLD, pageable);
         return ComplaintListResponse.from(complaints);
+    }
+
+    @Transactional(readOnly = true)
+    public ResidentComplaintListResponse getResidentComplaints(
+            Long residentId,
+            String keyword,
+            List<String> statusValues,
+            int page,
+            int size
+    ) {
+        residentRoomService.getLivingRoom(residentId);
+        Pageable pageable = PageRequest.of(page, size, MANAGER_COMPLAINT_SORT);
+        Page<Complaint> complaints = complaintRepository.findResidentComplaints(
+            residentId, normalizeKeyword(keyword), normalizeStatuses(statusValues), pageable);
+        return ResidentComplaintListResponse.from(complaints);
+    }
+
+    @Transactional(readOnly = true)
+    public ResidentComplaintDetailResponse getResidentComplaint(Long residentId, Long complaintId) {
+        residentRoomService.getLivingRoom(residentId);
+        Complaint complaint = complaintRepository.findByIdAndDeletedAtIsNull(complaintId)
+            .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.COMPLAINT));
+        if (complaint.getBuilding().getDeletedAt() != null) {
+            throw new NotFoundException(NotFoundException.Resource.COMPLAINT);
+        }
+        if (!complaint.getUser().getId().equals(residentId)) {
+            throw new ForbiddenException();
+        }
+        ComplaintDetail detail = complaintDetailRepository.findById(complaintId)
+            .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.COMPLAINT));
+        return ResidentComplaintDetailResponse.from(complaint, detail);
     }
 
     private String normalizeKeyword(String keyword) {

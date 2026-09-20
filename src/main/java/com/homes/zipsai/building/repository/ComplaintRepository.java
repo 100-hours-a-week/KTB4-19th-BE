@@ -36,4 +36,20 @@ public interface ComplaintRepository extends JpaRepository<Complaint, Long> {
             @Param("urgentThreshold") int urgentThreshold,
             Pageable pageable
     );
+
+    @EntityGraph(attributePaths = {"building", "attachment"})
+    @Query("""
+            select c from Complaint c
+            where c.user.id = :residentId
+                and c.deletedAt is null
+                and c.building.deletedAt is null
+                and (:keyword is null or lower(c.title) like lower(concat('%', :keyword, '%')))
+                and c.status in :statuses
+            """)
+    Page<Complaint> findResidentComplaints(
+            @Param("residentId") Long residentId,
+            @Param("keyword") String keyword,
+            @Param("statuses") List<ComplaintStatus> statuses,
+            Pageable pageable
+    );
 }
