@@ -35,7 +35,7 @@ public final class UserInput {
     }
 
     public static void fields(JsonNode body, Set<String> allowed) {
-        if (body == null || !body.isObject() || body.size() == 0) {
+        if (body == null || !body.isObject() || body.isEmpty()) {
             throw missing("body");
         }
         for (String field : body.propertyNames()) {
@@ -53,13 +53,13 @@ public final class UserInput {
             }
             return null;
         }
-        if (!value.isString()) {
+        if (!value.isTextual()) {
             throw invalid(field, Reason.EXPECTED_STRING);
         }
-        if (required && value.stringValue().isBlank()) {
+        if (required && value.asText().isBlank()) {
             throw missing(field);
         }
-        return value.stringValue();
+        return value.asText();
     }
 
     public static String email(String value) {

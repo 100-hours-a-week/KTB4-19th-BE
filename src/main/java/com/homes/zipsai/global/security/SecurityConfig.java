@@ -1,11 +1,8 @@
 package com.homes.zipsai.global.security;
 
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
 import javax.crypto.spec.SecretKeySpec;
-
-import jakarta.servlet.http.HttpServletResponse;
 
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -23,14 +20,10 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
-import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-import com.homes.zipsai.global.exception.ApiException;
 import com.homes.zipsai.global.exception.ForbiddenException;
 import com.homes.zipsai.global.exception.UnauthorizedException;
-import com.homes.zipsai.global.response.ApiResponse;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 
 import tools.jackson.databind.ObjectMapper;
@@ -67,13 +60,15 @@ public class SecurityConfig {
             HttpSecurity http,
             AuthProperties properties,
             ObjectMapper json,
-            AccessTokenAuthenticationConverter tokenConverter
+            AccessTokenAuthenticationConverter accessTokenAuthenticationConverter,
+            CorsConfigurationSource corsConfigurationSource,
+            SecurityErrorResponseWriter errorResponseWriter
     ) throws Exception {
         http.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .csrf(csrf -> csrf.disable())
-                .cors(cors -> cors.configurationSource(cors(properties)))
-                .formLogin(formLogin -> formLogin.disable())
-                .httpBasic(httpBasic -> httpBasic.disable())
+                .cors(cors -> cors.configurationSource(corsConfigurationSource))
+                .formLogin(form -> form.disable())
+                .httpBasic(basic -> basic.disable())
                 .logout(logout -> logout.disable())
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
@@ -93,15 +88,16 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/managers/**").hasRole("MANAGER")
                         .requestMatchers("/api/v1/residents/**").hasRole("RESIDENT")
                         .anyRequest().authenticated())
-                .exceptionHandling(exceptions -> exceptions
-                        .authenticationEntryPoint((request, response, exception) ->
-                                write(response, json, new UnauthorizedException()))
-                        .accessDeniedHandler((request, response, exception) ->
-                                write(response, json, new ForbiddenException())))
+                        .exceptionHandling(exception -> exception
+                        .authenticationEntryPoint((request, response, cause) ->
+                                errorResponseWriter.write(response, new UnauthorizedException()))
+                        .accessDeniedHandler((request, response, cause) ->
+                                errorResponseWriter.write(response, new ForbiddenException())))
                 .oauth2ResourceServer(resourceServer -> resourceServer
-                        .authenticationEntryPoint((request, response, exception) ->
-                                write(response, json, new UnauthorizedException()))
-                        .jwt(jwt -> jwt.jwtAuthenticationConverter(tokenConverter)))
+                        .authenticationEntryPoint((request, response, cause) ->
+                                errorResponseWriter.write(response, new UnauthorizedException()))
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(
+                                accessTokenAuthenticationConverter)))
                 .addFilterBefore(
                         new RequestGuard(properties, json),
                         UsernamePasswordAuthenticationFilter.class
@@ -109,23 +105,4 @@ public class SecurityConfig {
         return http.build();
     }
 
-    private CorsConfigurationSource cors(AuthProperties properties) {
-        CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(properties.allowedOrigins());
-        configuration.setAllowCredentials(true);
-        configuration.setAllowedMethods(List.of("GET", "POST", "PATCH", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
-        configuration.setExposedHeaders(List.of("Retry-After"));
-
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", configuration);
-        return source;
-    }
-
-    private void write(HttpServletResponse response, ObjectMapper json, ApiException exception)
-            throws IOException {
-        response.setStatus(exception.status);
-        response.setContentType("application/json;charset=UTF-8");
-        response.getWriter().write(json.writeValueAsString(ApiResponse.error(exception)));
-    }
 }
