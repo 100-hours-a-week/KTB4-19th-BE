@@ -28,6 +28,10 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
       APP_AI_CLIENT: stub
       TZ: Asia/Seoul
+      AWS_REGION: ap-northeast-2
+      S3_UPLOAD_BUCKET: zipsai-dev-uploads
+      APP_STORAGE_AWS_REGION: ap-northeast-2
+      APP_STORAGE_UPLOAD_BUCKET: zipsai-dev-uploads
       AWS_SHARED_CREDENTIALS_FILE: /home/app/.aws/credentials
       AWS_CONFIG_FILE: /home/app/.aws/config
     ports:
