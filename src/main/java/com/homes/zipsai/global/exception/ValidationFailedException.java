@@ -25,7 +25,9 @@ public class ValidationFailedException extends UnprocessableEntityException {
         BUILDING_NAME_TOO_LONG("건물명은 20자 이하여야 합니다."),
         ROAD_ADDRESS_TOO_LONG("주소는 200자 이하여야 합니다."),
         EMPTY_ROOM_NO("호실 번호는 비워둘 수 없습니다."),
-        ROOM_NO_TOO_LONG("호실 번호는 5자 이하여야 합니다.");
+        ROOM_NO_TOO_LONG("호실 번호는 5자 이하여야 합니다."),
+        INVALID_FILE_TYPE("허용되지 않은 파일 형식입니다."),
+        ORIGINAL_NAME_TOO_LONG("원본 파일 이름은 255자 이하여야 합니다.");
 
         private final String message;
 
