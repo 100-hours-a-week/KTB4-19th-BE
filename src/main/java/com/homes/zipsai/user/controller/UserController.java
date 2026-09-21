@@ -1,6 +1,7 @@
 package com.homes.zipsai.user.controller;
 
-import org.springframework.http.ResponseEntity;
+import com.homes.zipsai.user.repository.UserRepository;
+import com.homes.zipsai.user.validator.UserInput;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -11,11 +12,11 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.homes.zipsai.global.response.ApiResponse;
 import com.homes.zipsai.global.security.AuthPrincipal;
-import com.homes.zipsai.user.dto.EmailAvailabilityResponse;
 import com.homes.zipsai.user.dto.UserPatchRequest;
 import com.homes.zipsai.user.dto.UserPatchResponse;
-import com.homes.zipsai.user.dto.UserProfileResponse;
 import com.homes.zipsai.user.service.UserService;
+
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/users")
@@ -49,7 +50,7 @@ public class UserController {
 
     // V3_P2: NONE에서 최초 한 번만 역할을 선택한다.
     @PatchMapping("/me")
-    public ApiResponse<Map<String, Object>> patch(
+    public ApiResponse<UserPatchResponse> patch(
             @AuthenticationPrincipal AuthPrincipal principal,
             @RequestBody UserPatchRequest request
     ) {

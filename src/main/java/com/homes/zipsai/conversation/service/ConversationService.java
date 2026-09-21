@@ -128,7 +128,7 @@ public class ConversationService {
     @Transactional
     public MessageResponse saveAiReply(PendingAiReply pendingReply, AiConverseResponse aiResponse) {
         Conversation conversation = conversationRepository.getReferenceById(pendingReply.conversation().getId());
-        conversation.applyAiResponse(aiResponse.route(), aiResponse.nextState(), aiResponse.complaintDraft());
+        conversation.applyAiResponse(aiResponse);
         MessageType messageType = conversation.isReadyToConfirmComplaint()
             ? MessageType.SUMMARY_CARD
             : MessageType.TEXT;
