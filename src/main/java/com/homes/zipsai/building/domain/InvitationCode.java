@@ -1,0 +1,89 @@
+package com.homes.zipsai.building.domain;
+
+import java.time.LocalDateTime;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
+
+import com.homes.zipsai.global.domain.BaseTimeEntity;
+import com.homes.zipsai.global.exception.ConflictException;
+
+import lombok.AccessLevel;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
+@Entity
+@Table(
+    name = "Invitation_codes",
+    uniqueConstraints = @UniqueConstraint(name = "uk_invitation_codes_code", columnNames = "code")
+)
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class InvitationCode extends BaseTimeEntity {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "code_id")
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "room_id", nullable = false)
+    private Room room;
+
+    @Column(name = "code", nullable = false, columnDefinition = "CHAR(6)")
+    private String code;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private InvitationCodeStatus status;
+
+    @Column(name = "expires_at", nullable = false)
+    private LocalDateTime expiresAt;
+
+    @Builder
+    public InvitationCode(Room room, String code, LocalDateTime expiresAt) {
+        this.room = room;
+        this.code = code;
+        this.status = InvitationCodeStatus.ACTIVE;
+        this.expiresAt = expiresAt;
+    }
+
+    public boolean isExpired(LocalDateTime now) {
+        return status == InvitationCodeStatus.ACTIVE && !now.isBefore(expiresAt);
+    }
+
+    public boolean expireIfExpired(LocalDateTime now) {
+        if (!isExpired(now)) {
+            return false;
+        }
+        status = InvitationCodeStatus.EXPIRED;
+        return true;
+    }
+
+    public void expire() {
+        if (status == InvitationCodeStatus.ACTIVE) {
+            status = InvitationCodeStatus.EXPIRED;
+        }
+    }
+
+    public void use() {
+        if (status == InvitationCodeStatus.USED) {
+            throw new ConflictException(ConflictException.Reason.INVITATION_CODE_ALREADY_USED);
+        }
+        if (status == InvitationCodeStatus.EXPIRED) {
+            throw new ConflictException(ConflictException.Reason.INVITATION_CODE_EXPIRED);
+        }
+        status = InvitationCodeStatus.USED;
+    }
+}
