@@ -38,12 +38,8 @@ public class RoomService {
     @Transactional
     public RoomBulkCreateResponse create(
             AuthPrincipal principal,
-            long buildingId,
             RoomBulkCreateRequest request
     ) {
-        if (buildingId < 1) {
-            throw new ValidationFailedException("buildingId", Reason.INVALID_ID);
-        }
         if (request == null || request.roomNos() == null || request.roomNos().isEmpty()) {
             throw new MissingFieldException("roomNos");
         }
@@ -54,16 +50,12 @@ public class RoomService {
                 .toList();
         validateRoomNumbers(roomNos);
 
-        Building building = buildings.findById(buildingId)
+        Building building = buildings.findByManager_IdAndDeletedAtIsNull(principal.userId())
                 .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.BUILDING));
-        // URL의 건물 ID만으로 소유권을 인정하지 않고 JWT principal의 관리자 ID와 대조합니다.
-        if (!building.getManager().getId().equals(principal.userId())) {
-            throw new ForbiddenException();
-        }
 
         // 요청 내부 중복과 DB에 이미 존재하는 호실을 먼저 찾아 부분 등록을 막습니다.
         if (new HashSet<>(roomNos).size() != roomNos.size()
-                || rooms.existsByBuilding_IdAndRoomNoIn(buildingId, roomNos)) {
+                || rooms.existsByBuilding_IdAndRoomNoIn(building.getId(), roomNos)) {
             throw alreadyExists();
         }
 
@@ -75,7 +67,7 @@ public class RoomService {
             List<RoomResponse> created = rooms.saveAllAndFlush(newRooms).stream()
                     .map(room -> new RoomResponse(room.getId(), room.getRoomNo(), room.getStatus().name()))
                     .toList();
-            return new RoomBulkCreateResponse(buildingId, created.size(), created);
+            return new RoomBulkCreateResponse(building.getId(), created.size(), created);
         } catch (DataIntegrityViolationException exception) {
             // 사전 중복 조회 직후 다른 요청이 같은 호실을 만들었을 때도 공통 충돌 코드로 바꿉니다.
             throw alreadyExists();

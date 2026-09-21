@@ -24,14 +24,13 @@ public class RoomController {
         this.roomService = roomService;
     }
 
-    @PostMapping("/buildings/{buildingId}/rooms")
+    @PostMapping("/building/rooms")
     public ResponseEntity<ApiResponse<RoomBulkCreateResponse>> create(
             @AuthenticationPrincipal AuthPrincipal principal,
-            @PathVariable long buildingId,
             @RequestBody RoomBulkCreateRequest request
     ) {
         return ResponseEntity.status(201)
-                .body(ApiResponse.data(roomService.create(principal, buildingId, request)));
+                .body(ApiResponse.data(roomService.create(principal, request)));
     }
 
     @DeleteMapping("/rooms/{roomId}/resident")
