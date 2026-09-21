@@ -2,6 +2,7 @@ package com.homes.zipsai.auth.service;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Base64;
@@ -19,6 +20,7 @@ import com.homes.zipsai.user.domain.User;
 
 @Service
 public class TokenService {
+
     private final JwtEncoder encoder;
     private final AuthProperties properties;
     private final SecureRandom random = new SecureRandom();
@@ -28,15 +30,13 @@ public class TokenService {
         this.properties = properties;
     }
 
-    public String access(User user, String sessionId) {
+    public String access(User user) {
         Instant now = Instant.now();
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuer("zipsai")
                 .subject(user.getId().toString())
                 .issuedAt(now)
                 .expiresAt(now.plus(properties.accessTtl()))
-                .claim("sid", sessionId)
-                .claim("ver", user.getAuthVersion())
                 .claim("role", user.getRole().name())
                 .build();
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
@@ -44,16 +44,17 @@ public class TokenService {
     }
 
     public String refresh() {
-        byte[] bytes = new byte[32]; random.nextBytes(bytes);
+        byte[] bytes = new byte[32];
+        random.nextBytes(bytes);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
     public static String hash(String value) {
         try {
-            byte[] hash = MessageDigest.getInstance("SHA-256")
+            byte[] digest = MessageDigest.getInstance("SHA-256")
                     .digest(value.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(hash);
-        } catch (java.security.NoSuchAlgorithmException exception) {
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException(exception);
         }
     }
