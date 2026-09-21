@@ -15,6 +15,7 @@ import com.homes.zipsai.user.dto.EmailAvailabilityResponse;
 import com.homes.zipsai.user.dto.UserPatchRequest;
 import com.homes.zipsai.user.dto.UserPatchResponse;
 import com.homes.zipsai.user.dto.UserProfileResponse;
+import com.homes.zipsai.user.dto.OnboardingStatusResponse;
 import com.homes.zipsai.user.service.UserService;
 
 import lombok.RequiredArgsConstructor;
@@ -38,6 +39,13 @@ public class UserController {
             @AuthenticationPrincipal AuthPrincipal principal
     ) {
         return ResponseEntity.ok(ApiResponse.data(service.me(principal.userId())));
+    }
+
+    @GetMapping("/me/onboarding-status")
+    public ResponseEntity<ApiResponse<OnboardingStatusResponse>> onboardingStatus(
+            @AuthenticationPrincipal AuthPrincipal principal
+    ) {
+        return ResponseEntity.ok(ApiResponse.data(service.onboardingStatus(principal)));
     }
 
     // V3_P2: NONE에서 최초 한 번만 역할을 선택한다.

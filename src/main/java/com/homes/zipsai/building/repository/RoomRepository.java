@@ -37,6 +37,8 @@ public interface RoomRepository extends JpaRepository<Room, Long> {
             """)
     boolean existsLivingByResidentId(@Param("residentId") Long residentId);
 
+    boolean existsByBuilding_IdAndDeletedAtIsNull(Long buildingId);
+
     @Query("""
             select r from Room r
             join fetch r.building b
