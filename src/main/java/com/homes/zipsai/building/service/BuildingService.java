@@ -1,15 +1,32 @@
 package com.homes.zipsai.building.service;
 
+import java.time.DayOfWeek;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.temporal.TemporalAdjusters;
+import java.util.List;
+
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.homes.zipsai.building.domain.Building;
+import com.homes.zipsai.building.domain.Room;
+import com.homes.zipsai.building.domain.RoomStatus;
 import com.homes.zipsai.building.dto.BuildingRegistrationRequest;
 import com.homes.zipsai.building.dto.BuildingResponse;
+import com.homes.zipsai.building.dto.response.ManagerBuildingDetailResponse;
+import com.homes.zipsai.building.dto.response.ManagerComplaintSummaryResponse;
+import com.homes.zipsai.building.dto.response.ManagerRoomItemResponse;
+import com.homes.zipsai.building.dto.response.ManagerRoomListResponse;
+import com.homes.zipsai.building.dto.response.ManagerRoomSummaryResponse;
 import com.homes.zipsai.building.repository.BuildingRepository;
+import com.homes.zipsai.building.repository.ComplaintRepository;
+import com.homes.zipsai.building.repository.RoomRepository;
 import com.homes.zipsai.global.exception.ConflictException;
+import com.homes.zipsai.global.exception.ForbiddenException;
 import com.homes.zipsai.global.exception.MissingFieldException;
+import com.homes.zipsai.global.exception.NotFoundException;
 import com.homes.zipsai.global.exception.UnauthorizedException;
 import com.homes.zipsai.global.exception.ValidationFailedException;
 import com.homes.zipsai.global.exception.ValidationFailedException.Reason;
@@ -22,12 +39,22 @@ public class BuildingService {
     // DB 컬럼 길이와 동일한 제한을 두어 저장 단계에서 길이 오류가 나지 않게 합니다.
     private static final int ROAD_ADDRESS_MAX_LENGTH = 200;
     private static final int BUILDING_NAME_MAX_LENGTH = 20;
+    private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
 
     private final BuildingRepository buildings;
+    private final ComplaintRepository complaints;
+    private final RoomRepository rooms;
     private final UserRepository users;
 
-    public BuildingService(BuildingRepository buildings, UserRepository users) {
+    public BuildingService(
+            BuildingRepository buildings,
+            ComplaintRepository complaints,
+            RoomRepository rooms,
+            UserRepository users
+    ) {
         this.buildings = buildings;
+        this.complaints = complaints;
+        this.rooms = rooms;
         this.users = users;
     }
 
@@ -74,6 +101,87 @@ public class BuildingService {
             }
             throw exception;
         }
+    }
+
+    @Transactional(readOnly = true)
+    public ManagerBuildingDetailResponse getBuilding(Long managerId, long buildingId) {
+        Building building = ownedBuilding(managerId, buildingId);
+        return new ManagerBuildingDetailResponse(
+                building.getId(),
+                building.getBuildingName(),
+                building.getRoadAddress(),
+                rooms.countByBuilding_IdAndDeletedAtIsNull(building.getId()),
+                building.getUpdatedAt());
+    }
+
+    @Transactional(readOnly = true)
+    public ManagerRoomSummaryResponse getRoomSummary(Long managerId, long buildingId) {
+        Building building = ownedBuilding(managerId, buildingId);
+        long livingCount = rooms.countByBuilding_IdAndStatusAndDeletedAtIsNull(building.getId(), RoomStatus.LIVING);
+        long invitedCount = rooms.countByBuilding_IdAndStatusAndDeletedAtIsNull(building.getId(), RoomStatus.INVITED);
+        long emptyCount = rooms.countByBuilding_IdAndStatusAndDeletedAtIsNull(building.getId(), RoomStatus.EMPTY);
+        return new ManagerRoomSummaryResponse(
+                livingCount,
+                invitedCount,
+                emptyCount,
+                livingCount + invitedCount + emptyCount);
+    }
+
+    @Transactional(readOnly = true)
+    public ManagerRoomListResponse getRooms(Long managerId, long buildingId) {
+        Building building = ownedBuilding(managerId, buildingId);
+        List<ManagerRoomItemResponse> roomItems = activeRooms(building).stream()
+                .map(this::roomItem)
+                .toList();
+        return new ManagerRoomListResponse(
+                building.getId(),
+                building.getBuildingName(),
+                roomItems.size(),
+                roomItems);
+    }
+
+    @Transactional(readOnly = true)
+    public ManagerComplaintSummaryResponse getComplaintSummary(Long managerId, long buildingId) {
+        Building building = ownedBuilding(managerId, buildingId);
+        LocalDateTime now = LocalDateTime.now(SEOUL);
+        LocalDateTime weekStart = now.toLocalDate()
+                .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+                .atStartOfDay();
+        return complaints.findManagerComplaintSummary(building.getId(), weekStart, now);
+    }
+
+    private Building ownedBuilding(Long managerId, long buildingId) {
+        if (buildingId <= 0) {
+            throw new ValidationFailedException("buildingId", Reason.INVALID_ID);
+        }
+        Building building = buildings.findById(buildingId)
+                .filter(candidate -> candidate.getDeletedAt() == null)
+                .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.BUILDING));
+        if (!building.getManager().getId().equals(managerId)) {
+            throw new ForbiddenException();
+        }
+        return building;
+    }
+
+    private List<Room> activeRooms(Building building) {
+        return rooms.findAllByBuilding_IdAndDeletedAtIsNull(building.getId());
+    }
+
+    private ManagerRoomItemResponse roomItem(Room room) {
+        return new ManagerRoomItemResponse(
+                room.getId(),
+                room.getRoomNo(),
+                room.getStatus().name(),
+                roomStatusLabel(room.getStatus()),
+                room.getResident() == null ? null : room.getResident().getUserName());
+    }
+
+    private String roomStatusLabel(RoomStatus status) {
+        return switch (status) {
+            case LIVING -> "입주";
+            case INVITED -> "초대됨";
+            case EMPTY -> "공실";
+        };
     }
 
     // 같은 매니저의 두 번째 등록은 공통 충돌 코드로 응답합니다.

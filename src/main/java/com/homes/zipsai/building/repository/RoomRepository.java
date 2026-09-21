@@ -1,6 +1,7 @@
 package com.homes.zipsai.building.repository;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.EntityGraph;
@@ -12,6 +13,13 @@ import com.homes.zipsai.building.domain.Room;
 import com.homes.zipsai.building.domain.RoomStatus;
 
 public interface RoomRepository extends JpaRepository<Room, Long> {
+
+    @EntityGraph(attributePaths = "resident")
+    List<Room> findAllByBuilding_IdAndDeletedAtIsNull(Long buildingId);
+
+    long countByBuilding_IdAndDeletedAtIsNull(Long buildingId);
+
+    long countByBuilding_IdAndStatusAndDeletedAtIsNull(Long buildingId, RoomStatus status);
 
     // 요청한 번호 중 건물에 이미 등록된 호실이 하나라도 있는지 확인합니다.
     boolean existsByBuilding_IdAndRoomNoIn(Long buildingId, Collection<String> roomNos);
