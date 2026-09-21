@@ -142,14 +142,22 @@ public class UserService {
                     .filter(agreement -> updates.containsKey(agreement.termsType()))
                     .toList();
         }
+        UserRole updatedRole = request.userRole() == null ? null : user.getRole();
+        String updatedUserName = request.userName() == null ? null : user.getUserName();
+        String updatedPhone = request.phone() == null ? null : user.getPhone();
+        String accessToken = request.userRole() == null ? null : tokens.access(user);
+        String tokenType = request.userRole() == null ? null : "Bearer";
+        List<UserAgreementResponse> updatedAgreements = request.agreements() == null ? null
+                : agreementViews(user).stream()
+                .filter(agreement -> updates.containsKey(agreement.get("termsType")))
+                .map(agreement -> new UserAgreementResponse(
+                        (Long) agreement.get("agreementId"),
+                        (TermsType) agreement.get("termsType"),
+                        (Boolean) agreement.get("isAgreed"),
+                        (java.time.LocalDateTime) agreement.get("agreedAt")))
+                .toList();
         return new UserPatchResponse(
-                user.getId(),
-                updatedRole,
-                updatedUserName,
-                updatedPhone,
-                updatedAgreements,
-                accessToken,
-                tokenType
-        );
+                user.getId(), updatedRole, updatedUserName, updatedPhone,
+                updatedAgreements, accessToken, tokenType);
     }
 }
