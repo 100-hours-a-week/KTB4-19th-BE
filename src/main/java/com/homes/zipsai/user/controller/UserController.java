@@ -17,42 +17,35 @@ import com.homes.zipsai.user.dto.UserPatchResponse;
 import com.homes.zipsai.user.dto.UserProfileResponse;
 import com.homes.zipsai.user.service.UserService;
 
+import lombok.RequiredArgsConstructor;
+
 @RestController
 @RequestMapping("/api/v1/users")
+@RequiredArgsConstructor
 public class UserController {
 
-    private final UserRepository users;
     private final UserService service;
 
-    public UserController(UserRepository users, UserService service) {
-        this.users = users;
-        this.service = service;
-    }
-
     @GetMapping("/email-availability")
-    public ApiResponse<Map<String, Object>> available(
+    public ResponseEntity<ApiResponse<EmailAvailabilityResponse>> available(
             @RequestParam(required = false) String email
     ) {
-        String normalized = UserInput.email(email);
-        return ApiResponse.data(Map.of(
-                "email", normalized,
-                "isAvailable", !users.existsByEmail(normalized)
-        ));
+        return ResponseEntity.ok(ApiResponse.data(service.checkEmailAvailability(email)));
     }
 
     @GetMapping("/me")
-    public ApiResponse<Map<String, Object>> me(
+    public ResponseEntity<ApiResponse<UserProfileResponse>> me(
             @AuthenticationPrincipal AuthPrincipal principal
     ) {
-        return ApiResponse.data(service.me(principal.userId()));
+        return ResponseEntity.ok(ApiResponse.data(service.me(principal.userId())));
     }
 
     // V3_P2: NONE에서 최초 한 번만 역할을 선택한다.
     @PatchMapping("/me")
-    public ApiResponse<Map<String, Object>> patch(
+    public ResponseEntity<ApiResponse<UserPatchResponse>> patch(
             @AuthenticationPrincipal AuthPrincipal principal,
             @RequestBody UserPatchRequest request
     ) {
-        return ApiResponse.data(service.patch(principal, request));
+        return ResponseEntity.ok(ApiResponse.data(service.patch(principal, request)));
     }
 }

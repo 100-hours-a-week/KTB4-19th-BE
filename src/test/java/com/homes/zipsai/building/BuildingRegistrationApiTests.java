@@ -104,7 +104,7 @@ class BuildingRegistrationApiTests {
                         .content("""
                                 {"roadAddress":"%s"}
                                 """.formatted("가".repeat(201))), ip))
-                .andExpect(status().is(422))
+                .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
 
         mvc.perform(withIp(post("/api/v1/managers/me/buildings")
@@ -113,7 +113,7 @@ class BuildingRegistrationApiTests {
                         .content("""
                                 {"buildingName":"%s","roadAddress":"서울 강남구 역삼동 123-4"}
                                 """.formatted("가".repeat(21))), ip))
-                .andExpect(status().is(422))
+                .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
     }
 
@@ -172,7 +172,7 @@ class BuildingRegistrationApiTests {
                 .andExpect(jsonPath("$.error.code").value("MISSING_REQUIRED_FIELD"));
 
         mvc.perform(withIp(roomRequest(buildingId, token, "123456"), ip))
-                .andExpect(status().is(422))
+                .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
     }
 
@@ -271,7 +271,7 @@ class BuildingRegistrationApiTests {
         return json.readTree(result.getResponse().getContentAsString())
                 .path("data")
                 .path("accessToken")
-                .stringValue();
+                .asText();
     }
 
     private String nextRemoteIp() {

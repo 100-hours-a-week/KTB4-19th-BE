@@ -128,10 +128,11 @@ public class ConversationService {
     @Transactional
     public MessageResponse saveAiReply(PendingAiReply pendingReply, AiConverseResponse aiResponse) {
         Conversation conversation = conversationRepository.getReferenceById(pendingReply.conversation().getId());
-        conversation.applyAiResponse(aiResponse.route(), aiResponse.nextState(), aiResponse.complaintDraft());
-        MessageType messageType = conversation.isReadyToConfirmComplaint()
-            ? MessageType.SUMMARY_CARD
-            : MessageType.TEXT;
+        conversation.applyAiResponse(aiResponse);
+        MessageType messageType = MessageType.TEXT;
+        if (conversation.isReadyToConfirmComplaint()) {
+            messageType = MessageType.SUMMARY_CARD;
+        }
         String reply = TextUtils.truncate(aiResponse.reply(), Message.CONTENT_MAX_LENGTH);
         String traceId = pendingReply.aiRequest().traceId();
         Message assistantMessage = saveMessage(conversation, reply, SenderType.ASSISTANT, messageType, traceId);

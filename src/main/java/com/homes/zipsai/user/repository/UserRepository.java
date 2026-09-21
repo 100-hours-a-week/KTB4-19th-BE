@@ -12,7 +12,6 @@ import org.springframework.data.repository.query.Param;
 import com.homes.zipsai.user.domain.User;
 
 public interface UserRepository extends JpaRepository<User, Long> {
-
     Optional<User> findByEmail(String email);
 
     boolean existsByEmail(String email);

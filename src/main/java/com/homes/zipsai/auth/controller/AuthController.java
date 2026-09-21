@@ -34,13 +34,14 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 @RequestMapping("/api/v1/auth")
 public class AuthController {
-
     private final AuthService authService;
     private final AuthProperties properties;
 
     // V3_P1_1: 가입 후 로그인 화면으로 이동한다.
     @PostMapping("/signup")
-    public ResponseEntity<ApiResponse<SignupResponse>> signup(@RequestBody SignupRequest request) {
+    public ResponseEntity<ApiResponse<SignupResponse>> signup(
+            @RequestBody SignupRequest request
+    ) {
         SignupResponse response = new SignupResponse(authService.signup(request));
         return ResponseEntity.status(201).body(ApiResponse.data(response));
     }
@@ -59,27 +60,24 @@ public class AuthController {
             HttpServletResponse response
     ) {
         AuthService.Tokens tokens = authService.reissue(refresh);
-        long maxAge = Math.max(
-                0,
-                Duration.between(Instant.now(), tokens.expiresAt()).toSeconds()
+        cookie(
+                response,
+                tokens.refreshToken(),
+                Math.max(0, Duration.between(Instant.now(), tokens.expiresAt()).toSeconds())
         );
-        cookie(response, tokens.refreshToken(), maxAge);
-
         Map<String, Object> data = tokens.data();
-        ReissueResponse reissueResponse = new ReissueResponse(
+        return ApiResponse.data(new ReissueResponse(
                 (String) data.get("accessToken"),
                 (String) data.get("tokenType")
-        );
-        return ApiResponse.data(reissueResponse);
+        ));
     }
 
     @PostMapping("/logout")
     public ApiResponse<Void> logout(
             @AuthenticationPrincipal AuthPrincipal principal,
-            @CookieValue(name = "refreshToken", required = false) String refresh,
             HttpServletResponse response
     ) {
-        authService.logout(principal, refresh);
+        authService.logout(principal);
         cookie(response, "", 0);
         return ApiResponse.data(null);
     }
@@ -90,29 +88,29 @@ public class AuthController {
         }
 
         return new UserResponse(
-                (Long) user.get("userId"),
-                (String) user.get("email"),
-                (UserRole) user.get("userRole"),
-                (String) user.get("userName"),
-                (String) user.get("phone")
+            (Long) user.get("userId"),
+            (String) user.get("email"),
+            (UserRole) user.get("userRole"),
+            (String) user.get("userName"),
+            (String) user.get("phone")
         );
     }
 
     private ApiResponse<LoginResponse> result(AuthService.Tokens tokens, HttpServletResponse response) {
-        long maxAge = Math.max(
-                0,
-                Duration.between(Instant.now(), tokens.expiresAt()).toSeconds()
+        cookie(
+                response,
+                tokens.refreshToken(),
+                Math.max(0, Duration.between(Instant.now(), tokens.expiresAt()).toSeconds())
         );
-        cookie(response, tokens.refreshToken(), maxAge);
-
         Map<String, Object> data = tokens.data();
+
         UserResponse user = toUserResponse(data.get("user"));
-        LoginResponse loginResponse = new LoginResponse(
+
+        return ApiResponse.data(new LoginResponse(
                 (String) data.get("accessToken"),
                 (String) data.get("tokenType"),
                 user
-        );
-        return ApiResponse.data(loginResponse);
+        ));
     }
 
     private void cookie(HttpServletResponse response, String value, long age) {

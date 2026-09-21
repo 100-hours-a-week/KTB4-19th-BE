@@ -11,26 +11,14 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-@Entity
-@Table(name = "Refresh_sessions")
-@Getter
+@Entity @Table(name = "Refresh_sessions") @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class RefreshSession {
-    @Id
-    @Column(name = "session_id", length = 36)
-    private String id;
-
-    @Column(name = "user_id", nullable = false)
-    private Long userId;
-
-    @Column(name = "token_hash", nullable = false, length = 64, unique = true)
-    private String tokenHash;
-
-    @Column(name = "expires_at", nullable = false)
-    private Instant expiresAt;
-
-    @Column(nullable = false)
-    private boolean revoked;
+    @Id @Column(name = "session_id", length = 36) private String id;
+    @Column(name = "user_id", nullable = false) private Long userId;
+    @Column(name = "token_hash", nullable = false, length = 64, unique = true) private String tokenHash;
+    @Column(name = "expires_at", nullable = false) private Instant expiresAt;
+    @Column(nullable = false) private boolean revoked;
 
     public RefreshSession(String id, Long userId, String hash, Instant expiresAt) {
         this.id = id;

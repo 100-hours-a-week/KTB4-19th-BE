@@ -56,7 +56,7 @@ public class User extends BaseTimeEntity {
     @Column(name = "user_status", nullable = false, length = 10)
     private UserStatus status;
 
-    // 이전 토큰 버전 검증을 위한 컬럼으로, 현재 stateless access-token 인증에서는 조회하지 않는다.
+    // 역할 변경 시 증가시켜 기존 access token을 무효화한다.
     @Column(name = "auth_version", nullable = false)
     private long authVersion;
 
@@ -75,6 +75,7 @@ public class User extends BaseTimeEntity {
 
     public void selectRole(UserRole role) {
         this.role = role;
+        this.authVersion++;
     }
 
     public void changeUserName(String userName) {

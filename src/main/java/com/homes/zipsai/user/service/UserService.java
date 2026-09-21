@@ -30,7 +30,6 @@ import com.homes.zipsai.user.validator.UserInput;
 
 @Service
 public class UserService {
-
     private final UserRepository users;
     private final TokenService tokens;
     private final TermsRepository terms;
@@ -50,38 +49,45 @@ public class UserService {
     }
 
     @Transactional(readOnly = true)
-    public Map<String, Object> me(Long id) {
+    public EmailAvailabilityResponse checkEmailAvailability(String email) {
+        String normalizedEmail = UserInput.email(email);
+        return new EmailAvailabilityResponse(
+                normalizedEmail,
+                !users.existsByEmail(normalizedEmail)
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public UserProfileResponse me(Long id) {
         User user = active(id);
-        Map<String, Object> data = profile(user);
-        data.put("email", user.getEmail());
-        data.put("agreements", agreementViews(user));
-        return data;
+        return new UserProfileResponse(
+                user.getId(),
+                user.getEmail(),
+                user.getRole(),
+                user.getUserName(),
+                user.getPhone(),
+                agreementViews(user)
+        );
     }
 
     public static Map<String, Object> profile(User user) {
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("userId", user.getId());
-        data.put("userRole", user.getRole());
-        data.put("userName", user.getUserName());
-        data.put("phone", user.getPhone());
-        return data;
+        data.put("userId", user.getId()); data.put("userRole", user.getRole());
+        data.put("userName", user.getUserName()); data.put("phone", user.getPhone()); return data;
     }
 
-    public static List<Map<String, Object>> agreementViews(User user) {
+    public static List<UserAgreementResponse> agreementViews(User user) {
         Map<TermsType, UserAgreement> latest = new EnumMap<>(TermsType.class);
         user.getAgreements().stream()
                 .sorted(Comparator.comparing(UserAgreement::getId))
                 .forEach(agreement -> latest.put(agreement.getTermsType(), agreement));
-
         return latest.values().stream()
-                .map(agreement -> {
-                    Map<String, Object> view = new LinkedHashMap<>();
-                    view.put("agreementId", agreement.getId());
-                    view.put("termsType", agreement.getTermsType());
-                    view.put("isAgreed", agreement.isAgreed());
-                    view.put("agreedAt", agreement.getAgreedAt());
-                    return view;
-                })
+                .map(agreement -> new UserAgreementResponse(
+                        agreement.getId(),
+                        agreement.getTermsType(),
+                        agreement.isAgreed(),
+                        agreement.getAgreedAt()
+                ))
                 .toList();
     }
 
@@ -91,9 +97,12 @@ public class UserService {
         if (user.getStatus() != UserStatus.ACTIVE) {
             throw new UnauthorizedException();
         }
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("userId", user.getId());
+        UserRole updatedRole = null;
+        String updatedUserName = null;
+        String updatedPhone = null;
+        List<UserAgreementResponse> updatedAgreements = null;
+        String accessToken = null;
+        String tokenType = null;
         if (request.userRole() != null) {
             UserRole role = request.userRole();
             if (role == UserRole.NONE) {
@@ -105,33 +114,33 @@ public class UserService {
             if (user.getRole() != role) {
                 user.selectRole(role);
             }
-            result.put("userRole", role);
-            result.put("accessToken", tokens.access(user));
-            result.put("tokenType", "Bearer");
+            updatedRole = role;
+            accessToken = tokens.access(user, principal.sessionId());
+            tokenType = "Bearer";
         }
         if (request.userName() != null) {
             user.changeUserName(UserInput.name(request.userName()));
-            result.put("userName", user.getUserName());
+            updatedUserName = user.getUserName();
         }
         if (request.phone() != null) {
             user.changePhone(UserInput.phone(request.phone()));
-            result.put("phone", user.getPhone());
+            updatedPhone = user.getPhone();
         }
-
         Map<TermsType, Boolean> updates = UserInput.agreements(request.agreements(), false);
         if (request.agreements() != null) {
             for (var entry : updates.entrySet()) {
-                boolean unchanged = agreementViews(user).stream()
-                        .anyMatch(agreement -> agreement.get("termsType") == entry.getKey()
-                                && agreement.get("isAgreed").equals(entry.getValue()));
+                boolean unchanged = agreementViews(user).stream().anyMatch(agreement ->
+                        agreement.termsType() == entry.getKey()
+                                && agreement.isAgreed() == entry.getValue()
+                );
                 if (!unchanged) {
                     user.agree(terms.getLatest(entry.getKey()), entry.getValue());
                 }
             }
             users.saveAndFlush(user);
-            result.put("agreements", agreementViews(user).stream()
-                    .filter(agreement -> updates.containsKey(agreement.get("termsType")))
-                    .toList());
+            updatedAgreements = agreementViews(user).stream()
+                    .filter(agreement -> updates.containsKey(agreement.termsType()))
+                    .toList();
         }
         return new UserPatchResponse(
                 user.getId(),

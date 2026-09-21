@@ -11,28 +11,35 @@ import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
 
-import com.homes.zipsai.user.domain.UserRole;
+import com.homes.zipsai.global.exception.ApiException;
+import com.homes.zipsai.global.exception.UnauthorizedException;
 
-/** Builds the request principal using only the already-verified access-token claims. */
+/** Converts verified JWT claims into the principal used by the application. */
 @Component
-public class AccessTokenAuthenticationConverter implements Converter<Jwt, AbstractAuthenticationToken> {
+public class AccessTokenAuthenticationConverter
+        implements Converter<Jwt, AbstractAuthenticationToken> {
 
     @Override
-    public AbstractAuthenticationToken convert(Jwt jwt) {
+    public AbstractAuthenticationToken convert(Jwt token) {
         try {
-            long userId = Long.parseLong(jwt.getSubject());
-            UserRole role = UserRole.valueOf(jwt.getClaimAsString("role"));
-            if (userId <= 0) {
-                throw new IllegalArgumentException("Invalid user id");
+            long userId = Long.parseLong(token.getSubject());
+            String sessionId = token.getClaimAsString("sid");
+            String role = token.getClaimAsString("role");
+
+            if (sessionId == null || sessionId.isBlank()
+                    || role == null || role.isBlank()) {
+                throw new UnauthorizedException();
             }
 
             return new UsernamePasswordAuthenticationToken(
-                    new AuthPrincipal(userId),
+                    new AuthPrincipal(userId, sessionId),
                     null,
-                    List.of(new SimpleGrantedAuthority("ROLE_" + role.name()))
+                    List.of(new SimpleGrantedAuthority("ROLE_" + role))
             );
-        } catch (RuntimeException e) {
-            throw new OAuth2AuthenticationException(new OAuth2Error("invalid_token"));
+        } catch (ApiException | IllegalArgumentException exception) {
+            throw new OAuth2AuthenticationException(
+                    new OAuth2Error("invalid_token")
+            );
         }
     }
 }

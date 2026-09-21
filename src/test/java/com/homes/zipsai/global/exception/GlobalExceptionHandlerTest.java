@@ -127,7 +127,7 @@ class GlobalExceptionHandlerTest {
     @Test
     void putsFieldValidationErrorsUnderDetailsViolations() throws Exception {
         mockMvc.perform(post("/validation").contentType(MediaType.APPLICATION_JSON).content("{}"))
-                .andExpect(status().is(422))
+                .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.message").value("입력값이 유효하지 않습니다."))
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
                 .andExpect(jsonPath("$.error.details.violations[0].field").value("email"))
@@ -201,7 +201,7 @@ class GlobalExceptionHandlerTest {
     @Test
     void mapsPathVariableTypeMismatchToValidationFailed() throws Exception {
         mockMvc.perform(get("/path/not-an-id"))
-                .andExpect(status().is(422))
+                .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
                 .andExpect(jsonPath("$.error.details.violations[0].field").value("roomId"))
                 .andExpect(jsonPath("$.error.details.violations[0].reason").value("1 이상의 정수여야 합니다."));
