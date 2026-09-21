@@ -18,7 +18,13 @@ repositories {
 	mavenCentral()
 }
 
+ext {
+	awsSdkVersion = '2.31.68'
+}
+
 dependencies {
+	implementation platform("software.amazon.awssdk:bom:${awsSdkVersion}")
+	implementation 'software.amazon.awssdk:s3'
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	implementation 'org.springframework.boot:spring-boot-starter-security'
 	implementation 'org.springframework.security:spring-security-oauth2-jose'
