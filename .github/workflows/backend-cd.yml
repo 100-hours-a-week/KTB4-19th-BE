@@ -1,0 +1,140 @@
+name: Backend CD
+
+# 배포할 main Commit SHA를 운영자가 선택한다.
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: EC2 Backend Container에 배포할 main Commit SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ap-northeast-2
+  INSTANCE_ID: i-06c0ca0d997f03792
+  ECR_REGISTRY: 929368845727.dkr.ecr.ap-northeast-2.amazonaws.com
+  APP_DIR: /opt/zipsai
+  CURRENT_SHA_PARAMETER: /zipsai/prod/deploy/backend/current-sha
+  HEALTH_URL: https://zipsai.co.kr/api/actuator/health
+
+jobs:
+  deploy:
+    name: Backend Image 배포
+    # 수동 실행 화면에서 다른 브랜치를 선택해도 운영 배포는 main에서만 허용한다.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify selected commit
+        env:
+          DEPLOY_SHA: ${{ inputs.commit_sha }}
+        run: |
+          DEPLOY_SHA="$(git rev-parse "${DEPLOY_SHA}^{commit}")"
+          git merge-base --is-ancestor "$DEPLOY_SHA" origin/main
+          echo "deploy_sha=$DEPLOY_SHA" >> "$GITHUB_ENV"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          # Backend GitHub Actions 전용 OIDC 배포 Role ARN을 Repository Variable에 등록한다.
+          role-to-assume: ${{ vars.AWS_BACKEND_CD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy selected Image and verify production
+        run: |
+          set -euo pipefail
+
+          # 지정한 SHA를 EC2에 적용하고 Backend Container만 교체한다.
+          run_remote_deploy() {
+            local target_sha="$1"
+            local command_id
+
+            jq -n \
+              --arg app_dir "$APP_DIR" \
+              --arg aws_region "$AWS_REGION" \
+              --arg ecr_registry "$ECR_REGISTRY" \
+              --arg target_sha "$target_sha" \
+              '{
+                commands: [
+                  "set -eu",
+                  ("sudo test -f " + $app_dir + "/.env"),
+                  ("if sudo grep -q \"^BACKEND_IMAGE_TAG=\" " + $app_dir + "/.env; then sudo sed -i \"s|^BACKEND_IMAGE_TAG=.*|BACKEND_IMAGE_TAG=" + $target_sha + "|\" " + $app_dir + "/.env; else echo BACKEND_IMAGE_TAG=" + $target_sha + " | sudo tee -a " + $app_dir + "/.env > /dev/null; fi"),
+                  ("sudo chown root:root " + $app_dir + "/.env && sudo chmod 600 " + $app_dir + "/.env"),
+                  ("aws ecr get-login-password --region " + $aws_region + " | sudo docker login --username AWS --password-stdin " + $ecr_registry),
+                  ("sudo docker compose --env-file " + $app_dir + "/.env -f " + $app_dir + "/compose.yaml pull backend"),
+                  ("sudo docker compose --env-file " + $app_dir + "/.env -f " + $app_dir + "/compose.yaml up -d --no-deps backend")
+                ]
+              }' > ssm-parameters.json
+
+            command_id="$(aws ssm send-command \
+              --document-name AWS-RunShellScript \
+              --instance-ids "$INSTANCE_ID" \
+              --parameters file://ssm-parameters.json \
+              --comment "Deploy Backend: $target_sha" \
+              --query 'Command.CommandId' \
+              --output text)"
+
+            if ! aws ssm wait command-executed \
+              --command-id "$command_id" \
+              --instance-id "$INSTANCE_ID"; then
+              aws ssm get-command-invocation \
+                --command-id "$command_id" \
+                --instance-id "$INSTANCE_ID" \
+                --output json || true
+              return 1
+            fi
+
+            aws ssm get-command-invocation \
+              --command-id "$command_id" \
+              --instance-id "$INSTANCE_ID" \
+              --query '{Status:Status,StandardOutput:StandardOutputContent,StandardError:StandardErrorContent}' \
+              --output json
+          }
+
+          check_backend() {
+            curl --fail --silent --show-error \
+              --retry 12 --retry-all-errors --retry-delay 5 \
+              "$HEALTH_URL" > /dev/null
+          }
+
+          # 마지막으로 정상 확인된 SHA가 있으면 새 배포 실패 시 그 Image로 되돌린다.
+          PREVIOUS_SHA="$(aws ssm get-parameter \
+            --name "$CURRENT_SHA_PARAMETER" \
+            --query 'Parameter.Value' \
+            --output text 2>/dev/null || true)"
+
+          rollback() {
+            if [ -z "$PREVIOUS_SHA" ]; then
+              echo "이전 정상 Backend SHA가 없어 자동 복구할 수 없습니다." >&2
+              exit 1
+            fi
+
+            echo "배포 확인에 실패했습니다. 이전 정상 SHA로 복구합니다: $PREVIOUS_SHA" >&2
+            run_remote_deploy "$PREVIOUS_SHA"
+            check_backend
+            exit 1
+          }
+
+          if ! run_remote_deploy "$deploy_sha"; then
+            rollback
+          fi
+
+          if ! check_backend; then
+            rollback
+          fi
+
+          # 외부 Health Check를 통과한 경우에만 다음 배포의 복구 기준 SHA를 갱신한다.
+          aws ssm put-parameter \
+            --name "$CURRENT_SHA_PARAMETER" \
+            --type String \
+            --value "$deploy_sha" \
+            --overwrite > /dev/null
