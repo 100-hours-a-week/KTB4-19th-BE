@@ -36,7 +36,7 @@ class BuildingRegistrationApiTests {
         String ip = nextRemoteIp();
         String token = managerToken(ip);
 
-        mvc.perform(withIp(post("/api/v1/managers/me/buildings")
+        mvc.perform(withIp(post("/api/v1/managers/me/building")
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content("""
@@ -52,7 +52,7 @@ class BuildingRegistrationApiTests {
     void managerCannotRegisterMoreThanOneBuilding() throws Exception {
         String ip = nextRemoteIp();
         String token = managerToken(ip);
-        MockHttpServletRequestBuilder request = post("/api/v1/managers/me/buildings")
+        MockHttpServletRequestBuilder request = post("/api/v1/managers/me/building")
                 .header("Authorization", "Bearer " + token)
                 .contentType("application/json")
                 .content("""
@@ -69,14 +69,14 @@ class BuildingRegistrationApiTests {
     void registrationRequiresManagerAuthentication() throws Exception {
         String ip = nextRemoteIp();
 
-        mvc.perform(withIp(post("/api/v1/managers/me/buildings")
+        mvc.perform(withIp(post("/api/v1/managers/me/building")
                         .contentType("application/json")
                         .content("""
                                 {"roadAddress":"서울 강남구 역삼동 123-4"}
                                 """), ip))
                 .andExpect(status().isUnauthorized());
 
-        mvc.perform(withIp(post("/api/v1/managers/me/buildings")
+        mvc.perform(withIp(post("/api/v1/managers/me/building")
                         .header("Authorization", "Bearer " + userToken(ip, "RESIDENT"))
                         .contentType("application/json")
                         .content("""
@@ -91,14 +91,14 @@ class BuildingRegistrationApiTests {
         String ip = nextRemoteIp();
         String token = managerToken(ip);
 
-        mvc.perform(withIp(post("/api/v1/managers/me/buildings")
+        mvc.perform(withIp(post("/api/v1/managers/me/building")
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content("{}"), ip))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("MISSING_REQUIRED_FIELD"));
 
-        mvc.perform(withIp(post("/api/v1/managers/me/buildings")
+        mvc.perform(withIp(post("/api/v1/managers/me/building")
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content("""
@@ -107,7 +107,7 @@ class BuildingRegistrationApiTests {
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
 
-        mvc.perform(withIp(post("/api/v1/managers/me/buildings")
+        mvc.perform(withIp(post("/api/v1/managers/me/building")
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content("""
@@ -123,7 +123,7 @@ class BuildingRegistrationApiTests {
         String token = managerToken(ip);
         long buildingId = registerBuilding(ip, token);
 
-        mvc.perform(withIp(post("/api/v1/managers/me/buildings/{buildingId}/rooms", buildingId)
+        mvc.perform(withIp(post("/api/v1/managers/me/building/rooms")
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content("""
@@ -143,17 +143,17 @@ class BuildingRegistrationApiTests {
     void duplicateRoomRejectsWholeBatchWithoutSavingOtherNumbers() throws Exception {
         String ip = nextRemoteIp();
         String token = managerToken(ip);
-        long buildingId = registerBuilding(ip, token);
+        registerBuilding(ip, token);
 
-        mvc.perform(withIp(roomRequest(buildingId, token, "101"), ip))
+        mvc.perform(withIp(roomRequest(token, "101"), ip))
                 .andExpect(status().isCreated());
 
-        mvc.perform(withIp(roomRequest(buildingId, token, "102", "101"), ip))
+        mvc.perform(withIp(roomRequest(token, "102", "101"), ip))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("ROOM_ALREADY_EXISTS"));
 
         // 102이 앞선 중복 요청에서 일부 저장되지 않았으므로 단독 생성은 성공해야 합니다.
-        mvc.perform(withIp(roomRequest(buildingId, token, "102"), ip))
+        mvc.perform(withIp(roomRequest(token, "102"), ip))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.createdCount").value(1));
     }
@@ -162,51 +162,41 @@ class BuildingRegistrationApiTests {
     void bulkRoomCreationRequiresRoomNumbersAndLimitsEachNumberToFiveCharacters() throws Exception {
         String ip = nextRemoteIp();
         String token = managerToken(ip);
-        long buildingId = registerBuilding(ip, token);
+        registerBuilding(ip, token);
 
-        mvc.perform(withIp(post("/api/v1/managers/me/buildings/{buildingId}/rooms", buildingId)
+        mvc.perform(withIp(post("/api/v1/managers/me/building/rooms")
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content("{}"), ip))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("MISSING_REQUIRED_FIELD"));
 
-        mvc.perform(withIp(roomRequest(buildingId, token, "123456"), ip))
+        mvc.perform(withIp(roomRequest(token, "123456"), ip))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
     }
 
     @Test
-    void onlyBuildingOwnerCanCreateItsRooms() throws Exception {
-        String ownerIp = nextRemoteIp();
-        String ownerToken = managerToken(ownerIp);
-        long buildingId = registerBuilding(ownerIp, ownerToken);
-
-        String otherManagerIp = nextRemoteIp();
-        String otherManagerToken = managerToken(otherManagerIp);
-        mvc.perform(withIp(roomRequest(buildingId, otherManagerToken, "101"), otherManagerIp))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
-
+    void residentCannotCreateRooms() throws Exception {
         String residentIp = nextRemoteIp();
         String residentToken = userToken(residentIp, "RESIDENT");
-        mvc.perform(withIp(roomRequest(buildingId, residentToken, "101"), residentIp))
+        mvc.perform(withIp(roomRequest(residentToken, "101"), residentIp))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
     }
 
     @Test
-    void bulkRoomCreationRequiresAnExistingBuilding() throws Exception {
+    void bulkRoomCreationRequiresManagersBuilding() throws Exception {
         String ip = nextRemoteIp();
         String token = managerToken(ip);
 
-        mvc.perform(withIp(roomRequest(Long.MAX_VALUE, token, "101"), ip))
+        mvc.perform(withIp(roomRequest(token, "101"), ip))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error.code").value("BUILDING_NOT_FOUND"));
     }
 
     private long registerBuilding(String ip, String token) throws Exception {
-        MvcResult response = mvc.perform(withIp(post("/api/v1/managers/me/buildings")
+        MvcResult response = mvc.perform(withIp(post("/api/v1/managers/me/building")
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content("""
@@ -220,11 +210,11 @@ class BuildingRegistrationApiTests {
                 .asLong();
     }
 
-    private MockHttpServletRequestBuilder roomRequest(long buildingId, String token, String... roomNos) {
+    private MockHttpServletRequestBuilder roomRequest(String token, String... roomNos) {
         String roomNosJson = java.util.Arrays.stream(roomNos)
                 .map(number -> "\"" + number + "\"")
                 .collect(java.util.stream.Collectors.joining(","));
-        return post("/api/v1/managers/me/buildings/{buildingId}/rooms", buildingId)
+        return post("/api/v1/managers/me/building/rooms")
                 .header("Authorization", "Bearer " + token)
                 .contentType("application/json")
                 .content("{\"roomNos\":[" + roomNosJson + "]}");

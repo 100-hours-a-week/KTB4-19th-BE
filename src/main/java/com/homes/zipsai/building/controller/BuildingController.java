@@ -3,7 +3,6 @@ package com.homes.zipsai.building.controller;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -28,7 +27,7 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequiredArgsConstructor
 // 건물 등록 API는 건물 관리자 본인의 계정 경로 아래에 둡니다.
-@RequestMapping("/api/v1/managers/me/buildings")
+@RequestMapping("/api/v1/managers/me/building")
 public class BuildingController {
     private final BuildingService buildings;
 
@@ -45,39 +44,35 @@ public class BuildingController {
     }
 
     @Operation(summary = "건물 상세 조회", description = "관리자가 관리 대상 건물의 상세 정보와 호실 수를 조회한다.")
-    @GetMapping("/{buildingId}")
+    @GetMapping
     public ResponseEntity<ApiResponse<ManagerBuildingDetailResponse>> getBuilding(
-            @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal,
-            @PathVariable long buildingId
+            @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal
     ) {
-        return ResponseEntity.ok(ApiResponse.data(buildings.getBuilding(principal.userId(), buildingId)));
+        return ResponseEntity.ok(ApiResponse.data(buildings.getBuilding(principal.userId())));
     }
 
     @Operation(summary = "호실 현황 요약 조회", description = "관리자가 관리 대상 건물의 입주·초대·공실 현황을 조회한다.")
-    @GetMapping("/{buildingId}/rooms/summary")
+    @GetMapping("/rooms/summary")
     public ResponseEntity<ApiResponse<ManagerRoomSummaryResponse>> getRoomSummary(
-            @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal,
-            @PathVariable long buildingId
+            @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal
     ) {
-        return ResponseEntity.ok(ApiResponse.data(buildings.getRoomSummary(principal.userId(), buildingId)));
+        return ResponseEntity.ok(ApiResponse.data(buildings.getRoomSummary(principal.userId())));
     }
 
     @Operation(summary = "호실 목록 조회", description = "관리자가 관리 대상 건물의 전체 호실과 입주민 정보를 조회한다.")
-    @GetMapping("/{buildingId}/rooms")
+    @GetMapping("/rooms")
     public ResponseEntity<ApiResponse<ManagerRoomListResponse>> getRooms(
-            @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal,
-            @PathVariable long buildingId
+            @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal
     ) {
-        return ResponseEntity.ok(ApiResponse.data(buildings.getRooms(principal.userId(), buildingId)));
+        return ResponseEntity.ok(ApiResponse.data(buildings.getRooms(principal.userId())));
     }
 
     @Operation(summary = "민원 처리 상태 요약 조회",
         description = "관리자가 관리 대상 건물의 민원 처리 상태별 건수를 조회한다.", tags = {"관리자 민원"})
-    @GetMapping("/{buildingId}/complaints/summary")
+    @GetMapping("/complaints/summary")
     public ResponseEntity<ApiResponse<ManagerComplaintSummaryResponse>> getComplaintSummary(
-            @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal,
-            @PathVariable long buildingId
+            @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal
     ) {
-        return ResponseEntity.ok(ApiResponse.data(buildings.getComplaintSummary(principal.userId(), buildingId)));
+        return ResponseEntity.ok(ApiResponse.data(buildings.getComplaintSummary(principal.userId())));
     }
 }

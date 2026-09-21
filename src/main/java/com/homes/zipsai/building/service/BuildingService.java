@@ -24,7 +24,6 @@ import com.homes.zipsai.building.repository.BuildingRepository;
 import com.homes.zipsai.building.repository.ComplaintRepository;
 import com.homes.zipsai.building.repository.RoomRepository;
 import com.homes.zipsai.global.exception.ConflictException;
-import com.homes.zipsai.global.exception.ForbiddenException;
 import com.homes.zipsai.global.exception.MissingFieldException;
 import com.homes.zipsai.global.exception.NotFoundException;
 import com.homes.zipsai.global.exception.UnauthorizedException;
@@ -104,8 +103,8 @@ public class BuildingService {
     }
 
     @Transactional(readOnly = true)
-    public ManagerBuildingDetailResponse getBuilding(Long managerId, long buildingId) {
-        Building building = ownedBuilding(managerId, buildingId);
+    public ManagerBuildingDetailResponse getBuilding(Long managerId) {
+        Building building = ownedBuilding(managerId);
         return new ManagerBuildingDetailResponse(
                 building.getId(),
                 building.getBuildingName(),
@@ -115,8 +114,8 @@ public class BuildingService {
     }
 
     @Transactional(readOnly = true)
-    public ManagerRoomSummaryResponse getRoomSummary(Long managerId, long buildingId) {
-        Building building = ownedBuilding(managerId, buildingId);
+    public ManagerRoomSummaryResponse getRoomSummary(Long managerId) {
+        Building building = ownedBuilding(managerId);
         long livingCount = rooms.countByBuilding_IdAndStatusAndDeletedAtIsNull(building.getId(), RoomStatus.LIVING);
         long invitedCount = rooms.countByBuilding_IdAndStatusAndDeletedAtIsNull(building.getId(), RoomStatus.INVITED);
         long emptyCount = rooms.countByBuilding_IdAndStatusAndDeletedAtIsNull(building.getId(), RoomStatus.EMPTY);
@@ -128,8 +127,8 @@ public class BuildingService {
     }
 
     @Transactional(readOnly = true)
-    public ManagerRoomListResponse getRooms(Long managerId, long buildingId) {
-        Building building = ownedBuilding(managerId, buildingId);
+    public ManagerRoomListResponse getRooms(Long managerId) {
+        Building building = ownedBuilding(managerId);
         List<ManagerRoomItemResponse> roomItems = activeRooms(building).stream()
                 .map(this::roomItem)
                 .toList();
@@ -141,8 +140,8 @@ public class BuildingService {
     }
 
     @Transactional(readOnly = true)
-    public ManagerComplaintSummaryResponse getComplaintSummary(Long managerId, long buildingId) {
-        Building building = ownedBuilding(managerId, buildingId);
+    public ManagerComplaintSummaryResponse getComplaintSummary(Long managerId) {
+        Building building = ownedBuilding(managerId);
         LocalDateTime now = LocalDateTime.now(SEOUL);
         LocalDateTime weekStart = now.toLocalDate()
                 .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
@@ -150,17 +149,9 @@ public class BuildingService {
         return complaints.findManagerComplaintSummary(building.getId(), weekStart, now);
     }
 
-    private Building ownedBuilding(Long managerId, long buildingId) {
-        if (buildingId <= 0) {
-            throw new ValidationFailedException("buildingId", Reason.INVALID_ID);
-        }
-        Building building = buildings.findById(buildingId)
-                .filter(candidate -> candidate.getDeletedAt() == null)
+    private Building ownedBuilding(Long managerId) {
+        return buildings.findByManager_IdAndDeletedAtIsNull(managerId)
                 .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.BUILDING));
-        if (!building.getManager().getId().equals(managerId)) {
-            throw new ForbiddenException();
-        }
-        return building;
     }
 
     private List<Room> activeRooms(Building building) {

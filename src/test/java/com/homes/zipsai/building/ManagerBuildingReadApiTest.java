@@ -48,7 +48,7 @@ import tools.jackson.databind.ObjectMapper;
 @AutoConfigureMockMvc
 class ManagerBuildingReadApiTest {
 
-    private static final String BUILDINGS = "/api/v1/managers/me/buildings/";
+    private static final String BUILDING = "/api/v1/managers/me/building";
     private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
 
     @Autowired
@@ -82,7 +82,7 @@ class ManagerBuildingReadApiTest {
         Room deleted = room(owner.building(), "104", RoomStatus.EMPTY, null);
         delete(deleted);
 
-        JsonNode detail = data(mvc.perform(get(BUILDINGS + owner.building().getId())
+        JsonNode detail = data(mvc.perform(get(BUILDING)
                 .with(manager(owner.manager().getId())))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.buildingId").value(owner.building().getId()))
@@ -93,7 +93,7 @@ class ManagerBuildingReadApiTest {
             .andReturn());
         assertThat(detail.path("totalRoomCount").asInt()).isEqualTo(3);
 
-        mvc.perform(get(BUILDINGS + owner.building().getId() + "/rooms/summary")
+        mvc.perform(get(BUILDING + "/rooms/summary")
                 .with(manager(owner.manager().getId())))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.livingCount").value(1))
@@ -101,7 +101,7 @@ class ManagerBuildingReadApiTest {
             .andExpect(jsonPath("$.data.emptyCount").value(1))
             .andExpect(jsonPath("$.data.totalCount").value(3));
 
-        JsonNode rooms = data(mvc.perform(get(BUILDINGS + owner.building().getId() + "/rooms")
+        JsonNode rooms = data(mvc.perform(get(BUILDING + "/rooms")
                 .with(manager(owner.manager().getId())))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.buildingId").value(owner.building().getId()))
@@ -130,13 +130,13 @@ class ManagerBuildingReadApiTest {
     void returnsNullableBuildingNameAndZeroCountsWhenBuildingHasNoRooms() throws Exception {
         ManagerBuilding owner = managerBuilding(null);
 
-        mvc.perform(get(BUILDINGS + owner.building().getId())
+        mvc.perform(get(BUILDING)
                 .with(manager(owner.manager().getId())))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.buildingName").value((Object) null))
             .andExpect(jsonPath("$.data.totalRoomCount").value(0));
 
-        mvc.perform(get(BUILDINGS + owner.building().getId() + "/rooms/summary")
+        mvc.perform(get(BUILDING + "/rooms/summary")
                 .with(manager(owner.manager().getId())))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.livingCount").value(0))
@@ -144,14 +144,14 @@ class ManagerBuildingReadApiTest {
             .andExpect(jsonPath("$.data.emptyCount").value(0))
             .andExpect(jsonPath("$.data.totalCount").value(0));
 
-        mvc.perform(get(BUILDINGS + owner.building().getId() + "/rooms")
+        mvc.perform(get(BUILDING + "/rooms")
                 .with(manager(owner.manager().getId())))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.buildingName").value((Object) null))
             .andExpect(jsonPath("$.data.totalCount").value(0))
             .andExpect(jsonPath("$.data.rooms.length()").value(0));
 
-        mvc.perform(get(BUILDINGS + owner.building().getId() + "/complaints/summary")
+        mvc.perform(get(BUILDING + "/complaints/summary")
                 .with(manager(owner.manager().getId())))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.pendingCount").value(0))
@@ -186,7 +186,7 @@ class ManagerBuildingReadApiTest {
         occupied.moveOutResident();
         roomRepository.saveAndFlush(occupied);
 
-        mvc.perform(get(BUILDINGS + owner.building().getId() + "/complaints/summary")
+        mvc.perform(get(BUILDING + "/complaints/summary")
                 .with(manager(owner.manager().getId())))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.pendingCount").value(1))
@@ -196,72 +196,43 @@ class ManagerBuildingReadApiTest {
     }
 
     @Test
-    void rejectsMissingAndDeletedBuildings() throws Exception {
+    void rejectsManagerWithoutActiveBuilding() throws Exception {
         User manager = user(UserRole.MANAGER, "관리자");
-
-        for (String suffix : List.of("", "/complaints/summary")) {
-            mvc.perform(get(BUILDINGS + Long.MAX_VALUE + suffix).with(manager(manager.getId())))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error.code").value("BUILDING_NOT_FOUND"));
-        }
-
         ManagerBuilding deleted = managerBuilding("삭제건물");
         delete(deleted.building());
 
-        for (String suffix : List.of("", "/complaints/summary")) {
-            mvc.perform(get(BUILDINGS + deleted.building().getId() + suffix)
-                    .with(manager(deleted.manager().getId())))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error.code").value("BUILDING_NOT_FOUND"));
+        for (User user : List.of(manager, deleted.manager())) {
+            for (String suffix : List.of("", "/rooms/summary", "/rooms", "/complaints/summary")) {
+                mvc.perform(get(BUILDING + suffix).with(manager(user.getId())))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.error.code").value("BUILDING_NOT_FOUND"));
+            }
         }
     }
 
     @Test
-    void rejectsNonPositiveBuildingIds() throws Exception {
-        User manager = user(UserRole.MANAGER, "관리자");
-
-        for (long buildingId : List.of(0L, -1L)) {
-            mvc.perform(get(BUILDINGS + buildingId).with(manager(manager.getId())))
-                .andExpect(status().isUnprocessableContent())
-                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
-                .andExpect(jsonPath("$.error.details.violations[0].field").value("buildingId"));
-            mvc.perform(get(BUILDINGS + buildingId + "/rooms/summary").with(manager(manager.getId())))
-                .andExpect(status().isUnprocessableContent())
-                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
-            mvc.perform(get(BUILDINGS + buildingId + "/rooms").with(manager(manager.getId())))
-                .andExpect(status().isUnprocessableContent())
-                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
-            mvc.perform(get(BUILDINGS + buildingId + "/complaints/summary").with(manager(manager.getId())))
-                .andExpect(status().isUnprocessableContent())
-                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
-        }
-    }
-
-    @Test
-    void rejectsAnotherManagersBuilding() throws Exception {
+    void returnsOnlyAuthenticatedManagersBuilding() throws Exception {
+        managerBuilding("타인건물");
         ManagerBuilding owner = managerBuilding("소유건물");
-        ManagerBuilding other = managerBuilding("타인건물");
 
-        for (String suffix : List.of("", "/rooms/summary", "/rooms", "/complaints/summary")) {
-            mvc.perform(get(BUILDINGS + owner.building().getId() + suffix)
-                    .with(manager(other.manager().getId())))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
-        }
+        mvc.perform(get(BUILDING).with(manager(owner.manager().getId())))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.buildingId").value(owner.building().getId()))
+            .andExpect(jsonPath("$.data.buildingName").value("소유건물"));
     }
 
     @Test
     void requiresManagerAuthentication() throws Exception {
-        mvc.perform(get(BUILDINGS + 1))
+        mvc.perform(get(BUILDING))
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
-        mvc.perform(get(BUILDINGS + 1 + "/complaints/summary"))
+        mvc.perform(get(BUILDING + "/complaints/summary"))
             .andExpect(status().isUnauthorized())
             .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
 
         User resident = user(UserRole.RESIDENT, "입주민");
         for (String suffix : List.of("", "/rooms/summary", "/rooms", "/complaints/summary")) {
-            mvc.perform(get(BUILDINGS + 1 + suffix).with(resident(resident.getId())))
+            mvc.perform(get(BUILDING + suffix).with(resident(resident.getId())))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
         }
