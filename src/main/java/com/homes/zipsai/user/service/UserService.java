@@ -10,6 +10,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.homes.zipsai.auth.service.TokenService;
+import com.homes.zipsai.building.domain.RoomStatus;
+import com.homes.zipsai.building.repository.BuildingRepository;
+import com.homes.zipsai.building.repository.RoomRepository;
 import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.global.exception.UnauthorizedException;
 import com.homes.zipsai.global.exception.ValidationFailedException.Reason;
@@ -33,11 +36,16 @@ public class UserService {
     private final UserRepository users;
     private final TokenService tokens;
     private final TermsRepository terms;
+    private final BuildingRepository buildings;
+    private final RoomRepository rooms;
 
-    public UserService(UserRepository users, TokenService tokens, TermsRepository terms) {
+    public UserService(UserRepository users, TokenService tokens, TermsRepository terms,
+            BuildingRepository buildings, RoomRepository rooms) {
         this.users = users;
         this.tokens = tokens;
         this.terms = terms;
+        this.buildings = buildings;
+        this.rooms = rooms;
     }
 
     public User active(Long id) {
@@ -60,10 +68,14 @@ public class UserService {
     @Transactional(readOnly = true)
     public UserProfileResponse me(Long id) {
         User user = active(id);
+        Long buildingId = buildings.findByManager_IdAndDeletedAtIsNull(id).map(b -> b.getId()).orElse(null);
+        Long roomId = rooms.findByResidentIdAndStatus(id, RoomStatus.LIVING).map(r -> r.getId()).orElse(null);
         return new UserProfileResponse(
                 user.getId(),
                 user.getEmail(),
                 user.getRole(),
+                buildingId,
+                roomId,
                 user.getUserName(),
                 user.getPhone(),
                 agreementViews(user)

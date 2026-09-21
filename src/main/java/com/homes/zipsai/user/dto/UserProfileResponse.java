@@ -8,6 +8,8 @@ public record UserProfileResponse(
         Long userId,
         String email,
         UserRole userRole,
+        Long buildingId,
+        Long roomId,
         String userName,
         String phone,
         List<UserAgreementResponse> agreements
