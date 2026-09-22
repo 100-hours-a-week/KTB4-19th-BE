@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.homes.zipsai.building.dto.RuleDocumentCreateRequest;
 import com.homes.zipsai.building.dto.RuleDocumentResponse;
+import com.homes.zipsai.building.dto.RuleDocumentUpdateRequest;
 import com.homes.zipsai.building.service.RuleDocumentService;
 import com.homes.zipsai.global.response.ApiResponse;
 import com.homes.zipsai.global.security.AuthPrincipal;
@@ -41,5 +42,13 @@ public class RuleDocumentController {
     @Operation(summary = "운영 문서 목록 조회")
     public ApiResponse<List<RuleDocumentResponse>> list(@AuthenticationPrincipal AuthPrincipal principal) {
         return ApiResponse.data(ruleDocumentService.list(principal));
+    }
+
+    @org.springframework.web.bind.annotation.PatchMapping("/{documentId}")
+    public ApiResponse<RuleDocumentResponse> update(
+            @AuthenticationPrincipal AuthPrincipal principal,
+            @org.springframework.web.bind.annotation.PathVariable long documentId,
+            @Valid @RequestBody RuleDocumentUpdateRequest request) {
+        return ApiResponse.data(ruleDocumentService.update(principal, documentId, request));
     }
 }

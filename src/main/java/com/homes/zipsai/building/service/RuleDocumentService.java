@@ -12,6 +12,7 @@ import com.homes.zipsai.building.domain.Building;
 import com.homes.zipsai.building.domain.RuleDocument;
 import com.homes.zipsai.building.dto.RuleDocumentCreateRequest;
 import com.homes.zipsai.building.dto.RuleDocumentResponse;
+import com.homes.zipsai.building.dto.RuleDocumentUpdateRequest;
 import com.homes.zipsai.building.repository.BuildingRepository;
 import com.homes.zipsai.building.repository.RuleDocumentRepository;
 import com.homes.zipsai.common.config.StorageProperties;
@@ -62,6 +63,20 @@ public class RuleDocumentService {
                 .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.BUILDING));
         return documentRepository.findAllByBuilding_IdAndDeletedAtIsNullOrderByUpdatedAtDesc(building.getId())
                 .stream().map(this::response).toList();
+    }
+
+    @Transactional
+    public RuleDocumentResponse update(AuthPrincipal principal, long documentId, RuleDocumentUpdateRequest request) {
+        Building building = buildingRepository.findByManager_IdAndDeletedAtIsNull(principal.userId())
+                .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.BUILDING));
+        RuleDocument document = documentRepository.findById(documentId)
+                .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.DOCUMENT));
+        if (!document.getBuilding().getId().equals(building.getId())) {
+            throw new ForbiddenException();
+        }
+        document.updateTitle(request.title().trim());
+        index(document, building);
+        return response(document);
     }
 
     private void index(RuleDocument document, Building building) {
