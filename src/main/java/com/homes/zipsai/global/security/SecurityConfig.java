@@ -90,6 +90,9 @@ public class SecurityConfig {
                         ).permitAll()
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/api/v1/managers/**").hasRole("MANAGER")
+                        // 역할이 NONE인 사용자가 초대코드 연결과 동시에 RESIDENT로 전환할 수 있다.
+                        .requestMatchers(org.springframework.http.HttpMethod.PUT, "/api/v1/residents/me/room")
+                        .authenticated()
                         .requestMatchers("/api/v1/residents/**").hasRole("RESIDENT")
                         .anyRequest().authenticated())
                         .exceptionHandling(exception -> exception

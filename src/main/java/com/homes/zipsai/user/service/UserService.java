@@ -10,6 +10,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.homes.zipsai.auth.service.TokenService;
+import com.homes.zipsai.building.domain.RoomStatus;
+import com.homes.zipsai.building.repository.BuildingRepository;
+import com.homes.zipsai.building.repository.RoomRepository;
+import com.homes.zipsai.user.dto.OnboardingStatusResponse;
 import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.global.exception.UnauthorizedException;
 import com.homes.zipsai.global.exception.ValidationFailedException.Reason;
@@ -33,11 +37,16 @@ public class UserService {
     private final UserRepository users;
     private final TokenService tokens;
     private final TermsRepository terms;
+    private final BuildingRepository buildings;
+    private final RoomRepository rooms;
 
-    public UserService(UserRepository users, TokenService tokens, TermsRepository terms) {
+    public UserService(UserRepository users, TokenService tokens, TermsRepository terms,
+            BuildingRepository buildings, RoomRepository rooms) {
         this.users = users;
         this.tokens = tokens;
         this.terms = terms;
+        this.buildings = buildings;
+        this.rooms = rooms;
     }
 
     public User active(Long id) {
@@ -60,14 +69,35 @@ public class UserService {
     @Transactional(readOnly = true)
     public UserProfileResponse me(Long id) {
         User user = active(id);
+        Long buildingId = buildings.findByManager_IdAndDeletedAtIsNull(id).map(b -> b.getId()).orElse(null);
+        Long roomId = rooms.findByResidentIdAndStatus(id, RoomStatus.LIVING).map(r -> r.getId()).orElse(null);
         return new UserProfileResponse(
                 user.getId(),
                 user.getEmail(),
                 user.getRole(),
+                buildingId,
+                roomId,
                 user.getUserName(),
                 user.getPhone(),
                 agreementViews(user)
         );
+    }
+
+    @Transactional(readOnly = true)
+    public OnboardingStatusResponse onboardingStatus(AuthPrincipal principal) {
+        User user = active(principal.userId());
+        if (user.getRole() == UserRole.NONE) {
+            return new OnboardingStatusResponse(UserRole.NONE, null, false, false, "ROLE_SELECTION");
+        }
+        if (user.getRole() == UserRole.RESIDENT) {
+            boolean connected = rooms.existsLivingByResidentId(user.getId());
+            return new OnboardingStatusResponse(UserRole.RESIDENT, null, false, connected,
+                    connected ? "HOME" : "INVITATION_CODE");
+        }
+        Long buildingId = buildings.findByManager_IdAndDeletedAtIsNull(user.getId()).map(b -> b.getId()).orElse(null);
+        boolean hasRooms = buildingId != null && rooms.existsByBuilding_IdAndDeletedAtIsNull(buildingId);
+        return new OnboardingStatusResponse(UserRole.MANAGER, buildingId, hasRooms, false,
+                buildingId == null ? "BUILDING_REGISTRATION" : hasRooms ? "HOME" : "ROOM_REGISTRATION");
     }
 
     public static Map<String, Object> profile(User user) {
