@@ -22,6 +22,7 @@ import com.homes.zipsai.auth.dto.ReissueResponse;
 import com.homes.zipsai.auth.dto.SignupRequest;
 import com.homes.zipsai.auth.dto.SignupResponse;
 import com.homes.zipsai.auth.service.AuthService;
+import com.homes.zipsai.auth.validator.RefreshTokenValidator;
 import com.homes.zipsai.global.response.ApiResponse;
 import com.homes.zipsai.global.security.AuthPrincipal;
 import com.homes.zipsai.global.security.AuthProperties;
@@ -38,15 +39,16 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 @Tag(name = "인증", description = "회원가입, 로그인, 토큰 재발급과 로그아웃을 처리한다.")
 public class AuthController {
     private final AuthService authService;
-    private final AuthProperties properties;
+    private final AuthProperties authProperties;
 
-    // V3_P1_1: 가입 후 로그인 화면으로 이동한다.
     @PostMapping("/signup")
     @Operation(summary = "회원가입")
     public ResponseEntity<ApiResponse<SignupResponse>> signup(
             @RequestBody SignupRequest request
     ) {
-        SignupResponse response = new SignupResponse(authService.signup(request));
+        SignupResponse response = new SignupResponse(authService.signup(
+                request.email(), request.password(), request.passwordConfirm(),
+                request.userName(), request.phone(), request.agreements()));
         return ResponseEntity.status(201).body(ApiResponse.data(response));
     }
 
@@ -56,7 +58,7 @@ public class AuthController {
             @RequestBody LoginRequest loginRequest,
             HttpServletResponse response
     ) {
-        return result(authService.login(loginRequest), response);
+        return result(authService.login(loginRequest.email(), loginRequest.password()), response);
     }
 
     @PostMapping("/reissue")
@@ -65,7 +67,8 @@ public class AuthController {
             @CookieValue(name = "refreshToken", required = false) String refresh,
             HttpServletResponse response
     ) {
-        AuthService.Tokens tokens = authService.reissue(refresh);
+        String refreshToken = RefreshTokenValidator.validate(refresh);
+        AuthService.Tokens tokens = authService.reissue(refreshToken);
         cookie(
                 response,
                 tokens.refreshToken(),
@@ -123,7 +126,7 @@ public class AuthController {
     private void cookie(HttpServletResponse response, String value, long age) {
         ResponseCookie cookie = ResponseCookie.from("refreshToken", value)
                 .httpOnly(true)
-                .secure(properties.secureCookie())
+                .secure(authProperties.secureCookie())
                 .sameSite("Strict")
                 .path("/api/v1/auth")
                 .maxAge(age)

@@ -1,9 +1,20 @@
 package com.homes.zipsai.building.dto;
 
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
-/** 건물 등록 입력값. 건물명은 생략할 수 있고 도로명 주소는 필수입니다. */
-// 정의되지 않은 필드가 들어온 요청은 조용히 무시하지 않고 역직렬화 오류로 처리합니다.
 @JsonIgnoreProperties(ignoreUnknown = false)
-public record BuildingRegistrationRequest(String buildingName, String roadAddress) {
+public record BuildingRegistrationRequest(
+        @Size(max = 20, message = "건물명은 20자 이하여야 합니다.") String buildingName,
+        @NotBlank(message = "필수 입력값입니다.")
+        @Size(max = 200, message = "주소는 200자 이하여야 합니다.") String roadAddress
+) {
+    public BuildingRegistrationRequest {
+        buildingName = buildingName == null || buildingName.isBlank()
+                ? null
+                : buildingName.trim();
+        roadAddress = roadAddress == null ? null : roadAddress.trim();
+    }
 }

@@ -59,8 +59,9 @@ public class UserController {
     @Operation(summary = "내 프로필·역할 변경")
     public ResponseEntity<ApiResponse<UserPatchResponse>> patch(
             @AuthenticationPrincipal AuthPrincipal principal,
-            @RequestBody UserPatchRequest request
+            @RequestBody UserPatchRequest userPatchRequest
     ) {
-        return ResponseEntity.ok(ApiResponse.data(service.patch(principal, request)));
+        return ResponseEntity.ok(ApiResponse.data(service.patch(
+                principal, userPatchRequest.userRole(), userPatchRequest.userName(), userPatchRequest.phone(), userPatchRequest.agreements())));
     }
 }

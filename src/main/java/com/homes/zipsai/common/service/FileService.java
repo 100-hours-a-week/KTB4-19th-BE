@@ -12,10 +12,8 @@ import org.springframework.transaction.annotation.Transactional;
 import com.homes.zipsai.common.config.StorageProperties;
 import com.homes.zipsai.common.domain.File;
 import com.homes.zipsai.common.domain.FileStatus;
-import com.homes.zipsai.common.dto.FileCompleteRequest;
 import com.homes.zipsai.common.dto.FileCompleteResponse;
 import com.homes.zipsai.common.dto.FileDownloadResponse;
-import com.homes.zipsai.common.dto.FileUploadRequest;
 import com.homes.zipsai.common.dto.FileUploadResponse;
 import com.homes.zipsai.common.repository.FileRepository;
 import com.homes.zipsai.global.exception.ConflictException;
@@ -33,33 +31,33 @@ import lombok.RequiredArgsConstructor;
 public class FileService {
     private static final Set<String> ALLOWED_TYPES = Set.of("jpg", "jpeg", "png", "heic", "pdf");
 
-    private final FileRepository files;
-    private final UserRepository users;
-    private final S3StorageService storage;
-    private final StorageProperties properties;
+    private final FileRepository fileRepository;
+    private final UserRepository userRepository;
+    private final S3StorageService s3StorageService;
+    private final StorageProperties storageProperties;
 
     @Transactional
-    public FileUploadResponse createUpload(AuthPrincipal principal, FileUploadRequest request) {
-        validateRequest(request);
-        String extension = normalizeType(request.fileType());
-        String key = "documents/rules/" + UUID.randomUUID() + "-" + safeName(request.originalName());
-        File file = new File(key, request.fileSize(), extension, request.originalName());
-        file.assignOwner(users.getReferenceById(principal.userId()));
-        File saved = files.save(file);
-        S3StorageService.PresignedUpload upload = storage.prepareUpload(
-                key, contentType(extension), Duration.ofSeconds(properties.presignedUrlTtlSeconds()));
+    public FileUploadResponse createUpload(AuthPrincipal principal, String originalName, String fileType, int fileSize) {
+        validateRequest(originalName, fileType, fileSize);
+        String extension = normalizeType(fileType);
+        String key = "documents/rules/" + UUID.randomUUID() + "-" + safeName(originalName);
+        File file = new File(key, fileSize, extension, originalName);
+        file.assignOwner(userRepository.getReferenceById(principal.userId()));
+        File saved = fileRepository.save(file);
+        S3StorageService.PresignedUpload upload = s3StorageService.prepareUpload(
+                key, contentType(extension), Duration.ofSeconds(storageProperties.presignedUrlTtlSeconds()));
         return new FileUploadResponse(
-                saved.getId(), upload.url(), properties.presignedUrlTtlSeconds(),
+                saved.getId(), upload.url(), storageProperties.presignedUrlTtlSeconds(),
                 Map.of("Content-Type", upload.contentType()));
     }
 
     @Transactional
-    public FileCompleteResponse complete(AuthPrincipal principal, long attachmentId, FileCompleteRequest request) {
-        if (!"UPLOADED".equals(request.fileStatus())) {
+    public FileCompleteResponse complete(AuthPrincipal principal, long attachmentId, String fileStatus) {
+        if (!"UPLOADED".equals(fileStatus)) {
             throw new ValidationFailedException(
                     "fileStatus", ValidationFailedException.Reason.INVALID_FILE_TYPE);
         }
-        File file = files.findById(attachmentId)
+        File file = fileRepository.findById(attachmentId)
                 .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.ATTACHMENT));
         if (file.getOwner() == null || !file.getOwner().getId().equals(principal.userId())) {
             throw new ForbiddenException();
@@ -67,11 +65,11 @@ public class FileService {
         if (file.getStatus() == FileStatus.UPLOADED) {
             return response(file);
         }
-        S3StorageService.ObjectMetadata metadata = storage.head(file.getFileKey());
+        S3StorageService.ObjectMetadata metadata = s3StorageService.head(file.getFileKey());
         if (metadata == null) {
             throw new ConflictException(ConflictException.Reason.UPLOAD_NOT_COMPLETED);
         }
-        if (metadata.size() > properties.maxFileSize()) {
+        if (metadata.size() > storageProperties.maxFileSize()) {
             throw PayloadTooLargeException.uploadedFileSizeExceeded();
         }
         String actualType = normalizeContentType(metadata.contentType(), file.getFileType());
@@ -84,28 +82,28 @@ public class FileService {
 
     @Transactional(readOnly = true)
     public FileDownloadResponse createDownloadUrl(long attachmentId) {
-        File file = files.findById(attachmentId)
+        File file = fileRepository.findById(attachmentId)
                 .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.ATTACHMENT));
         if (file.getStatus() != FileStatus.UPLOADED) {
             throw new ConflictException(ConflictException.Reason.UPLOAD_NOT_COMPLETED);
         }
-        int ttl = properties.presignedUrlTtlSeconds();
-        String url = storage.prepareDownload(file.getFileKey(), Duration.ofSeconds(ttl)).url();
+        int ttl = storageProperties.presignedUrlTtlSeconds();
+        String url = s3StorageService.prepareDownload(file.getFileKey(), Duration.ofSeconds(ttl)).url();
         return new FileDownloadResponse(
                 file.getId(), file.getOriginalName(), file.getFileSize(), file.getFileType(),
                 file.getStatus().name(), url, ttl);
     }
 
-    private void validateRequest(FileUploadRequest request) {
-        if (request.originalName().length() > 255) {
+    private void validateRequest(String originalName, String fileType, int fileSize) {
+        if (originalName.length() > 255) {
             throw new ValidationFailedException(
                     "originalName", ValidationFailedException.Reason.ORIGINAL_NAME_TOO_LONG);
         }
-        String extension = normalizeType(request.fileType());
+        String extension = normalizeType(fileType);
         if (!ALLOWED_TYPES.contains(extension)) {
             throw new ValidationFailedException("fileType", ValidationFailedException.Reason.INVALID_FILE_TYPE);
         }
-        if (request.fileSize() > properties.maxFileSize()) {
+        if (fileSize > storageProperties.maxFileSize()) {
             throw PayloadTooLargeException.fileSizeLimitExceeded();
         }
     }

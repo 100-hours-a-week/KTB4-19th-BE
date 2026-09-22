@@ -20,12 +20,12 @@ import com.homes.zipsai.user.domain.User;
 @Service
 public class TokenService {
     private final JwtEncoder encoder;
-    private final AuthProperties properties;
+    private final AuthProperties authProperties;
     private final SecureRandom random = new SecureRandom();
 
-    public TokenService(JwtEncoder encoder, AuthProperties properties) {
+    public TokenService(JwtEncoder encoder, AuthProperties authProperties) {
         this.encoder = encoder;
-        this.properties = properties;
+        this.authProperties = authProperties;
     }
 
     public String access(User user, String sessionId) {
@@ -34,7 +34,7 @@ public class TokenService {
                 .issuer("zipsai")
                 .subject(user.getId().toString())
                 .issuedAt(now)
-                .expiresAt(now.plus(properties.accessTtl()))
+                .expiresAt(now.plus(authProperties.accessTtl()))
                 .claim("sid", sessionId)
                 .claim("ver", user.getAuthVersion())
                 .claim("role", user.getRole().name())

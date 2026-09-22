@@ -2,6 +2,7 @@ package com.homes.zipsai.auth.service;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -13,8 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.homes.zipsai.auth.domain.RefreshSession;
-import com.homes.zipsai.auth.dto.LoginRequest;
-import com.homes.zipsai.auth.dto.SignupRequest;
+import com.homes.zipsai.auth.dto.AgreementRequest;
 import com.homes.zipsai.auth.repository.RefreshSessionRepository;
 import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.global.exception.InvalidCredentialsException;
@@ -34,42 +34,43 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class AuthService {
-    private final UserRepository users;
-    private final TermsRepository terms;
-    private final RefreshSessionRepository sessions;
-    private final PasswordEncoder passwords;
-    private final TokenService tokens;
-    private final AuthProperties properties;
+    private final UserRepository userRepository;
+    private final TermsRepository termsRepository;
+    private final RefreshSessionRepository refreshSessionRepository;
+    private final PasswordEncoder passwordEncoder;
+    private final TokenService tokenService;
+    private final AuthProperties authProperties;
     private final TransactionTemplate tx;
     private String dummyHash;
 
     @PostConstruct
     void init() {
-        dummyHash = passwords.encode("dummy-password");
+        dummyHash = passwordEncoder.encode("dummy-password");
     }
 
-    public Long signup(SignupRequest request) {
-        String email = UserInput.email(request.email());
-        String password = UserInput.password(request.password());
-        if (!password.equals(request.passwordConfirm())) {
+    public Long signup(String emailInput, String passwordInput, String passwordConfirm,
+                       String userNameInput, String phoneInput, List<AgreementRequest> agreementRequests) {
+        String email = UserInput.email(emailInput);
+        String password = UserInput.password(passwordInput);
+        if (!password.equals(passwordConfirm)) {
             throw UserInput.invalid(
                     "passwordConfirm", Reason.PASSWORD_CONFIRMATION_MISMATCH);
         }
-        String name = UserInput.name(request.userName());
-        String phone = UserInput.phone(request.phone());
-        var agreements = UserInput.agreements(request.agreements(), true);
-        if (users.existsByEmail(email)) {
+        String name = UserInput.name(userNameInput);
+        String phone = UserInput.phone(phoneInput);
+        var agreements = UserInput.agreements(agreementRequests, true);
+        if (userRepository.existsByEmail(email)) {
             throw duplicate();
         }
-        String hash = passwords.encode(password);
+        String hash = passwordEncoder.encode(password);
         try {
             return tx.execute(status -> {
                 User user = new User(email, hash, name, phone);
-                agreements.forEach((type, agreed) -> user.agree(terms.getLatest(type), agreed));
-                return users.saveAndFlush(user).getId();
+                agreements.forEach((type, agreed) -> user.agree(termsRepository.getLatest(type), agreed));
+                return userRepository.saveAndFlush(user).getId();
             });
         } catch (DataIntegrityViolationException e) {
-            if (users.existsByEmail(email)) {
+            if (userRepository.existsByEmail(email)) {
                 throw duplicate();
             }
             throw e;
@@ -83,26 +84,26 @@ public class AuthService {
     public record Tokens(Map<String, Object> data, String refreshToken, Instant expiresAt) {
     }
 
-    public Tokens login(LoginRequest loginRequest) {
-        String email = UserInput.email(loginRequest.email());
-        String password = UserInput.password(loginRequest.password());
-        User user = users.findByEmail(email).orElse(null);
-        boolean matches = passwords.matches(password, user == null ? dummyHash : user.getPassword());
+    public Tokens login(String emailInput, String passwordInput) {
+        String email = UserInput.email(emailInput);
+        String password = UserInput.password(passwordInput);
+        User user = userRepository.findByEmail(email).orElse(null);
+        boolean matches = passwordEncoder.matches(password, user == null ? dummyHash : user.getPassword());
         if (user == null || !matches || user.getStatus() != UserStatus.ACTIVE) {
             throw new InvalidCredentialsException();
         }
         return tx.execute(status -> {
-            String raw = tokens.refresh();
-            Instant expiresAt = Instant.now().plus(properties.refreshTtl());
+            String raw = tokenService.refresh();
+            Instant expiresAt = Instant.now().plus(authProperties.refreshTtl());
             RefreshSession session = new RefreshSession(
                     UUID.randomUUID().toString(),
                     user.getId(),
                     TokenService.hash(raw),
                     expiresAt
             );
-            sessions.save(session);
+            refreshSessionRepository.save(session);
             Map<String, Object> data = new LinkedHashMap<>();
-            data.put("accessToken", tokens.access(user, session.getId()));
+            data.put("accessToken", tokenService.access(user, session.getId()));
             data.put("tokenType", "Bearer");
             Map<String, Object> view = UserService.profile(user);
             view.remove("phone");
@@ -113,23 +114,20 @@ public class AuthService {
     }
 
     public Tokens reissue(String raw) {
-        if (raw == null || raw.isBlank() || raw.length() > 100) {
-            throw new UnauthorizedException();
-        }
         return tx.execute(status -> {
-            RefreshSession session = sessions.findLockedByHash(TokenService.hash(raw))
+            RefreshSession session = refreshSessionRepository.findLockedByHash(TokenService.hash(raw))
                     .orElseThrow(UnauthorizedException::new);
             if (!session.active()) {
                 throw new UnauthorizedException();
             }
-            User user = users.findById(session.getUserId()).orElseThrow(UnauthorizedException::new);
+            User user = userRepository.findById(session.getUserId()).orElseThrow(UnauthorizedException::new);
             if (user.getStatus() != UserStatus.ACTIVE) {
                 throw new UnauthorizedException();
             }
-            String next = tokens.refresh();
+            String next = tokenService.refresh();
             session.rotate(TokenService.hash(next));
             Map<String, Object> data = Map.of(
-                    "accessToken", tokens.access(user, session.getId()),
+                    "accessToken", tokenService.access(user, session.getId()),
                     "tokenType", "Bearer"
             );
             return new Tokens(data, next, session.getExpiresAt());
@@ -138,7 +136,7 @@ public class AuthService {
 
     public void logout(AuthPrincipal principal) {
         tx.executeWithoutResult(status -> {
-            RefreshSession session = sessions.findLockedById(principal.sessionId())
+            RefreshSession session = refreshSessionRepository.findLockedById(principal.sessionId())
                     .orElseThrow(UnauthorizedException::new);
             if (!session.getUserId().equals(principal.userId())) {
                 throw new UnauthorizedException();

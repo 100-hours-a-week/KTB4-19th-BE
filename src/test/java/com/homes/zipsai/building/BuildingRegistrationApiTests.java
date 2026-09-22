@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -32,7 +33,8 @@ class BuildingRegistrationApiTests {
     ObjectMapper json;
 
     @Test
-    void managerCanRegisterBuildingWithoutOptionalName() throws Exception {
+    @DisplayName("관리자는 건물명 없이 건물을 등록할 수 있다")
+    void 관리자가건물명없이건물을등록할수있는지확인한다() throws Exception {
         String ip = nextRemoteIp();
         String token = managerToken(ip);
 
@@ -49,7 +51,8 @@ class BuildingRegistrationApiTests {
     }
 
     @Test
-    void managerCannotRegisterMoreThanOneBuilding() throws Exception {
+    @DisplayName("관리자는 건물을 두 개 이상 등록할 수 없다")
+    void 관리자의중복건물등록을거부하는지확인한다() throws Exception {
         String ip = nextRemoteIp();
         String token = managerToken(ip);
         MockHttpServletRequestBuilder request = post("/api/v1/managers/me/building")
@@ -66,7 +69,8 @@ class BuildingRegistrationApiTests {
     }
 
     @Test
-    void registrationRequiresManagerAuthentication() throws Exception {
+    @DisplayName("건물 등록은 관리자 인증이 필요하다")
+    void 미인증사용자와입주민의건물등록을거부하는지확인한다() throws Exception {
         String ip = nextRemoteIp();
 
         mvc.perform(withIp(post("/api/v1/managers/me/building")
@@ -87,7 +91,8 @@ class BuildingRegistrationApiTests {
     }
 
     @Test
-    void registrationUsesCommonCodesForMissingAndInvalidFields() throws Exception {
+    @DisplayName("건물 등록 입력값 오류는 공통 오류 코드로 반환한다")
+    void 필수값누락과길이초과를공통오류코드로반환하는지확인한다() throws Exception {
         String ip = nextRemoteIp();
         String token = managerToken(ip);
 
@@ -118,7 +123,8 @@ class BuildingRegistrationApiTests {
     }
 
     @Test
-    void managerCanCreateOnlySelectedRoomsInBulk() throws Exception {
+    @DisplayName("관리자는 선택한 호실만 일괄 등록할 수 있다")
+    void 관리자가선택한호실을일괄등록할수있는지확인한다() throws Exception {
         String ip = nextRemoteIp();
         String token = managerToken(ip);
         long buildingId = registerBuilding(ip, token);
@@ -140,7 +146,8 @@ class BuildingRegistrationApiTests {
     }
 
     @Test
-    void duplicateRoomRejectsWholeBatchWithoutSavingOtherNumbers() throws Exception {
+    @DisplayName("중복 호실이 포함된 일괄 등록은 전체를 거부한다")
+    void 중복호실이포함된요청에서일부호실이저장되지않는지확인한다() throws Exception {
         String ip = nextRemoteIp();
         String token = managerToken(ip);
         registerBuilding(ip, token);
@@ -159,7 +166,8 @@ class BuildingRegistrationApiTests {
     }
 
     @Test
-    void bulkRoomCreationRequiresRoomNumbersAndLimitsEachNumberToFiveCharacters() throws Exception {
+    @DisplayName("호실 번호는 필수이며 5자 이하여야 한다")
+    void 호실번호누락과길이초과를검증하는지확인한다() throws Exception {
         String ip = nextRemoteIp();
         String token = managerToken(ip);
         registerBuilding(ip, token);
@@ -177,7 +185,8 @@ class BuildingRegistrationApiTests {
     }
 
     @Test
-    void residentCannotCreateRooms() throws Exception {
+    @DisplayName("입주민은 호실을 등록할 수 없다")
+    void 입주민의호실등록을거부하는지확인한다() throws Exception {
         String residentIp = nextRemoteIp();
         String residentToken = userToken(residentIp, "RESIDENT");
         mvc.perform(withIp(roomRequest(residentToken, "101"), residentIp))
@@ -186,7 +195,8 @@ class BuildingRegistrationApiTests {
     }
 
     @Test
-    void bulkRoomCreationRequiresManagersBuilding() throws Exception {
+    @DisplayName("건물이 없는 관리자는 호실을 등록할 수 없다")
+    void 관리건물이없는사용자의호실등록을거부하는지확인한다() throws Exception {
         String ip = nextRemoteIp();
         String token = managerToken(ip);
 
