@@ -28,7 +28,7 @@ public record AiConverseResponse(String code, String traceId, Data data) {
     }
 
     public AiComplaintDraft draftPatch() {
-        DraftPatch patch = data.result().draftPatch();
+        DraftPatch patch = data.result().complaintDraft();
         return patch == null ? null : patch.toDraft();
     }
 
@@ -54,7 +54,7 @@ public record AiConverseResponse(String code, String traceId, Data data) {
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-    public record Result(DraftPatch draftPatch, QaCardDraft qaCardDraft, List<String> missingFields,
+    public record Result(DraftPatch complaintDraft, QaCardDraft qaCardDraft, List<String> missingFields,
                          List<Citation> citations) {
 
         public Result {

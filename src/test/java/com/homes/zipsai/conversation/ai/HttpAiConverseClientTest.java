@@ -66,7 +66,7 @@ class HttpAiConverseClientTest {
                     "next_complaint_state": null,
                     "reply": "아래 내용으로 민원을 접수할까요?",
                     "result": {
-                      "draft_patch": {
+                      "complaint_draft": {
                         "issue_type": "water_supply",
                         "location": "안방 천장",
                         "symptom": "천장에서 물이 새요"
@@ -107,7 +107,7 @@ class HttpAiConverseClientTest {
                     "next_complaint_state": null,
                     "reply": "근거를 찾지 못했습니다.",
                     "result": {
-                      "draft_patch": null,
+                      "complaint_draft": null,
                       "qa_card_draft": { "question": "엘리베이터 정기 점검 일정 문의" },
                       "missing_fields": [],
                       "has_sufficient_evidence": false
