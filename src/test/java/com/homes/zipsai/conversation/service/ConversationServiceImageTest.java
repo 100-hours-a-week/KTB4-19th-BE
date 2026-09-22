@@ -125,6 +125,18 @@ class ConversationServiceImageTest {
     }
 
     @Test
+    @DisplayName("사진만 보낸 첫 메시지는 사진 문의 제목으로 저장되고 AI에 사진만 전달된다")
+    void savesImageOnlyFirstMessage() {
+        givenFiles(uploaded(4L, resident, "jpg"));
+
+        PendingAiReply reply = conversationService.saveFirstMessage(RESIDENT_ID, "", List.of(4L));
+
+        assertThat(reply.conversation().getTitle()).isEqualTo("사진 문의");
+        assertThat(reply.aiRequest().message().text()).isEmpty();
+        assertThat(reply.aiRequest().message().imageUrls()).containsExactly("https://s3.test/key-4");
+    }
+
+    @Test
     @DisplayName("다른 사람의 사진은 첨부할 수 없다")
     void rejectsImageOwnedByAnotherUser() {
         givenFiles(uploaded(4L, user(OTHER_USER_ID), "jpg"));

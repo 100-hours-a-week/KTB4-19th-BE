@@ -53,6 +53,7 @@ import lombok.RequiredArgsConstructor;
 public class ConversationService {
 
     private static final int TITLE_MAX_LENGTH = 30;
+    private static final String IMAGE_ONLY_TITLE = "사진 문의";
     private static final Set<String> IMAGE_TYPES = Set.of("jpg", "jpeg", "png");
 
     private final ConversationRepository conversationRepository;
@@ -129,7 +130,7 @@ public class ConversationService {
         Conversation conversation = conversationRepository.save(Conversation.builder()
             .user(room.getResident())
             .type(ConversationType.INQUIRY)
-            .title(TextUtils.truncate(content, TITLE_MAX_LENGTH))
+            .title(content.isEmpty() ? IMAGE_ONLY_TITLE : TextUtils.truncate(content, TITLE_MAX_LENGTH))
             .build());
         Message residentMessage = saveResidentMessage(conversation, content);
         List<AttachmentResponse> attachments = attachImages(residentMessage, images);

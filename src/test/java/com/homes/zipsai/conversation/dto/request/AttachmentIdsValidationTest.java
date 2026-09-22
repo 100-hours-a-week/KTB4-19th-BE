@@ -59,6 +59,29 @@ class AttachmentIdsValidationTest {
         assertThat(VALIDATOR.validate(new MessageSendRequest("안방이요", null))).isEmpty();
     }
 
+    @Test
+    @DisplayName("사진이 있으면 메시지 내용 없이 보낼 수 있다")
+    void allowsImageOnlyMessage() {
+        assertThat(VALIDATOR.validate(new MessageSendRequest("", List.of(1L)))).isEmpty();
+        assertThat(VALIDATOR.validate(new ConversationCreateRequest(null, List.of(1L)))).isEmpty();
+    }
+
+    @Test
+    @DisplayName("메시지 내용과 사진이 모두 없으면 검증에 실패한다")
+    void rejectsMessageWithoutContentAndImages() {
+        assertThat(fields(VALIDATOR.validate(new MessageSendRequest("   ", null))))
+            .containsExactly("contentOrImagePresent");
+        assertThat(fields(VALIDATOR.validate(new ConversationCreateRequest("", List.of()))))
+            .containsExactly("contentOrImagePresent");
+    }
+
+    @Test
+    @DisplayName("메시지 내용의 앞뒤 공백을 지운다")
+    void stripsContent() {
+        assertThat(new MessageSendRequest("  안방이요  ", null).content()).isEqualTo("안방이요");
+        assertThat(new ConversationCreateRequest(null, List.of(1L)).content()).isEmpty();
+    }
+
     private static <T> List<String> fields(Set<ConstraintViolation<T>> violations) {
         return violations.stream().map(violation -> violation.getPropertyPath().toString()).toList();
     }

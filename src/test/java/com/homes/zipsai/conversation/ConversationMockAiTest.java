@@ -324,6 +324,23 @@ class ConversationMockAiTest {
     }
 
     @Test
+    @DisplayName("사진만 첨부하고 내용 없이 메시지를 보낼 수 있다")
+    void sendsImageOnlyMessage() throws Exception {
+        String email = fixture.livingResident("302");
+        String token = fixture.login(mvc, json, email);
+        long image = fixture.uploadedFile(email, "jpg");
+        given(aiConverseClient.converse(any())).willAnswer(ConversationMockAiTest::collecting);
+
+        mvc.perform(post(CONVERSATIONS).header("Authorization", "Bearer " + token)
+                .contentType("application/json")
+                .content("{\"content\":\"\",\"attachmentIds\":[%d]}".formatted(image)))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.data.conversationTitle").value("사진 문의"))
+            .andExpect(jsonPath("$.data.message.content").value(""))
+            .andExpect(jsonPath("$.data.message.attachments[0].attachmentId").value(image));
+    }
+
+    @Test
     @DisplayName("AI 호출이 실패하면 답변받지 못한 메시지의 사진 연결도 지운다")
     void removesImageLinksOfUnansweredMessageWhenAiFails() throws Exception {
         String email = fixture.livingResident("302");
