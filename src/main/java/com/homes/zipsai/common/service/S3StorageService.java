@@ -9,12 +9,15 @@ import com.homes.zipsai.common.config.StorageProperties;
 import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
 
 @Service
 public class S3StorageService {
@@ -39,6 +42,14 @@ public class S3StorageService {
         return new PresignedUpload(request.url().toString(), contentType);
     }
 
+    public PresignedDownload prepareDownload(String key, Duration ttl) {
+        GetObjectRequest getObject = GetObjectRequest.builder()
+                .bucket(properties.uploadBucket()).key(key).build();
+        PresignedGetObjectRequest request = presigner.presignGetObject(
+                GetObjectPresignRequest.builder().signatureDuration(ttl).getObjectRequest(getObject).build());
+        return new PresignedDownload(request.url().toString());
+    }
+
     public ObjectMetadata head(String key) {
         try {
             HeadObjectResponse response = client.headObject(HeadObjectRequest.builder()
@@ -55,6 +66,9 @@ public class S3StorageService {
     }
 
     public record PresignedUpload(String url, String contentType) {
+    }
+
+    public record PresignedDownload(String url) {
     }
 
     public record ObjectMetadata(long size, String contentType) {
