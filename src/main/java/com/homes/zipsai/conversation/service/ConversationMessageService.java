@@ -1,5 +1,6 @@
 package com.homes.zipsai.conversation.service;
 
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -9,8 +10,6 @@ import org.springframework.stereotype.Service;
 
 import com.homes.zipsai.conversation.ai.AiConverseClient;
 import com.homes.zipsai.conversation.ai.AiConverseResponse;
-import com.homes.zipsai.conversation.dto.request.ConversationCreateRequest;
-import com.homes.zipsai.conversation.dto.request.MessageSendRequest;
 import com.homes.zipsai.conversation.dto.response.ConversationCreateResponse;
 import com.homes.zipsai.conversation.dto.response.MessageResponse;
 import com.homes.zipsai.conversation.dto.response.MessageSendResponse;
@@ -29,20 +28,21 @@ public class ConversationMessageService {
     private final AiConverseClient aiConverseClient;
     private final Set<Long> conversationsWaitingForAi = ConcurrentHashMap.newKeySet();
 
-    public ConversationCreateResponse createConversation(Long userId, ConversationCreateRequest request) {
-        PendingAiReply pendingReply = conversationService.saveFirstMessage(userId, request.content());
+    public ConversationCreateResponse createConversation(Long userId, String content, List<Long> attachmentIds) {
+        PendingAiReply pendingReply = conversationService.saveFirstMessage(userId, content, attachmentIds);
         MessageResponse assistantMessage = askAiAndSaveReply(pendingReply);
         return ConversationCreateResponse.of(pendingReply.conversation(), pendingReply.residentMessage(),
             assistantMessage);
     }
 
-    public MessageSendResponse sendMessage(Long userId, Long conversationId, MessageSendRequest request) {
+    public MessageSendResponse sendMessage(Long userId, Long conversationId, String content,
+                                           List<Long> attachmentIds) {
         if (!conversationsWaitingForAi.add(conversationId)) {
             throw new ConflictException(ConflictException.Reason.CONVERSATION_BUSY);
         }
         try {
             PendingAiReply pendingReply =
-                conversationService.saveNextMessage(userId, conversationId, request.content());
+                conversationService.saveNextMessage(userId, conversationId, content, attachmentIds);
             MessageResponse assistantMessage = askAiAndSaveReply(pendingReply);
             return MessageSendResponse.of(conversationId, pendingReply.residentMessage(), assistantMessage);
         } finally {

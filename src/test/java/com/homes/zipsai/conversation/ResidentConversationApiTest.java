@@ -170,7 +170,7 @@ class ResidentConversationApiTest {
         startConversation(token, "   ")
             .andExpect(status().isUnprocessableContent())
             .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
-            .andExpect(jsonPath("$.error.details.violations[0].field").value("content"))
+            .andExpect(jsonPath("$.error.details.violations[0].field").value("contentOrImagePresent"))
             .andExpect(jsonPath("$.data").value(nullValue()));
         startConversation(token, "가".repeat(201))
             .andExpect(status().isUnprocessableContent())
@@ -194,7 +194,7 @@ class ResidentConversationApiTest {
         sendMessage(token, 1L, "   ")
             .andExpect(status().isUnprocessableContent())
             .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
-            .andExpect(jsonPath("$.error.details.violations[0].field").value("content"));
+            .andExpect(jsonPath("$.error.details.violations[0].field").value("contentOrImagePresent"));
         createComplaint(token, "{}")
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error.details.violations[0].field").value("conversationId"));

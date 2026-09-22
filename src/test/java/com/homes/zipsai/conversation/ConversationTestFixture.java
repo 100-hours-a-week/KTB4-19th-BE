@@ -14,6 +14,8 @@ import com.homes.zipsai.building.domain.Building;
 import com.homes.zipsai.building.domain.Room;
 import com.homes.zipsai.building.repository.BuildingRepository;
 import com.homes.zipsai.building.repository.RoomRepository;
+import com.homes.zipsai.common.domain.File;
+import com.homes.zipsai.common.repository.FileRepository;
 import com.homes.zipsai.user.domain.TermsType;
 import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.domain.UserRole;
@@ -31,15 +33,17 @@ public class ConversationTestFixture {
     private final TermsRepository termsRepository;
     private final BuildingRepository buildingRepository;
     private final RoomRepository roomRepository;
+    private final FileRepository fileRepository;
     private final PasswordEncoder passwordEncoder;
 
     public ConversationTestFixture(UserRepository userRepository, TermsRepository termsRepository,
                                    BuildingRepository buildingRepository, RoomRepository roomRepository,
-                                   PasswordEncoder passwordEncoder) {
+                                   FileRepository fileRepository, PasswordEncoder passwordEncoder) {
         this.userRepository = userRepository;
         this.termsRepository = termsRepository;
         this.buildingRepository = buildingRepository;
         this.roomRepository = roomRepository;
+        this.fileRepository = fileRepository;
         this.passwordEncoder = passwordEncoder;
     }
 
@@ -60,12 +64,30 @@ public class ConversationTestFixture {
         return user(UserRole.RESIDENT).getEmail();
     }
 
+    @Transactional
+    public long uploadedFile(String email, String fileType) {
+        File file = pendingFile(email, fileType);
+        file.markUploaded(1024, fileType);
+        return file.getId();
+    }
+
+    @Transactional
+    public long pendingFile(String email) {
+        return pendingFile(email, "jpg").getId();
+    }
+
     public String login(MockMvc mvc, ObjectMapper json, String email) throws Exception {
         String body = mvc.perform(post("/api/v1/auth/login").contentType("application/json")
                 .content("{\"email\":\"%s\",\"password\":\"%s\"}".formatted(email, PASSWORD)))
             .andExpect(status().isOk())
             .andReturn().getResponse().getContentAsString();
         return json.readTree(body).path("data").path("accessToken").asText();
+    }
+
+    private File pendingFile(String email, String fileType) {
+        File file = new File(UUID.randomUUID() + "." + fileType, 1024, fileType, "photo." + fileType);
+        file.assignOwner(userRepository.findByEmail(email).orElseThrow());
+        return fileRepository.save(file);
     }
 
     private User user(UserRole role) {

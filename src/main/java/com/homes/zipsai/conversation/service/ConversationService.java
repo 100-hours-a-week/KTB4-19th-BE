@@ -1,10 +1,12 @@
 package com.homes.zipsai.conversation.service;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.data.domain.Limit;
@@ -15,21 +17,33 @@ import org.springframework.util.StringUtils;
 import com.homes.zipsai.building.domain.Complaint;
 import com.homes.zipsai.building.domain.Room;
 import com.homes.zipsai.building.service.ResidentRoomService;
+import com.homes.zipsai.common.config.StorageProperties;
+import com.homes.zipsai.common.domain.File;
+import com.homes.zipsai.common.domain.FileStatus;
+import com.homes.zipsai.common.repository.FileRepository;
+import com.homes.zipsai.common.service.S3StorageService;
 import com.homes.zipsai.conversation.ai.AiConverseRequest;
+import com.homes.zipsai.conversation.ai.AiConverseRequest.HistoryMessage;
 import com.homes.zipsai.conversation.ai.AiConverseResponse;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.conversation.domain.Message;
+import com.homes.zipsai.conversation.domain.MessageFileGroup;
 import com.homes.zipsai.conversation.domain.MessageType;
 import com.homes.zipsai.conversation.domain.SenderType;
+import com.homes.zipsai.conversation.dto.response.AttachmentResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationListItemResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationListResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationMessagesResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationStatusResponse;
 import com.homes.zipsai.conversation.dto.response.MessageResponse;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
+import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
+import com.homes.zipsai.global.exception.ConflictException;
+import com.homes.zipsai.global.exception.ForbiddenException;
 import com.homes.zipsai.global.exception.NotFoundException;
+import com.homes.zipsai.global.exception.ValidationFailedException;
 import com.homes.zipsai.global.util.TextUtils;
 
 import lombok.RequiredArgsConstructor;
@@ -39,10 +53,16 @@ import lombok.RequiredArgsConstructor;
 public class ConversationService {
 
     private static final int TITLE_MAX_LENGTH = 30;
+    private static final String IMAGE_ONLY_TITLE = "사진 문의";
+    private static final Set<String> IMAGE_TYPES = Set.of("jpg", "jpeg", "png");
 
     private final ConversationRepository conversationRepository;
     private final MessageRepository messageRepository;
+    private final MessageFileGroupRepository messageFileGroupRepository;
+    private final FileRepository fileRepository;
     private final ResidentRoomService residentRoomService;
+    private final S3StorageService s3StorageService;
+    private final StorageProperties storageProperties;
 
     @Transactional(readOnly = true)
     public ConversationListResponse getConversations(Long userId, String keyword, String cursor, int size) {
@@ -85,7 +105,10 @@ public class ConversationService {
         boolean hasNext = found.size() > size;
         List<Message> latestMessages = hasNext ? found.subList(0, size) : found;
         Long nextCursor = hasNext ? latestMessages.getLast().getId() : null;
-        List<MessageResponse> messages = latestMessages.reversed().stream().map(MessageResponse::from).toList();
+        Map<Long, List<AttachmentResponse>> attachments = findAttachments(latestMessages);
+        List<MessageResponse> messages = latestMessages.reversed().stream()
+            .map(message -> MessageResponse.of(message, attachments.getOrDefault(message.getId(), List.of())))
+            .toList();
 
         Complaint complaint = findComplaints(List.of(conversation)).get(conversationId);
         return ConversationMessagesResponse.of(conversation, complaint, messages, hasNext, nextCursor);
@@ -100,29 +123,41 @@ public class ConversationService {
     }
 
     @Transactional
-    public PendingAiReply saveFirstMessage(Long userId, String content) {
+    public PendingAiReply saveFirstMessage(Long userId, String content, List<Long> attachmentIds) {
         Room room = residentRoomService.getLivingRoom(userId);
+        List<File> images = getAttachableImages(userId, attachmentIds);
+
         Conversation conversation = conversationRepository.save(Conversation.builder()
             .user(room.getResident())
             .type(ConversationType.INQUIRY)
-            .title(TextUtils.truncate(content, TITLE_MAX_LENGTH))
+            .title(content.isEmpty() ? IMAGE_ONLY_TITLE : TextUtils.truncate(content, TITLE_MAX_LENGTH))
             .build());
         Message residentMessage = saveResidentMessage(conversation, content);
-        AiConverseRequest aiRequest = AiConverseRequest.of(room, conversation, residentMessage, List.of());
-        return new PendingAiReply(conversation, MessageResponse.from(residentMessage), true, null, aiRequest);
+        List<AttachmentResponse> attachments = attachImages(residentMessage, images);
+
+        AiConverseRequest aiRequest = AiConverseRequest.of(room, conversation, residentMessage,
+            fileUrls(attachments), List.of());
+        return new PendingAiReply(conversation, MessageResponse.of(residentMessage, attachments), true, null,
+            aiRequest);
     }
 
     @Transactional
-    public PendingAiReply saveNextMessage(Long userId, Long conversationId, String content) {
+    public PendingAiReply saveNextMessage(Long userId, Long conversationId, String content,
+                                          List<Long> attachmentIds) {
         Conversation conversation = getOwnedConversation(userId, conversationId);
         conversation.verifyCanSendMessage();
         Room room = residentRoomService.getLivingRoom(userId);
-        List<Message> history = messageRepository.findAllByConversationId(conversationId);
+        List<File> images = getAttachableImages(userId, attachmentIds);
+        List<HistoryMessage> history = getHistory(conversationId);
         LocalDateTime previousLastMessageAt = conversation.getLastMessageAt();
+
         Message residentMessage = saveResidentMessage(conversation, content);
-        AiConverseRequest aiRequest = AiConverseRequest.of(room, conversation, residentMessage, history);
-        return new PendingAiReply(conversation, MessageResponse.from(residentMessage), false, previousLastMessageAt,
-            aiRequest);
+        List<AttachmentResponse> attachments = attachImages(residentMessage, images);
+
+        AiConverseRequest aiRequest = AiConverseRequest.of(room, conversation, residentMessage,
+            fileUrls(attachments), history);
+        return new PendingAiReply(conversation, MessageResponse.of(residentMessage, attachments), false,
+            previousLastMessageAt, aiRequest);
     }
 
     @Transactional
@@ -142,7 +177,9 @@ public class ConversationService {
     @Transactional
     public void discardUnansweredMessage(PendingAiReply pendingReply) {
         Long conversationId = pendingReply.conversation().getId();
-        messageRepository.deleteById(pendingReply.residentMessage().messageId());
+        Long residentMessageId = pendingReply.residentMessage().messageId();
+        messageFileGroupRepository.deleteAllByMessageId(residentMessageId);
+        messageRepository.deleteById(residentMessageId);
         if (pendingReply.newConversation()) {
             conversationRepository.deleteById(conversationId);
             return;
@@ -168,6 +205,80 @@ public class ConversationService {
             complaints.put(complaint.getConversation().getId(), complaint);
         }
         return complaints;
+    }
+
+    private List<File> getAttachableImages(Long userId, List<Long> attachmentIds) {
+        if (attachmentIds == null) {
+            return List.of();
+        }
+
+        List<File> images = new ArrayList<>();
+        for (Long attachmentId : attachmentIds.stream().distinct().toList()) {
+            File file = fileRepository.findById(attachmentId)
+                .filter(found -> found.getDeletedAt() == null)
+                .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.ATTACHMENT));
+            verifyAttachableImage(file, userId);
+            images.add(file);
+        }
+        return images;
+    }
+
+    private void verifyAttachableImage(File file, Long userId) {
+        if (file.getOwner() == null || !file.getOwner().getId().equals(userId)) {
+            throw new ForbiddenException();
+        }
+        if (file.getStatus() != FileStatus.UPLOADED) {
+            throw new ConflictException(ConflictException.Reason.UPLOAD_NOT_COMPLETED);
+        }
+        if (!IMAGE_TYPES.contains(file.getFileType())) {
+            throw new ValidationFailedException("attachmentIds", ValidationFailedException.Reason.INVALID_FILE_TYPE);
+        }
+    }
+
+    private List<AttachmentResponse> attachImages(Message message, List<File> images) {
+        List<AttachmentResponse> attachments = new ArrayList<>();
+        for (int i = 0; i < images.size(); i++) {
+            MessageFileGroup fileGroup = messageFileGroupRepository.save(MessageFileGroup.builder()
+                .message(message)
+                .attachment(images.get(i))
+                .fileGroupSeq(i + 1)
+                .build());
+            attachments.add(toAttachmentResponse(fileGroup));
+        }
+        return attachments;
+    }
+
+    private List<HistoryMessage> getHistory(Long conversationId) {
+        List<Message> messages = messageRepository.findAllByConversationId(conversationId);
+        Map<Long, List<AttachmentResponse>> attachments = findAttachments(messages);
+
+        List<HistoryMessage> history = new ArrayList<>();
+        for (Message message : messages) {
+            history.add(HistoryMessage.of(message, fileUrls(attachments.getOrDefault(message.getId(), List.of()))));
+        }
+        return history;
+    }
+
+    private Map<Long, List<AttachmentResponse>> findAttachments(List<Message> messages) {
+        List<Long> messageIds = messages.stream().map(message -> message.getId()).toList();
+
+        Map<Long, List<AttachmentResponse>> attachments = new HashMap<>();
+        for (MessageFileGroup fileGroup : messageFileGroupRepository.findAllByMessageIds(messageIds)) {
+            attachments.computeIfAbsent(fileGroup.getMessage().getId(), messageId -> new ArrayList<>())
+                .add(toAttachmentResponse(fileGroup));
+        }
+        return attachments;
+    }
+
+    private AttachmentResponse toAttachmentResponse(MessageFileGroup fileGroup) {
+        File attachment = fileGroup.getAttachment();
+        Duration ttl = Duration.ofSeconds(storageProperties.presignedUrlTtlSeconds());
+        String fileUrl = s3StorageService.prepareDownload(attachment.getFileKey(), ttl).url();
+        return new AttachmentResponse(attachment.getId(), fileUrl, fileGroup.getFileGroupSeq());
+    }
+
+    private static List<String> fileUrls(List<AttachmentResponse> attachments) {
+        return attachments.stream().map(attachment -> attachment.fileUrl()).toList();
     }
 
     private Message saveResidentMessage(Conversation conversation, String content) {

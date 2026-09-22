@@ -20,10 +20,14 @@ public record MessageResponse(
 ) {
 
     public static MessageResponse from(Message message) {
+        return of(message, List.of());
+    }
+
+    public static MessageResponse of(Message message, List<AttachmentResponse> attachments) {
         SummaryCardResponse summaryCard = message.getMessageType() == MessageType.SUMMARY_CARD
             ? SummaryCardResponse.from(message.getConversation().currentDraft())
             : null;
         return new MessageResponse(message.getId(), message.getSenderType(), message.getMessageType(),
-            message.getContent(), List.of(), summaryCard, message.getCreatedAt());
+            message.getContent(), attachments, summaryCard, message.getCreatedAt());
     }
 }
