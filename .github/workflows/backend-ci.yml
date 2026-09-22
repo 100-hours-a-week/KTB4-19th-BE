@@ -1,7 +1,7 @@
 name: Backend CI
 
 # Pull Request에서는 검증만 한다.
-# main 병합으로 발생한 push에서만 검증된 Image를 Commit SHA Tag로 ECR에 Push한다.
+# main 병합으로 발생한 push에서만 검증된 Image를 Commit SHA 앞 7자리 Tag로 ECR에 Push한다.
 on:
   pull_request:
     branches: [main]
@@ -39,6 +39,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
+          # Gradle 의존성·Wrapper를 GitHub Actions Cache에 보관한다.
+          cache: gradle
 
       # 실제 Backend 테스트 코드를 실행한다.
       - name: Run tests
@@ -58,6 +60,9 @@ jobs:
           context: .
           push: false
           tags: zipsai-backend:validation
+          # 다음 CI 실행에서 Gradle Build·Docker Layer를 재사용한다.
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
 
   publish-image:
     name: Main Image Build and Push
@@ -85,10 +90,17 @@ jobs:
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      # 최종 main Commit SHA를 Image Tag로 사용한다.
+      # GitHub 화면에 표시되는 짧은 Commit SHA와 같은 앞 7자리를 ECR Tag로 사용한다.
+      - name: Set short ECR image tag
+        id: image-tag
+        run: echo "value=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
       - name: Build and publish Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          tags: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ steps.image-tag.outputs.value }}
+          # PR 검증 Build와 main Image Build가 같은 Docker Layer Cache를 공유한다.
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend

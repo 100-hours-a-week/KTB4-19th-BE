@@ -1,11 +1,11 @@
 name: Backend CD
 
-# 배포할 main Commit SHA를 운영자가 선택한다.
+# 배포할 main Commit SHA 앞 7자리를 운영자가 선택한다.
 on:
   workflow_dispatch:
     inputs:
       commit_sha:
-        description: EC2 Backend Container에 배포할 main Commit SHA
+        description: EC2 Backend Container에 배포할 main Commit SHA 앞 7자리
         required: true
         type: string
 
@@ -40,7 +40,8 @@ jobs:
         run: |
           DEPLOY_SHA="$(git rev-parse "${DEPLOY_SHA}^{commit}")"
           git merge-base --is-ancestor "$DEPLOY_SHA" origin/main
-          echo "deploy_sha=$DEPLOY_SHA" >> "$GITHUB_ENV"
+          # ECR에는 Commit SHA 앞 7자리 Tag만 저장한다.
+          echo "deploy_sha=${DEPLOY_SHA::7}" >> "$GITHUB_ENV"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v5
