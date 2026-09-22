@@ -9,12 +9,14 @@ import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.homes.zipsai.auth.service.TokenService;
 import com.homes.zipsai.auth.dto.AgreementRequest;
+import com.homes.zipsai.auth.service.TokenService;
+import com.homes.zipsai.building.domain.Building;
+import com.homes.zipsai.building.domain.Room;
 import com.homes.zipsai.building.domain.RoomStatus;
 import com.homes.zipsai.building.repository.BuildingRepository;
 import com.homes.zipsai.building.repository.RoomRepository;
-import com.homes.zipsai.user.dto.OnboardingStatusResponse;
+import com.homes.zipsai.building.service.ResidentRoomService;
 import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.global.exception.UnauthorizedException;
 import com.homes.zipsai.global.exception.ValidationFailedException.Reason;
@@ -25,6 +27,9 @@ import com.homes.zipsai.user.domain.UserAgreement;
 import com.homes.zipsai.user.domain.UserRole;
 import com.homes.zipsai.user.domain.UserStatus;
 import com.homes.zipsai.user.dto.EmailAvailabilityResponse;
+import com.homes.zipsai.user.dto.ManagerMyPageResponse;
+import com.homes.zipsai.user.dto.OnboardingStatusResponse;
+import com.homes.zipsai.user.dto.ResidentMyPageResponse;
 import com.homes.zipsai.user.dto.UserAgreementResponse;
 import com.homes.zipsai.user.dto.UserPatchResponse;
 import com.homes.zipsai.user.dto.UserProfileResponse;
@@ -39,14 +44,17 @@ public class UserService {
     private final TermsRepository termsRepository;
     private final BuildingRepository buildingRepository;
     private final RoomRepository roomRepository;
+    private final ResidentRoomService residentRoomService;
 
     public UserService(UserRepository userRepository, TokenService tokenService, TermsRepository termsRepository,
-            BuildingRepository buildingRepository, RoomRepository roomRepository) {
+            BuildingRepository buildingRepository, RoomRepository roomRepository,
+            ResidentRoomService residentRoomService) {
         this.userRepository = userRepository;
         this.tokenService = tokenService;
         this.termsRepository = termsRepository;
         this.buildingRepository = buildingRepository;
         this.roomRepository = roomRepository;
+        this.residentRoomService = residentRoomService;
     }
 
     public User active(Long id) {
@@ -84,6 +92,39 @@ public class UserService {
     }
 
     @Transactional(readOnly = true)
+    public ManagerMyPageResponse getManagerMyPage(Long id) {
+        User user = active(id);
+        Building building = buildingRepository.findByManager_IdAndDeletedAtIsNull(id).orElse(null);
+        return new ManagerMyPageResponse(
+                user.getId(),
+                user.getUserName(),
+                user.getEmail(),
+                user.getPhone(),
+                building == null ? null : building.getId(),
+                building == null ? null : building.getBuildingName(),
+                building == null ? null : building.getRoadAddress()
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public ResidentMyPageResponse getResidentMyPage(Long id) {
+        User user = active(id);
+        Room room = residentRoomService.getLivingRoom(id);
+        User manager = room.getBuilding().getManager();
+        return new ResidentMyPageResponse(
+                user.getId(),
+                user.getUserName(),
+                user.getEmail(),
+                user.getPhone(),
+                room.getId(),
+                room.getBuilding().getBuildingName(),
+                room.getRoomNo(),
+                manager.getUserName(),
+                manager.getPhone()
+        );
+    }
+
+    @Transactional(readOnly = true)
     public OnboardingStatusResponse onboardingStatus(AuthPrincipal principal) {
         User user = active(principal.userId());
         if (user.getRole() == UserRole.NONE) {
@@ -94,7 +135,9 @@ public class UserService {
             return new OnboardingStatusResponse(UserRole.RESIDENT, null, false, connected,
                     connected ? "HOME" : "INVITATION_CODE");
         }
-        Long buildingId = buildingRepository.findByManager_IdAndDeletedAtIsNull(user.getId()).map(b -> b.getId()).orElse(null);
+        Long buildingId = buildingRepository.findByManager_IdAndDeletedAtIsNull(user.getId())
+                .map(b -> b.getId())
+                .orElse(null);
         boolean hasRooms = buildingId != null && roomRepository.existsByBuilding_IdAndDeletedAtIsNull(buildingId);
         return new OnboardingStatusResponse(UserRole.MANAGER, buildingId, hasRooms, false,
                 buildingId == null ? "BUILDING_REGISTRATION" : hasRooms ? "HOME" : "ROOM_REGISTRATION");
