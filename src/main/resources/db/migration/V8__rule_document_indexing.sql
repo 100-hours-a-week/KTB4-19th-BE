@@ -1,0 +1,3 @@
+ALTER TABLE Rule_Documents
+    ADD COLUMN indexing_status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    ADD COLUMN indexing_error VARCHAR(500) NULL;
