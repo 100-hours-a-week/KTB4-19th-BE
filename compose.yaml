@@ -20,7 +20,6 @@ services:
   backend:
     build: .
     environment:
-      SPRING_PROFILES_ACTIVE: local
       DB_URL: jdbc:mysql://db:3306/zipsai?serverTimezone=Asia/Seoul&characterEncoding=UTF-8&allowPublicKeyRetrieval=true&useSSL=false
       DB_USERNAME: root
       DB_PASSWORD: ${DB_PASSWORD:-mysql}
