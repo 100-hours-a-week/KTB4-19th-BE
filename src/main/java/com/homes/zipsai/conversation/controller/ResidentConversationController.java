@@ -66,8 +66,8 @@ public class ResidentConversationController {
         @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal,
         @Valid @RequestBody ConversationCreateRequest request
     ) {
-        ConversationCreateResponse created =
-            conversationMessageService.createConversation(principal.userId(), request.content());
+        ConversationCreateResponse created = conversationMessageService.createConversation(
+            principal.userId(), request.content(), request.attachmentIds());
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.data(created));
     }
 
@@ -106,8 +106,8 @@ public class ResidentConversationController {
         @PathVariable @Positive(message = "1 이상의 정수여야 합니다.") Long conversationId,
         @Valid @RequestBody MessageSendRequest request
     ) {
-        MessageSendResponse sent =
-            conversationMessageService.sendMessage(principal.userId(), conversationId, request.content());
+        MessageSendResponse sent = conversationMessageService.sendMessage(
+            principal.userId(), conversationId, request.content(), request.attachmentIds());
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.data(sent));
     }
 }

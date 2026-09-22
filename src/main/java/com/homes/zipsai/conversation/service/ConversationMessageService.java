@@ -1,5 +1,6 @@
 package com.homes.zipsai.conversation.service;
 
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -27,20 +28,21 @@ public class ConversationMessageService {
     private final AiConverseClient aiConverseClient;
     private final Set<Long> conversationsWaitingForAi = ConcurrentHashMap.newKeySet();
 
-    public ConversationCreateResponse createConversation(Long userId, String content) {
-        PendingAiReply pendingReply = conversationService.saveFirstMessage(userId, content);
+    public ConversationCreateResponse createConversation(Long userId, String content, List<Long> attachmentIds) {
+        PendingAiReply pendingReply = conversationService.saveFirstMessage(userId, content, attachmentIds);
         MessageResponse assistantMessage = askAiAndSaveReply(pendingReply);
         return ConversationCreateResponse.of(pendingReply.conversation(), pendingReply.residentMessage(),
             assistantMessage);
     }
 
-    public MessageSendResponse sendMessage(Long userId, Long conversationId, String content) {
+    public MessageSendResponse sendMessage(Long userId, Long conversationId, String content,
+                                           List<Long> attachmentIds) {
         if (!conversationsWaitingForAi.add(conversationId)) {
             throw new ConflictException(ConflictException.Reason.CONVERSATION_BUSY);
         }
         try {
             PendingAiReply pendingReply =
-                conversationService.saveNextMessage(userId, conversationId, content);
+                conversationService.saveNextMessage(userId, conversationId, content, attachmentIds);
             MessageResponse assistantMessage = askAiAndSaveReply(pendingReply);
             return MessageSendResponse.of(conversationId, pendingReply.residentMessage(), assistantMessage);
         } finally {

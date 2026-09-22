@@ -1,6 +1,7 @@
 package com.homes.zipsai.conversation.ai;
 
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 import com.homes.zipsai.building.domain.Room;
@@ -26,7 +27,13 @@ public record AiConverseRequest(
 ) {
 
     public static AiConverseRequest of(Room room, Conversation conversation, Message residentMessage,
-                                       List<Message> history) {
+                                       List<String> imageUrls, List<HistoryMessage> history) {
+        List<String> draftImageUrls = new ArrayList<>();
+        for (HistoryMessage message : history) {
+            draftImageUrls.addAll(message.imageUrls());
+        }
+        draftImageUrls.addAll(imageUrls);
+
         return new AiConverseRequest(
             room.getBuilding().getId(),
             room.getRoomNo(),
@@ -35,9 +42,9 @@ public record AiConverseRequest(
             residentMessage.getTraceId(),
             conversation.getCurrentRoute(),
             conversation.getComplaintState(),
-            new MessagePayload(String.valueOf(residentMessage.getId()), residentMessage.getContent(), List.of()),
-            history.stream().map(HistoryMessage::from).toList(),
-            ComplaintDraftPayload.from(conversation.currentDraft()));
+            new MessagePayload(String.valueOf(residentMessage.getId()), residentMessage.getContent(), imageUrls),
+            history,
+            ComplaintDraftPayload.of(conversation.currentDraft(), draftImageUrls));
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
@@ -47,9 +54,9 @@ public record AiConverseRequest(
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record HistoryMessage(String messageId, AiTurnRole role, String text, List<String> imageUrls) {
 
-        static HistoryMessage from(Message message) {
+        public static HistoryMessage of(Message message, List<String> imageUrls) {
             AiTurnRole role = message.getSenderType() == SenderType.RESIDENT ? AiTurnRole.USER : AiTurnRole.ASSISTANT;
-            return new HistoryMessage(String.valueOf(message.getId()), role, message.getContent(), List.of());
+            return new HistoryMessage(String.valueOf(message.getId()), role, message.getContent(), imageUrls);
         }
     }
 
@@ -57,11 +64,11 @@ public record AiConverseRequest(
     public record ComplaintDraftPayload(String location, String symptom, OffsetDateTime occurredAt,
                                         List<String> imageUrls) {
 
-        static ComplaintDraftPayload from(AiComplaintDraft draft) {
+        static ComplaintDraftPayload of(AiComplaintDraft draft, List<String> imageUrls) {
             if (draft.isEmpty()) {
                 return null;
             }
-            return new ComplaintDraftPayload(draft.location(), draft.symptom(), draft.occurredAt(), List.of());
+            return new ComplaintDraftPayload(draft.location(), draft.symptom(), draft.occurredAt(), imageUrls);
         }
 
         public AiComplaintDraft toDraft() {
