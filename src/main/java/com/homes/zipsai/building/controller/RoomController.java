@@ -1,5 +1,7 @@
 package com.homes.zipsai.building.controller;
 
+import jakarta.validation.Valid;
+
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -31,10 +33,10 @@ public class RoomController {
     @Operation(summary = "호실 일괄 등록")
     public ResponseEntity<ApiResponse<RoomBulkCreateResponse>> create(
             @AuthenticationPrincipal AuthPrincipal principal,
-            @RequestBody RoomBulkCreateRequest request
+            @Valid @RequestBody RoomBulkCreateRequest roomBulkCreateRequest
     ) {
         return ResponseEntity.status(201)
-                .body(ApiResponse.data(roomService.create(principal, request)));
+                .body(ApiResponse.data(roomService.create(principal.userId(), roomBulkCreateRequest.roomNos())));
     }
 
     @DeleteMapping("/rooms/{roomId}/resident")

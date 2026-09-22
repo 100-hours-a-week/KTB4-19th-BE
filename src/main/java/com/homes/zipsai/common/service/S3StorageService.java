@@ -23,17 +23,17 @@ import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequ
 public class S3StorageService {
     private final S3Client client;
     private final S3Presigner presigner;
-    private final StorageProperties properties;
+    private final StorageProperties storageProperties;
 
-    public S3StorageService(S3Client client, S3Presigner presigner, StorageProperties properties) {
+    public S3StorageService(S3Client client, S3Presigner presigner, StorageProperties storageProperties) {
         this.client = client;
         this.presigner = presigner;
-        this.properties = properties;
+        this.storageProperties = storageProperties;
     }
 
     public PresignedUpload prepareUpload(String key, String contentType, Duration ttl) {
         PutObjectRequest putObject = PutObjectRequest.builder()
-                .bucket(properties.uploadBucket())
+                .bucket(storageProperties.uploadBucket())
                 .key(key)
                 .contentType(contentType)
                 .build();
@@ -44,7 +44,7 @@ public class S3StorageService {
 
     public PresignedDownload prepareDownload(String key, Duration ttl) {
         GetObjectRequest getObject = GetObjectRequest.builder()
-                .bucket(properties.uploadBucket()).key(key).build();
+                .bucket(storageProperties.uploadBucket()).key(key).build();
         PresignedGetObjectRequest request = presigner.presignGetObject(
                 GetObjectPresignRequest.builder().signatureDuration(ttl).getObjectRequest(getObject).build());
         return new PresignedDownload(request.url().toString());
@@ -53,7 +53,7 @@ public class S3StorageService {
     public ObjectMetadata head(String key) {
         try {
             HeadObjectResponse response = client.headObject(HeadObjectRequest.builder()
-                    .bucket(properties.uploadBucket()).key(key).build());
+                    .bucket(storageProperties.uploadBucket()).key(key).build());
             return new ObjectMetadata(response.contentLength(), response.contentType());
         } catch (SdkException exception) {
             return null;
@@ -62,7 +62,7 @@ public class S3StorageService {
 
     public void delete(String key) {
         client.deleteObject(DeleteObjectRequest.builder()
-                .bucket(properties.uploadBucket()).key(key).build());
+                .bucket(storageProperties.uploadBucket()).key(key).build());
     }
 
     public record PresignedUpload(String url, String contentType) {

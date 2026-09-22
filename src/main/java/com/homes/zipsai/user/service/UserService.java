@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.homes.zipsai.auth.service.TokenService;
+import com.homes.zipsai.auth.dto.AgreementRequest;
 import com.homes.zipsai.building.domain.RoomStatus;
 import com.homes.zipsai.building.repository.BuildingRepository;
 import com.homes.zipsai.building.repository.RoomRepository;
@@ -25,7 +26,6 @@ import com.homes.zipsai.user.domain.UserRole;
 import com.homes.zipsai.user.domain.UserStatus;
 import com.homes.zipsai.user.dto.EmailAvailabilityResponse;
 import com.homes.zipsai.user.dto.UserAgreementResponse;
-import com.homes.zipsai.user.dto.UserPatchRequest;
 import com.homes.zipsai.user.dto.UserPatchResponse;
 import com.homes.zipsai.user.dto.UserProfileResponse;
 import com.homes.zipsai.user.repository.TermsRepository;
@@ -34,23 +34,23 @@ import com.homes.zipsai.user.validator.UserInput;
 
 @Service
 public class UserService {
-    private final UserRepository users;
-    private final TokenService tokens;
-    private final TermsRepository terms;
-    private final BuildingRepository buildings;
-    private final RoomRepository rooms;
+    private final UserRepository userRepository;
+    private final TokenService tokenService;
+    private final TermsRepository termsRepository;
+    private final BuildingRepository buildingRepository;
+    private final RoomRepository roomRepository;
 
-    public UserService(UserRepository users, TokenService tokens, TermsRepository terms,
-            BuildingRepository buildings, RoomRepository rooms) {
-        this.users = users;
-        this.tokens = tokens;
-        this.terms = terms;
-        this.buildings = buildings;
-        this.rooms = rooms;
+    public UserService(UserRepository userRepository, TokenService tokenService, TermsRepository termsRepository,
+            BuildingRepository buildingRepository, RoomRepository roomRepository) {
+        this.userRepository = userRepository;
+        this.tokenService = tokenService;
+        this.termsRepository = termsRepository;
+        this.buildingRepository = buildingRepository;
+        this.roomRepository = roomRepository;
     }
 
     public User active(Long id) {
-        User user = users.findById(id).orElseThrow(UnauthorizedException::new);
+        User user = userRepository.findById(id).orElseThrow(UnauthorizedException::new);
         if (user.getStatus() != UserStatus.ACTIVE) {
             throw new UnauthorizedException();
         }
@@ -62,15 +62,15 @@ public class UserService {
         String normalizedEmail = UserInput.email(email);
         return new EmailAvailabilityResponse(
                 normalizedEmail,
-                !users.existsByEmail(normalizedEmail)
+                !userRepository.existsByEmail(normalizedEmail)
         );
     }
 
     @Transactional(readOnly = true)
     public UserProfileResponse me(Long id) {
         User user = active(id);
-        Long buildingId = buildings.findByManager_IdAndDeletedAtIsNull(id).map(b -> b.getId()).orElse(null);
-        Long roomId = rooms.findByResidentIdAndStatus(id, RoomStatus.LIVING).map(r -> r.getId()).orElse(null);
+        Long buildingId = buildingRepository.findByManager_IdAndDeletedAtIsNull(id).map(b -> b.getId()).orElse(null);
+        Long roomId = roomRepository.findByResidentIdAndStatus(id, RoomStatus.LIVING).map(r -> r.getId()).orElse(null);
         return new UserProfileResponse(
                 user.getId(),
                 user.getEmail(),
@@ -90,12 +90,12 @@ public class UserService {
             return new OnboardingStatusResponse(UserRole.NONE, null, false, false, "ROLE_SELECTION");
         }
         if (user.getRole() == UserRole.RESIDENT) {
-            boolean connected = rooms.existsLivingByResidentId(user.getId());
+            boolean connected = roomRepository.existsLivingByResidentId(user.getId());
             return new OnboardingStatusResponse(UserRole.RESIDENT, null, false, connected,
                     connected ? "HOME" : "INVITATION_CODE");
         }
-        Long buildingId = buildings.findByManager_IdAndDeletedAtIsNull(user.getId()).map(b -> b.getId()).orElse(null);
-        boolean hasRooms = buildingId != null && rooms.existsByBuilding_IdAndDeletedAtIsNull(buildingId);
+        Long buildingId = buildingRepository.findByManager_IdAndDeletedAtIsNull(user.getId()).map(b -> b.getId()).orElse(null);
+        boolean hasRooms = buildingId != null && roomRepository.existsByBuilding_IdAndDeletedAtIsNull(buildingId);
         return new OnboardingStatusResponse(UserRole.MANAGER, buildingId, hasRooms, false,
                 buildingId == null ? "BUILDING_REGISTRATION" : hasRooms ? "HOME" : "ROOM_REGISTRATION");
     }
@@ -122,8 +122,9 @@ public class UserService {
     }
 
     @Transactional
-    public UserPatchResponse patch(AuthPrincipal principal, UserPatchRequest request) {
-        User user = users.findLocked(principal.userId()).orElseThrow(UnauthorizedException::new);
+    public UserPatchResponse patch(AuthPrincipal principal, UserRole requestedRole, String requestedName,
+                                   String requestedPhone, List<AgreementRequest> agreementRequests) {
+        User user = userRepository.findLocked(principal.userId()).orElseThrow(UnauthorizedException::new);
         if (user.getStatus() != UserStatus.ACTIVE) {
             throw new UnauthorizedException();
         }
@@ -133,8 +134,8 @@ public class UserService {
         List<UserAgreementResponse> updatedAgreements = null;
         String accessToken = null;
         String tokenType = null;
-        if (request.userRole() != null) {
-            UserRole role = request.userRole();
+        if (requestedRole != null) {
+            UserRole role = requestedRole;
             if (role == UserRole.NONE) {
                 throw UserInput.invalid("userRole", Reason.INVALID_USER_ROLE);
             }
@@ -145,29 +146,29 @@ public class UserService {
                 user.selectRole(role);
             }
             updatedRole = role;
-            accessToken = tokens.access(user, principal.sessionId());
+            accessToken = tokenService.access(user, principal.sessionId());
             tokenType = "Bearer";
         }
-        if (request.userName() != null) {
-            user.changeUserName(UserInput.name(request.userName()));
+        if (requestedName != null) {
+            user.changeUserName(UserInput.name(requestedName));
             updatedUserName = user.getUserName();
         }
-        if (request.phone() != null) {
-            user.changePhone(UserInput.phone(request.phone()));
+        if (requestedPhone != null) {
+            user.changePhone(UserInput.phone(requestedPhone));
             updatedPhone = user.getPhone();
         }
-        Map<TermsType, Boolean> updates = UserInput.agreements(request.agreements(), false);
-        if (request.agreements() != null) {
+        Map<TermsType, Boolean> updates = UserInput.agreements(agreementRequests, false);
+        if (agreementRequests != null) {
             for (var entry : updates.entrySet()) {
                 boolean unchanged = agreementViews(user).stream().anyMatch(agreement ->
                         agreement.termsType() == entry.getKey()
                                 && agreement.isAgreed() == entry.getValue()
                 );
                 if (!unchanged) {
-                    user.agree(terms.getLatest(entry.getKey()), entry.getValue());
+                    user.agree(termsRepository.getLatest(entry.getKey()), entry.getValue());
                 }
             }
-            users.saveAndFlush(user);
+            userRepository.saveAndFlush(user);
             updatedAgreements = agreementViews(user).stream()
                     .filter(agreement -> updates.containsKey(agreement.termsType()))
                     .toList();

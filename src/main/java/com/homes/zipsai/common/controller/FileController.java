@@ -37,8 +37,9 @@ public class FileController {
     @Operation(summary = "첨부파일 업로드 URL 발급", description = "S3에 직접 업로드할 수 있는 Presigned PUT URL을 발급한다.")
     public ResponseEntity<ApiResponse<FileUploadResponse>> createUpload(
             @AuthenticationPrincipal AuthPrincipal principal,
-            @Valid @RequestBody FileUploadRequest request) {
-        return ResponseEntity.status(201).body(ApiResponse.data(fileService.createUpload(principal, request)));
+            @Valid @RequestBody FileUploadRequest fileUploadRequest) {
+        return ResponseEntity.status(201).body(ApiResponse.data(fileService.createUpload(
+                principal, fileUploadRequest.originalName(), fileUploadRequest.fileType(), fileUploadRequest.fileSize())));
     }
 
     @PatchMapping("/{attachmentId}")
@@ -46,8 +47,8 @@ public class FileController {
     public ApiResponse<FileCompleteResponse> complete(
             @AuthenticationPrincipal AuthPrincipal principal,
             @PathVariable long attachmentId,
-            @Valid @RequestBody FileCompleteRequest request) {
-        return ApiResponse.data(fileService.complete(principal, attachmentId, request));
+            @Valid @RequestBody FileCompleteRequest fileCompleteRequest) {
+        return ApiResponse.data(fileService.complete(principal, attachmentId, fileCompleteRequest.fileStatus()));
     }
 
     @GetMapping("/{attachmentId}")
