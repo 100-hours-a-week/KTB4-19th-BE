@@ -14,9 +14,12 @@ import com.homes.zipsai.building.dto.RoomBulkCreateResponse;
 import com.homes.zipsai.building.service.RoomService;
 import com.homes.zipsai.global.response.ApiResponse;
 import com.homes.zipsai.global.security.AuthPrincipal;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 
 @RestController
 @RequestMapping("/api/v1/managers/me")
+@Tag(name = "관리자 호실", description = "관리자 건물의 호실을 일괄 등록하고 입주민을 퇴거 처리한다.")
 public class RoomController {
     private final RoomService roomService;
 
@@ -25,6 +28,7 @@ public class RoomController {
     }
 
     @PostMapping("/building/rooms")
+    @Operation(summary = "호실 일괄 등록")
     public ResponseEntity<ApiResponse<RoomBulkCreateResponse>> create(
             @AuthenticationPrincipal AuthPrincipal principal,
             @RequestBody RoomBulkCreateRequest request
@@ -34,6 +38,7 @@ public class RoomController {
     }
 
     @DeleteMapping("/rooms/{roomId}/resident")
+    @Operation(summary = "입주민 퇴거 처리")
     public ResponseEntity<ApiResponse<Void>> moveOut(
             @AuthenticationPrincipal AuthPrincipal principal,
             @PathVariable Long roomId
