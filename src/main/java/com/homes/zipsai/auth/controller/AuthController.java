@@ -29,16 +29,20 @@ import com.homes.zipsai.user.domain.UserRole;
 import com.homes.zipsai.user.dto.UserResponse;
 
 import lombok.RequiredArgsConstructor;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/v1/auth")
+@Tag(name = "인증", description = "회원가입, 로그인, 토큰 재발급과 로그아웃을 처리한다.")
 public class AuthController {
     private final AuthService authService;
     private final AuthProperties properties;
 
     // V3_P1_1: 가입 후 로그인 화면으로 이동한다.
     @PostMapping("/signup")
+    @Operation(summary = "회원가입")
     public ResponseEntity<ApiResponse<SignupResponse>> signup(
             @RequestBody SignupRequest request
     ) {
@@ -47,6 +51,7 @@ public class AuthController {
     }
 
     @PostMapping("/login")
+    @Operation(summary = "로그인", description = "access token을 응답하고 refresh token을 쿠키로 발급한다.")
     public ApiResponse<LoginResponse> login(
             @RequestBody LoginRequest loginRequest,
             HttpServletResponse response
@@ -55,6 +60,7 @@ public class AuthController {
     }
 
     @PostMapping("/reissue")
+    @Operation(summary = "access token 재발급")
     public ApiResponse<ReissueResponse> reissue(
             @CookieValue(name = "refreshToken", required = false) String refresh,
             HttpServletResponse response
@@ -73,6 +79,7 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
+    @Operation(summary = "로그아웃")
     public ApiResponse<Void> logout(
             @AuthenticationPrincipal AuthPrincipal principal,
             HttpServletResponse response
