@@ -14,6 +14,7 @@ import com.homes.zipsai.common.domain.File;
 import com.homes.zipsai.common.domain.FileStatus;
 import com.homes.zipsai.common.dto.FileCompleteRequest;
 import com.homes.zipsai.common.dto.FileCompleteResponse;
+import com.homes.zipsai.common.dto.FileDownloadResponse;
 import com.homes.zipsai.common.dto.FileUploadRequest;
 import com.homes.zipsai.common.dto.FileUploadResponse;
 import com.homes.zipsai.common.repository.FileRepository;
@@ -79,6 +80,20 @@ public class FileService {
         }
         file.markUploaded((int) metadata.size(), actualType);
         return response(file);
+    }
+
+    @Transactional(readOnly = true)
+    public FileDownloadResponse createDownloadUrl(long attachmentId) {
+        File file = files.findById(attachmentId)
+                .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.ATTACHMENT));
+        if (file.getStatus() != FileStatus.UPLOADED) {
+            throw new ConflictException(ConflictException.Reason.UPLOAD_NOT_COMPLETED);
+        }
+        int ttl = properties.presignedUrlTtlSeconds();
+        String url = storage.prepareDownload(file.getFileKey(), Duration.ofSeconds(ttl)).url();
+        return new FileDownloadResponse(
+                file.getId(), file.getOriginalName(), file.getFileSize(), file.getFileType(),
+                file.getStatus().name(), url, ttl);
     }
 
     private void validateRequest(FileUploadRequest request) {
