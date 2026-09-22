@@ -19,6 +19,7 @@ import com.homes.zipsai.common.config.StorageProperties;
 import com.homes.zipsai.common.domain.File;
 import com.homes.zipsai.common.domain.FileStatus;
 import com.homes.zipsai.common.repository.FileRepository;
+import com.homes.zipsai.common.service.S3StorageService;
 import com.homes.zipsai.conversation.ai.AiIndexingClient;
 import com.homes.zipsai.conversation.ai.AiIndexingRequest;
 import com.homes.zipsai.global.exception.ConflictException;
@@ -37,6 +38,7 @@ public class RuleDocumentService {
     private final BuildingRepository buildingRepository;
     private final FileRepository fileRepository;
     private final StorageProperties storageProperties;
+    private final S3StorageService s3StorageService;
     private final ObjectProvider<AiIndexingClient> aiIndexingClient;
 
     @Transactional
@@ -63,6 +65,18 @@ public class RuleDocumentService {
                 .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.BUILDING));
         return documentRepository.findAllByBuilding_IdAndDeletedAtIsNullOrderByUpdatedAtDesc(building.getId())
                 .stream().map(this::response).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public RuleDocumentResponse get(AuthPrincipal principal, long documentId) {
+        Building building = buildingRepository.findByManager_IdAndDeletedAtIsNull(principal.userId())
+                .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.BUILDING));
+        RuleDocument document = documentRepository.findById(documentId)
+                .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.DOCUMENT));
+        if (!document.getBuilding().getId().equals(building.getId())) {
+            throw new ForbiddenException();
+        }
+        return response(document);
     }
 
     @Transactional
@@ -99,6 +113,9 @@ public class RuleDocumentService {
 
     private RuleDocumentResponse response(RuleDocument document) {
         return new RuleDocumentResponse(document.getId(), document.getAttachment().getId(), document.getTitle(),
-                document.getVersion(), document.getUpdatedAt());
+                document.getVersion(), document.getUpdatedAt(),
+                s3StorageService.prepareDownload(document.getAttachment().getFileKey(),
+                        java.time.Duration.ofSeconds(storageProperties.presignedUrlTtlSeconds())).url(),
+                document.getAttachment().getOriginalName());
     }
 }

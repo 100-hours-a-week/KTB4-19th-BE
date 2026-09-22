@@ -7,6 +7,8 @@ public record RuleDocumentResponse(
         Long attachmentId,
         String title,
         int version,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+        String fileUrl,
+        String originalName
 ) {
 }

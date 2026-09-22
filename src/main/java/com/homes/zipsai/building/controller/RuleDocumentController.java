@@ -44,6 +44,14 @@ public class RuleDocumentController {
         return ApiResponse.data(ruleDocumentService.list(principal));
     }
 
+    @GetMapping("/{documentId}")
+    @Operation(summary = "운영 문서 상세 조회", description = "문서 메타데이터와 첨부파일 Presigned GET URL을 반환한다.")
+    public ApiResponse<RuleDocumentResponse> get(
+            @AuthenticationPrincipal AuthPrincipal principal,
+            @org.springframework.web.bind.annotation.PathVariable long documentId) {
+        return ApiResponse.data(ruleDocumentService.get(principal, documentId));
+    }
+
     @org.springframework.web.bind.annotation.PatchMapping("/{documentId}")
     public ApiResponse<RuleDocumentResponse> update(
             @AuthenticationPrincipal AuthPrincipal principal,
