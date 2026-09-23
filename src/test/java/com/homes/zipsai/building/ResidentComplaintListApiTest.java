@@ -1,5 +1,8 @@
 package com.homes.zipsai.building;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.BDDMockito.given;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -11,12 +14,14 @@ import java.util.UUID;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
@@ -32,6 +37,7 @@ import com.homes.zipsai.building.repository.ComplaintDetailRepository;
 import com.homes.zipsai.building.repository.ComplaintRepository;
 import com.homes.zipsai.building.repository.RoomRepository;
 import com.homes.zipsai.common.domain.File;
+import com.homes.zipsai.common.service.S3StorageService;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
@@ -43,6 +49,15 @@ import com.homes.zipsai.user.repository.UserRepository;
 @SpringBootTest(classes = ZipsaiBackendApplication.class)
 @AutoConfigureMockMvc
 class ResidentComplaintListApiTest {
+
+    @MockitoBean
+    S3StorageService s3StorageService;
+
+    @BeforeEach
+    void mockPresignedDownload() {
+        given(s3StorageService.prepareDownload(anyString(), any())).willAnswer(invocation ->
+            new S3StorageService.PresignedDownload("https://s3.test/" + invocation.getArgument(0)));
+    }
 
     private static final String COMPLAINTS = "/api/v1/residents/me/complaints";
 

@@ -24,7 +24,9 @@ import com.homes.zipsai.building.dto.request.ComplaintCreateRequest;
 import com.homes.zipsai.building.repository.BuildingRepository;
 import com.homes.zipsai.building.repository.ComplaintDetailRepository;
 import com.homes.zipsai.building.repository.ComplaintRepository;
+import com.homes.zipsai.common.config.StorageProperties;
 import com.homes.zipsai.common.domain.File;
+import com.homes.zipsai.common.service.S3StorageService;
 import com.homes.zipsai.conversation.ai.AiComplaintState;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
@@ -52,13 +54,17 @@ class ComplaintServiceImageTest {
     @Mock
     ConversationService conversationService;
 
+    @Mock
+    S3StorageService s3StorageService;
+
     ComplaintService complaintService;
     User resident;
 
     @BeforeEach
     void setUp() {
         complaintService = new ComplaintService(complaintRepository, complaintDetailRepository,
-            buildingRepository, residentRoomService, conversationService);
+            buildingRepository, residentRoomService, conversationService, s3StorageService,
+            new StorageProperties(null, null, null, 300, 0));
         resident = user(RESIDENT_ID);
         given(conversationService.getOwnedConversation(RESIDENT_ID, CONVERSATION_ID))
             .willReturn(readyConversation());
