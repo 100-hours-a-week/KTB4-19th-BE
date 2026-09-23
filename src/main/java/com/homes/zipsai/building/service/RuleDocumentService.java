@@ -101,6 +101,8 @@ public class RuleDocumentService {
                     .stream().map(item -> String.valueOf(item.getId())).toList();
             AiIndexingClient client = aiIndexingClient.getIfAvailable();
             if (client == null) {
+                LOGGER.error("AI 색인 클라이언트가 설정되지 않았습니다. buildingId={}, docId={}",
+                        building.getId(), document.getId());
                 return;
             }
             client.index(new AiIndexingRequest(
