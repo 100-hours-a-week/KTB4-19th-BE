@@ -23,6 +23,8 @@ import org.springframework.web.client.RestClient;
 import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.global.exception.TooManyRequestsException;
 
+import tools.jackson.databind.json.JsonMapper;
+
 class HttpAiConverseClientTest {
 
     private static final String BASE_URL = "http://ai.test";
@@ -37,7 +39,7 @@ class HttpAiConverseClientTest {
     void setUp() {
         RestClient.Builder builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
-        client = new HttpAiConverseClient(builder, BASE_URL, CONVERSE_PATH);
+        client = new HttpAiConverseClient(builder, BASE_URL, CONVERSE_PATH, new JsonMapper());
     }
 
     @Test
@@ -128,6 +130,30 @@ class HttpAiConverseClientTest {
         assertThat(response.draftPatch().occurredAt())
             .isEqualTo(OffsetDateTime.parse("2026-09-23T00:00:00+09:00"));
         server.verify();
+    }
+
+    @Test
+    @DisplayName("응답을 읽지 못하면 원문을 로그에 남긴다")
+    void logsRawBodyWhenResponseIsUnreadable() {
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+            org.slf4j.LoggerFactory.getLogger(HttpAiConverseClient.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+            new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        server.expect(requestTo(CONVERSE_URL))
+            .andRespond(withSuccess("{\"code\": \"ai_response_success\", \"data\": 12345}",
+                MediaType.APPLICATION_JSON));
+
+        try {
+            assertThatThrownBy(() -> client.converse(request()))
+                .isInstanceOf(AiUnavailableException.class);
+            assertThat(appender.list)
+                .anyMatch(event -> event.getFormattedMessage().contains("읽지 못했습니다")
+                    && event.getFormattedMessage().contains("12345"));
+        } finally {
+            logger.detachAppender(appender);
+        }
     }
 
     @Test
