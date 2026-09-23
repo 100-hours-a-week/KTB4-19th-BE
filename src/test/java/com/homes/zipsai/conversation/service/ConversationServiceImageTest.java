@@ -77,7 +77,7 @@ class ConversationServiceImageTest {
     void setUp() {
         conversationService = new ConversationService(conversationRepository, messageRepository,
             messageFileGroupRepository, fileRepository, residentRoomService, s3StorageService,
-            new StorageProperties(null, null, 300, 0));
+            new StorageProperties(null, null, null, 300, 0));
         resident = user(RESIDENT_ID);
         given(residentRoomService.getLivingRoom(RESIDENT_ID)).willReturn(livingRoom(resident));
         given(conversationRepository.save(any(Conversation.class)))
