@@ -58,4 +58,9 @@ public class RuleDocument extends BaseTimeEntity {
         this.version = version;
         this.valid = true;
     }
+
+    public void updateTitle(String title) {
+        this.title = title;
+        this.version++;
+    }
 }
