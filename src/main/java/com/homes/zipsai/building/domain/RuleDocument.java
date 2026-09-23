@@ -63,4 +63,12 @@ public class RuleDocument extends BaseTimeEntity {
         this.title = title;
         this.version++;
     }
+
+    public void replaceAttachment(File attachment) {
+        this.attachment = attachment;
+    }
+
+    public void delete() {
+        this.valid = false;
+    }
 }

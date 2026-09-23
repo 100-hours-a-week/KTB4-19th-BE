@@ -61,7 +61,7 @@ public class RuleDocumentService {
     public List<RuleDocumentResponse> list(Long userId) {
         Building building = buildingRepository.findByManager_IdAndDeletedAtIsNull(userId)
                 .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.BUILDING));
-        return documentRepository.findAllByBuilding_IdAndDeletedAtIsNullOrderByUpdatedAtDesc(building.getId())
+        return documentRepository.findAllByBuilding_IdAndValidTrueAndDeletedAtIsNullOrderByUpdatedAtDesc(building.getId())
                 .stream().map(this::response).toList();
     }
 
@@ -71,14 +71,39 @@ public class RuleDocumentService {
                 .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.BUILDING));
         RuleDocument document = documentRepository.findById(documentId)
                 .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.DOCUMENT));
-        if (!document.getBuilding().getId().equals(building.getId())) {
+        if (!document.isValid() || !document.getBuilding().getId().equals(building.getId())) {
             throw new ForbiddenException();
         }
         return response(document);
     }
 
     @Transactional
-    public RuleDocumentResponse update(Long userId, long documentId, String title) {
+    public RuleDocumentResponse update(Long userId, long documentId, String title, Long attachmentId) {
+        Building building = buildingRepository.findByManager_IdAndDeletedAtIsNull(userId)
+                .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.BUILDING));
+        RuleDocument document = documentRepository.findById(documentId)
+                .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.DOCUMENT));
+        if (!document.isValid() || !document.getBuilding().getId().equals(building.getId())) {
+            throw new ForbiddenException();
+        }
+        document.updateTitle(title.trim());
+        if (attachmentId != null && !attachmentId.equals(document.getAttachment().getId())) {
+            File replacement = fileRepository.findById(attachmentId)
+                    .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.ATTACHMENT));
+            if (replacement.getOwner() == null || !replacement.getOwner().getId().equals(userId)) {
+                throw new ForbiddenException();
+            }
+            if (replacement.getStatus() != FileStatus.UPLOADED) {
+                throw new ConflictException(ConflictException.Reason.UPLOAD_NOT_COMPLETED);
+            }
+            document.replaceAttachment(replacement);
+        }
+        index(document, building);
+        return response(document);
+    }
+
+    @Transactional
+    public void delete(Long userId, long documentId) {
         Building building = buildingRepository.findByManager_IdAndDeletedAtIsNull(userId)
                 .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.BUILDING));
         RuleDocument document = documentRepository.findById(documentId)
@@ -86,16 +111,15 @@ public class RuleDocumentService {
         if (!document.getBuilding().getId().equals(building.getId())) {
             throw new ForbiddenException();
         }
-        document.updateTitle(title.trim());
-        index(document, building);
-        return response(document);
+        document.delete();
+        indexCleanup(building);
     }
 
     private void index(RuleDocument document, Building building) {
         try {
             String fileKey = "s3://" + storageProperties.uploadBucket() + "/" + document.getAttachment().getFileKey();
             List<String> validDocumentIds = documentRepository
-                    .findAllByBuilding_IdAndDeletedAtIsNullOrderByUpdatedAtDesc(building.getId())
+                    .findAllByBuilding_IdAndValidTrueAndDeletedAtIsNullOrderByUpdatedAtDesc(building.getId())
                     .stream().map(item -> String.valueOf(item.getId())).toList();
             AiIndexingClient client = aiIndexingClient.getIfAvailable();
             if (client == null) {
@@ -108,6 +132,20 @@ public class RuleDocumentService {
                     validDocumentIds));
         } catch (RuntimeException exception) {
             LOGGER.warn("문서 저장 후 AI 색인 요청에 실패했습니다. documentId={}", document.getId(), exception);
+        }
+    }
+
+    private void indexCleanup(Building building) {
+        try {
+            List<String> validDocumentIds = documentRepository
+                    .findAllByBuilding_IdAndValidTrueAndDeletedAtIsNullOrderByUpdatedAtDesc(building.getId())
+                    .stream().map(item -> String.valueOf(item.getId())).toList();
+            AiIndexingClient client = aiIndexingClient.getIfAvailable();
+            if (client != null) {
+                client.cleanup(building.getId(), validDocumentIds);
+            }
+        } catch (RuntimeException exception) {
+            LOGGER.warn("문서 삭제 후 AI 색인 정리 요청에 실패했습니다. buildingId={}", building.getId(), exception);
         }
     }
 
