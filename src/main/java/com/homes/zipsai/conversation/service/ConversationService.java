@@ -188,6 +188,13 @@ public class ConversationService {
             .ifPresent(conversation -> conversation.updateLastMessageAt(pendingReply.previousLastMessageAt()));
     }
 
+    @Transactional(readOnly = true)
+    public List<File> findImages(Long conversationId) {
+        return messageFileGroupRepository.findAllByConversationId(conversationId).stream()
+            .map(MessageFileGroup::getAttachment)
+            .toList();
+    }
+
     public Conversation getOwnedConversation(Long userId, Long conversationId) {
         Conversation conversation = conversationRepository.findByIdAndDeletedAtIsNull(conversationId)
             .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.CONVERSATION));

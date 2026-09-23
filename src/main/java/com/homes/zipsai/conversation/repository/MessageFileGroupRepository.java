@@ -19,6 +19,14 @@ public interface MessageFileGroupRepository extends JpaRepository<MessageFileGro
         """)
     List<MessageFileGroup> findAllByMessageIds(@Param("messageIds") List<Long> messageIds);
 
+    @Query("""
+        select g from MessageFileGroup g
+        join fetch g.attachment
+        where g.message.conversation.id = :conversationId and g.deletedAt is null
+        order by g.message.id asc, g.fileGroupSeq asc
+        """)
+    List<MessageFileGroup> findAllByConversationId(@Param("conversationId") Long conversationId);
+
     @Modifying
     @Query("delete from MessageFileGroup g where g.message.id = :messageId")
     void deleteAllByMessageId(@Param("messageId") Long messageId);

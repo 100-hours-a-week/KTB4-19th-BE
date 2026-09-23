@@ -27,6 +27,7 @@ import com.homes.zipsai.building.dto.response.ResidentComplaintListResponse;
 import com.homes.zipsai.building.repository.BuildingRepository;
 import com.homes.zipsai.building.repository.ComplaintDetailRepository;
 import com.homes.zipsai.building.repository.ComplaintRepository;
+import com.homes.zipsai.common.domain.File;
 import com.homes.zipsai.conversation.ai.AiComplaintDraft;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.service.ConversationService;
@@ -62,6 +63,7 @@ public class ComplaintService {
             .conversation(conversation)
             .user(room.getResident())
             .building(room.getBuilding())
+            .attachment(representativeImage(conversation.getId()))
             .title(content.title())
             .urgency(URGENCY_NOT_EVALUATED)
             .roomNo(room.getRoomNo())
@@ -145,6 +147,10 @@ public class ComplaintService {
         ComplaintDetail detail = complaintDetailRepository.findById(complaintId)
             .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.COMPLAINT));
         return ResidentComplaintDetailResponse.from(complaint, detail);
+    }
+
+    private File representativeImage(Long conversationId) {
+        return conversationService.findImages(conversationId).stream().findFirst().orElse(null);
     }
 
     private String normalizeKeyword(String keyword) {
