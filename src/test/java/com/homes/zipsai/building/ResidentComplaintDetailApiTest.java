@@ -42,6 +42,10 @@ import com.homes.zipsai.common.domain.File;
 import com.homes.zipsai.common.service.S3StorageService;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
+import com.homes.zipsai.conversation.domain.Message;
+import com.homes.zipsai.conversation.domain.MessageFileGroup;
+import com.homes.zipsai.conversation.domain.MessageType;
+import com.homes.zipsai.conversation.domain.SenderType;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.global.security.AuthPrincipal;
 import com.homes.zipsai.user.domain.User;
@@ -203,6 +207,21 @@ class ResidentComplaintDetailApiTest {
             .type(ConversationType.COMPLAINT)
             .title(title)
             .build());
+        if (attachment != null) {
+            Message message = Message.builder()
+                .conversation(conversation)
+                .content("천장에서 물이 새요")
+                .senderType(SenderType.RESIDENT)
+                .messageType(MessageType.IMAGE)
+                .traceId(UUID.randomUUID().toString())
+                .build();
+            entityManager.persist(message);
+            entityManager.persist(MessageFileGroup.builder()
+                .message(message)
+                .attachment(attachment)
+                .fileGroupSeq(1)
+                .build());
+        }
         Complaint complaint = complaintRepository.save(Complaint.builder()
             .conversation(conversation)
             .user(residentRoom.resident())

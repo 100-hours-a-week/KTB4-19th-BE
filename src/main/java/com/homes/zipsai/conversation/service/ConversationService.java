@@ -92,7 +92,26 @@ public class ConversationService {
 
     @Transactional(readOnly = true)
     public ConversationMessagesResponse getMessages(Long userId, Long conversationId, Long cursor, int size) {
-        Conversation conversation = getOwnedConversation(userId, conversationId);
+        return readMessages(getOwnedConversation(userId, conversationId), cursor, size);
+    }
+
+    @Transactional(readOnly = true)
+    public ConversationMessagesResponse getComplaintMessagesForManager(Long managerId, Long conversationId,
+                                                                      Long cursor, int size) {
+        Conversation conversation = conversationRepository.findByIdAndDeletedAtIsNull(conversationId)
+            .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.CONVERSATION));
+        Complaint complaint = findComplaints(List.of(conversation)).get(conversationId);
+        if (complaint == null || complaint.getBuilding().getDeletedAt() != null) {
+            throw new NotFoundException(NotFoundException.Resource.CONVERSATION);
+        }
+        if (!complaint.getBuilding().getManager().getId().equals(managerId)) {
+            throw new ForbiddenException();
+        }
+        return readMessages(conversation, cursor, size);
+    }
+
+    private ConversationMessagesResponse readMessages(Conversation conversation, Long cursor, int size) {
+        Long conversationId = conversation.getId();
         Limit limit = Limit.of(size + 1);
         List<Message> found;
         if (cursor == null) {

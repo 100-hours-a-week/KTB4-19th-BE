@@ -131,9 +131,10 @@ class ComplaintPhotoUrlTest {
     }
 
     @Test
-    @DisplayName("관리자 상세의 첨부 사진도 내려받을 수 있는 URL로 내려간다")
+    @DisplayName("관리자 상세는 대화 사진을 내려받을 수 있는 URL로 내려준다")
     void putsDownloadUrlOnManagerDetailAttachment() {
         Complaint complaint = complaint(uploaded(4L));
+        given(conversationService.findImages(any())).willReturn(List.of(uploaded(4L)));
         given(complaintRepository.findByIdAndDeletedAtIsNull(COMPLAINT_ID)).willReturn(Optional.of(complaint));
         given(complaintDetailRepository.findById(COMPLAINT_ID))
             .willReturn(Optional.of(ComplaintDetail.builder().complaint(complaint).build()));
@@ -141,6 +142,36 @@ class ComplaintPhotoUrlTest {
         ComplaintDetailResponse response = complaintService.getManagerComplaint(MANAGER_ID, COMPLAINT_ID);
 
         assertThat(response.attachments().getFirst().fileUrl()).isEqualTo("https://s3.test/key-4");
+    }
+
+    @Test
+    @DisplayName("상세 사진은 앞에서 세 장까지만 내려준다")
+    void limitsDetailPhotosToThree() {
+        givenManagerDetail(List.of(uploaded(4L), uploaded(5L), uploaded(6L), uploaded(7L)));
+
+        ComplaintDetailResponse response = complaintService.getManagerComplaint(MANAGER_ID, COMPLAINT_ID);
+
+        assertThat(response.attachments()).hasSize(3);
+        assertThat(response.attachments()).extracting(ComplaintDetailResponse.AttachmentItem::seq)
+            .containsExactly(1, 2, 3);
+    }
+
+    @Test
+    @DisplayName("상세의 사진 개수는 대화에 올린 전체 장수로 내려간다")
+    void reportsTotalPhotoCountOnDetail() {
+        givenManagerDetail(List.of(uploaded(4L), uploaded(5L), uploaded(6L), uploaded(7L)));
+
+        ComplaintDetailResponse response = complaintService.getManagerComplaint(MANAGER_ID, COMPLAINT_ID);
+
+        assertThat(response.attachmentCount()).isEqualTo(4);
+    }
+
+    private void givenManagerDetail(List<File> images) {
+        Complaint complaint = complaint(images.isEmpty() ? null : images.getFirst());
+        given(complaintRepository.findByIdAndDeletedAtIsNull(COMPLAINT_ID)).willReturn(Optional.of(complaint));
+        given(complaintDetailRepository.findById(COMPLAINT_ID))
+            .willReturn(Optional.of(ComplaintDetail.builder().complaint(complaint).build()));
+        given(conversationService.findImages(any())).willReturn(images);
     }
 
     private void givenManagerComplaints(Complaint complaint) {

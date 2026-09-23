@@ -3,6 +3,7 @@ package com.homes.zipsai.building.dto.response;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.stream.IntStream;
 import java.util.function.Function;
 
 import com.homes.zipsai.building.domain.Complaint;
@@ -29,8 +30,9 @@ public record ResidentComplaintDetailResponse(
         LocalDateTime resolvedAt
 ) {
 
-    public static ResidentComplaintDetailResponse from(Complaint complaint, ComplaintDetail detail, Function<File, String> fileUrl) {
-        List<AttachmentItem> attachments = toAttachments(complaint.getAttachment(), fileUrl);
+    public static ResidentComplaintDetailResponse from(Complaint complaint, ComplaintDetail detail, List<File> images,
+                                             Function<File, String> fileUrl) {
+        List<AttachmentItem> attachments = toAttachments(images, fileUrl);
         return new ResidentComplaintDetailResponse(
             complaint.getId(),
             complaint.getConversation().getId(),
@@ -44,15 +46,17 @@ public record ResidentComplaintDetailResponse(
             detail.getOccurredTime(),
             detail.getSymptom(),
             detail.getAiSummary(),
-            attachments.size(),
+            images.size(),
             attachments,
             complaint.getCreatedAt(),
             complaint.getResolvedAt()
         );
     }
 
-    private static List<AttachmentItem> toAttachments(File attachment, Function<File, String> fileUrl) {
-        return attachment == null ? List.of() : List.of(AttachmentItem.from(attachment, fileUrl));
+    private static List<AttachmentItem> toAttachments(List<File> images, Function<File, String> fileUrl) {
+        return IntStream.range(0, Math.min(images.size(), Complaint.DETAIL_PHOTO_LIMIT))
+            .mapToObj(index -> AttachmentItem.from(images.get(index), index + 1, fileUrl))
+            .toList();
     }
 
     public record AttachmentItem(
@@ -64,14 +68,14 @@ public record ResidentComplaintDetailResponse(
             int seq
     ) {
 
-        private static AttachmentItem from(File attachment, Function<File, String> fileUrl) {
+        private static AttachmentItem from(File attachment, int seq, Function<File, String> fileUrl) {
             return new AttachmentItem(
                 attachment.getId(),
                 fileUrl.apply(attachment),
                 attachment.getOriginalName(),
                 attachment.getFileType(),
                 attachment.getFileSize(),
-                1
+                seq
             );
         }
     }
