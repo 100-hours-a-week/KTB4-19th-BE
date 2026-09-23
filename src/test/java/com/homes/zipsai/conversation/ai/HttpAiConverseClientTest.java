@@ -8,9 +8,11 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -92,6 +94,39 @@ class HttpAiConverseClientTest {
         assertThat(response.draftPatch().location()).isEqualTo("안방 천장");
         assertThat(response.qaCardQuestion()).isNull();
         assertThat(response.isConversationComplete()).isTrue();
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("오프셋 없는 발생 시각이 담긴 응답도 읽는다")
+    void readsResponseWithoutOffsetOnOccurredAt() {
+        server.expect(requestTo(CONVERSE_URL))
+            .andRespond(withSuccess("""
+                {
+                  "code": "ai_response_success",
+                  "trace_id": "%s",
+                  "data": {
+                    "route": "complaint",
+                    "next_complaint_state": "collecting",
+                    "reply": "언제부터 그랬나요?",
+                    "result": {
+                      "complaint_draft": {
+                        "location": "안방 천장",
+                        "symptom": "물이 샌다",
+                        "occurred_at": "2026-09-23T00:00:00"
+                      },
+                      "missing_fields": ["location"],
+                      "citations": []
+                    }
+                  }
+                }
+                """.formatted(TRACE_ID), MediaType.APPLICATION_JSON));
+
+        AiConverseResponse response = client.converse(request());
+
+        assertThat(response.isSuccess()).isTrue();
+        assertThat(response.draftPatch().occurredAt())
+            .isEqualTo(OffsetDateTime.parse("2026-09-23T00:00:00+09:00"));
         server.verify();
     }
 

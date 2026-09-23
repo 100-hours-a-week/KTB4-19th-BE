@@ -374,7 +374,8 @@ class ConversationMockAiTest {
                                                 AiComplaintDraft draft, List<String> missingFields) {
         AiConverseResponse.DraftPatch patch = draft == null
             ? null
-            : new AiConverseResponse.DraftPatch(draft.location(), draft.symptom(), draft.occurredAt());
+            : new AiConverseResponse.DraftPatch(draft.location(), draft.symptom(),
+                draft.occurredAt() == null ? null : draft.occurredAt().toString());
         return response(traceId, AiRoute.COMPLAINT, nextComplaintState, reply,
             new AiConverseResponse.Result(patch, null, missingFields, List.of()));
     }
