@@ -2,8 +2,8 @@ package com.homes.zipsai.building.dto.response;
 
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.IntStream;
 import java.util.function.Function;
 
 import com.homes.zipsai.building.domain.Complaint;
@@ -58,9 +58,11 @@ public record ComplaintDetailResponse(
     }
 
     private static List<AttachmentItem> toAttachments(List<File> images, Function<File, String> fileUrl) {
-        return IntStream.range(0, Math.min(images.size(), Complaint.DETAIL_PHOTO_LIMIT))
-            .mapToObj(index -> AttachmentItem.from(images.get(index), index + 1, fileUrl))
-            .toList();
+        List<AttachmentItem> attachments = new ArrayList<>();
+        for (File image : images) {
+            attachments.add(AttachmentItem.from(image, attachments.size() + 1, fileUrl));
+        }
+        return attachments;
     }
 
     public record AttachmentItem(

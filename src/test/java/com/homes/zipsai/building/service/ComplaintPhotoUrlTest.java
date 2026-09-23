@@ -145,19 +145,18 @@ class ComplaintPhotoUrlTest {
     }
 
     @Test
-    @DisplayName("상세 사진은 앞에서 세 장까지만 내려준다")
-    void limitsDetailPhotosToThree() {
+    @DisplayName("상세는 대화에 올린 사진을 모두 올린 순서대로 내려준다")
+    void returnsAllConversationPhotosInOrder() {
         givenManagerDetail(List.of(uploaded(4L), uploaded(5L), uploaded(6L), uploaded(7L)));
 
         ComplaintDetailResponse response = complaintService.getManagerComplaint(MANAGER_ID, COMPLAINT_ID);
 
-        assertThat(response.attachments()).hasSize(3);
         assertThat(response.attachments()).extracting(ComplaintDetailResponse.AttachmentItem::seq)
-            .containsExactly(1, 2, 3);
+            .containsExactly(1, 2, 3, 4);
     }
 
     @Test
-    @DisplayName("상세의 사진 개수는 대화에 올린 전체 장수로 내려간다")
+    @DisplayName("상세의 사진 개수는 내려준 사진 수와 같다")
     void reportsTotalPhotoCountOnDetail() {
         givenManagerDetail(List.of(uploaded(4L), uploaded(5L), uploaded(6L), uploaded(7L)));
 
