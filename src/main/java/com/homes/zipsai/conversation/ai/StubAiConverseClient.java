@@ -64,7 +64,8 @@ public class StubAiConverseClient implements AiConverseClient {
         AiComplaintDraft draft = fillNextMissingField(previous, text);
         List<String> missingFields = missingFields(draft);
         AiConverseResponse.DraftPatch patch =
-            new AiConverseResponse.DraftPatch(draft.location(), draft.symptom(), draft.occurredAt());
+            new AiConverseResponse.DraftPatch(draft.location(), draft.symptom(),
+                draft.occurredAt() == null ? null : draft.occurredAt().toString());
         if (missingFields.isEmpty()) {
             return response(traceId, AiRoute.COMPLAINT, null, "접수 내용을 정리했어요. 아래 내용으로 민원을 접수할까요?",
                 new AiConverseResponse.Result(patch, null, missingFields, List.of()));
