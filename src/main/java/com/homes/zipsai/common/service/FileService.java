@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.homes.zipsai.common.config.StorageProperties;
 import com.homes.zipsai.common.domain.File;
+import com.homes.zipsai.common.domain.FilePurpose;
 import com.homes.zipsai.common.domain.FileStatus;
 import com.homes.zipsai.common.dto.FileCompleteResponse;
 import com.homes.zipsai.common.dto.FileDownloadResponse;
@@ -37,10 +38,11 @@ public class FileService {
     private final StorageProperties storageProperties;
 
     @Transactional
-    public FileUploadResponse createUpload(AuthPrincipal principal, String originalName, String fileType, int fileSize) {
+    public FileUploadResponse createUpload(AuthPrincipal principal, String originalName, String fileType, int fileSize,
+                                           FilePurpose purpose) {
         validateRequest(originalName, fileType, fileSize);
         String extension = normalizeType(fileType);
-        String key = "documents/rules/" + UUID.randomUUID() + "-" + safeName(originalName);
+        String key = purpose.keyPrefix() + UUID.randomUUID() + "-" + safeName(originalName);
         File file = new File(key, fileSize, extension, originalName);
         file.assignOwner(userRepository.getReferenceById(principal.userId()));
         File saved = fileRepository.save(file);

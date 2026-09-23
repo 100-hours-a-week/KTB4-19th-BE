@@ -39,7 +39,8 @@ public class FileController {
             @AuthenticationPrincipal AuthPrincipal principal,
             @Valid @RequestBody FileUploadRequest fileUploadRequest) {
         return ResponseEntity.status(201).body(ApiResponse.data(fileService.createUpload(
-                principal, fileUploadRequest.originalName(), fileUploadRequest.fileType(), fileUploadRequest.fileSize())));
+                principal, fileUploadRequest.originalName(), fileUploadRequest.fileType(), fileUploadRequest.fileSize(),
+                fileUploadRequest.purpose())));
     }
 
     @PatchMapping("/{attachmentId}")
