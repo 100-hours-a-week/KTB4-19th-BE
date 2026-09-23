@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.homes.zipsai.building.dto.RuleDocumentCreateRequest;
@@ -58,6 +59,14 @@ public class RuleDocumentController {
             @org.springframework.web.bind.annotation.PathVariable long documentId,
             @Valid @RequestBody RuleDocumentUpdateRequest ruleDocumentUpdateRequest) {
         return ApiResponse.data(ruleDocumentService.update(
-                principal.userId(), documentId, ruleDocumentUpdateRequest.title()));
+                principal.userId(), documentId, ruleDocumentUpdateRequest.title(), ruleDocumentUpdateRequest.attachmentId()));
+    }
+
+    @DeleteMapping("/{documentId}")
+    @Operation(summary = "운영 문서 삭제")
+    public ResponseEntity<Void> delete(@AuthenticationPrincipal AuthPrincipal principal,
+            @org.springframework.web.bind.annotation.PathVariable long documentId) {
+        ruleDocumentService.delete(principal.userId(), documentId);
+        return ResponseEntity.noContent().build();
     }
 }
