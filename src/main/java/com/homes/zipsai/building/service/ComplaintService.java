@@ -89,7 +89,8 @@ public class ComplaintService {
         Complaint complaint = getManagerComplaintEntity(managerId, complaintId);
         ComplaintDetail detail = complaintDetailRepository.findById(complaintId)
             .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.COMPLAINT));
-        return ComplaintDetailResponse.from(complaint, detail, this::attachmentUrl);
+        return ComplaintDetailResponse.from(complaint, detail,
+            conversationService.findImages(complaint.getConversation().getId()), this::attachmentUrl);
     }
 
     @Transactional
@@ -151,7 +152,8 @@ public class ComplaintService {
         }
         ComplaintDetail detail = complaintDetailRepository.findById(complaintId)
             .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.COMPLAINT));
-        return ResidentComplaintDetailResponse.from(complaint, detail, this::attachmentUrl);
+        return ResidentComplaintDetailResponse.from(complaint, detail,
+            conversationService.findImages(complaint.getConversation().getId()), this::attachmentUrl);
     }
 
     private String attachmentUrl(File attachment) {
