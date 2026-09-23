@@ -9,6 +9,8 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
+
 import tools.jackson.databind.PropertyNamingStrategies;
 import tools.jackson.databind.annotation.JsonNaming;
 
@@ -55,7 +57,11 @@ public record AiConverseResponse(String code, String traceId, Data data) {
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-    public record Data(AiRoute route, AiComplaintState nextComplaintState, String reply, Result result) {
+    public record Data(AiRoute route,
+                       // 계약에 없는 상태가 오면 비워 둔다. 접수 여부는 missingFields로 판단하므로 이 값이 없어도 된다.
+                       @JsonFormat(with = JsonFormat.Feature.READ_UNKNOWN_ENUM_VALUES_AS_NULL)
+                       AiComplaintState nextComplaintState,
+                       String reply, Result result) {
 
         public Data {
             result = result == null ? new Result(null, null, List.of(), List.of()) : result;
