@@ -41,7 +41,7 @@ public record AiConverseResponse(String code, String traceId, Data data) {
         return switch (data.route()) {
             case COMPLAINT -> data.result().missingFields().isEmpty();
             case KNOWLEDGE -> data.result().citations().isEmpty();
-            case CLARIFY -> true;
+            case CLARIFY -> false;
         };
     }
 
