@@ -34,8 +34,8 @@ public class RuleDocumentController {
     @Operation(summary = "운영 문서 등록", description = "업로드 완료된 첨부파일을 건물 문서로 등록하고 AI 색인을 요청한다.")
     public ResponseEntity<ApiResponse<RuleDocumentResponse>> create(
             @AuthenticationPrincipal AuthPrincipal principal,
-            @Valid @RequestBody RuleDocumentCreateRequest request) {
-        return ResponseEntity.status(201).body(ApiResponse.data(ruleDocumentService.create(principal.userId(), request)));
+            @Valid @RequestBody RuleDocumentCreateRequest ruleDocumentCreateRequest) {
+        return ResponseEntity.status(201).body(ApiResponse.data(ruleDocumentService.create(principal.userId(), ruleDocumentCreateRequest)));
     }
 
     @GetMapping
@@ -56,7 +56,8 @@ public class RuleDocumentController {
     public ApiResponse<RuleDocumentResponse> update(
             @AuthenticationPrincipal AuthPrincipal principal,
             @org.springframework.web.bind.annotation.PathVariable long documentId,
-            @Valid @RequestBody RuleDocumentUpdateRequest request) {
-        return ApiResponse.data(ruleDocumentService.update(principal.userId(), documentId, request));
+            @Valid @RequestBody RuleDocumentUpdateRequest ruleDocumentUpdateRequest) {
+        return ApiResponse.data(ruleDocumentService.update(
+                principal.userId(), documentId, ruleDocumentUpdateRequest.title()));
     }
 }
