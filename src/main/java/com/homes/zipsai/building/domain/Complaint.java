@@ -32,7 +32,6 @@ import lombok.NoArgsConstructor;
 public class Complaint extends BaseTimeEntity {
 
     public static final int URGENCY_THRESHOLD = 9;
-    public static final int DETAIL_PHOTO_LIMIT = 3;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
