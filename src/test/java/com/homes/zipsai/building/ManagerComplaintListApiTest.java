@@ -1,6 +1,9 @@
 package com.homes.zipsai.building;
 
 import static org.hamcrest.Matchers.nullValue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.BDDMockito.given;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -9,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.util.List;
 import java.util.UUID;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -18,6 +22,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.homes.zipsai.ZipsaiBackendApplication;
 import com.homes.zipsai.building.domain.Building;
@@ -34,10 +39,20 @@ import com.homes.zipsai.global.security.AuthPrincipal;
 import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.domain.UserRole;
 import com.homes.zipsai.user.repository.UserRepository;
+import com.homes.zipsai.common.service.S3StorageService;
 
 @SpringBootTest(classes = ZipsaiBackendApplication.class)
 @AutoConfigureMockMvc
 class ManagerComplaintListApiTest {
+
+    @MockitoBean
+    S3StorageService s3StorageService;
+
+    @BeforeEach
+    void mockPresignedDownload() {
+        given(s3StorageService.prepareDownload(anyString(), any())).willAnswer(invocation ->
+            new S3StorageService.PresignedDownload("https://s3.test/" + invocation.getArgument(0)));
+    }
 
     private static final String COMPLAINTS = "/api/v1/managers/me/complaints";
 

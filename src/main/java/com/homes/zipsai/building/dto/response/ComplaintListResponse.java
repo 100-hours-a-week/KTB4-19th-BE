@@ -2,11 +2,13 @@ package com.homes.zipsai.building.dto.response;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.function.Function;
 
 import org.springframework.data.domain.Page;
 
 import com.homes.zipsai.building.domain.Complaint;
 import com.homes.zipsai.building.domain.ComplaintStatus;
+import com.homes.zipsai.common.domain.File;
 
 public record ComplaintListResponse(
         long totalCount,
@@ -16,13 +18,13 @@ public record ComplaintListResponse(
         List<ComplaintItem> complaints
 ) {
 
-    public static ComplaintListResponse from(Page<Complaint> page) {
+    public static ComplaintListResponse from(Page<Complaint> page, Function<File, String> fileUrl) {
         return new ComplaintListResponse(
             page.getTotalElements(),
             page.getNumber(),
             page.getSize(),
             page.hasNext(),
-            page.getContent().stream().map(ComplaintItem::from).toList()
+            page.getContent().stream().map(complaint -> ComplaintItem.from(complaint, fileUrl)).toList()
         );
     }
 
@@ -39,7 +41,7 @@ public record ComplaintListResponse(
             LocalDateTime createdAt
     ) {
 
-        private static ComplaintItem from(Complaint complaint) {
+        private static ComplaintItem from(Complaint complaint, Function<File, String> fileUrl) {
             return new ComplaintItem(
                 complaint.getId(),
                 complaint.getBuilding().getBuildingName(),
@@ -49,7 +51,7 @@ public record ComplaintListResponse(
                 complaint.getStatus().getLabel(),
                 complaint.getUrgency(),
                 complaint.getUrgency() >= Complaint.URGENCY_THRESHOLD,
-                null,
+                fileUrl.apply(complaint.getAttachment()),
                 complaint.getCreatedAt()
             );
         }

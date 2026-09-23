@@ -3,6 +3,7 @@ package com.homes.zipsai.building.dto.response;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.function.Function;
 
 import com.homes.zipsai.building.domain.Complaint;
 import com.homes.zipsai.building.domain.ComplaintDetail;
@@ -28,8 +29,8 @@ public record ResidentComplaintDetailResponse(
         LocalDateTime resolvedAt
 ) {
 
-    public static ResidentComplaintDetailResponse from(Complaint complaint, ComplaintDetail detail) {
-        List<AttachmentItem> attachments = toAttachments(complaint.getAttachment());
+    public static ResidentComplaintDetailResponse from(Complaint complaint, ComplaintDetail detail, Function<File, String> fileUrl) {
+        List<AttachmentItem> attachments = toAttachments(complaint.getAttachment(), fileUrl);
         return new ResidentComplaintDetailResponse(
             complaint.getId(),
             complaint.getConversation().getId(),
@@ -50,8 +51,8 @@ public record ResidentComplaintDetailResponse(
         );
     }
 
-    private static List<AttachmentItem> toAttachments(File attachment) {
-        return attachment == null ? List.of() : List.of(AttachmentItem.from(attachment));
+    private static List<AttachmentItem> toAttachments(File attachment, Function<File, String> fileUrl) {
+        return attachment == null ? List.of() : List.of(AttachmentItem.from(attachment, fileUrl));
     }
 
     public record AttachmentItem(
@@ -63,10 +64,10 @@ public record ResidentComplaintDetailResponse(
             int seq
     ) {
 
-        private static AttachmentItem from(File attachment) {
+        private static AttachmentItem from(File attachment, Function<File, String> fileUrl) {
             return new AttachmentItem(
                 attachment.getId(),
-                ResidentComplaintListResponse.fileUrl(attachment),
+                fileUrl.apply(attachment),
                 attachment.getOriginalName(),
                 attachment.getFileType(),
                 attachment.getFileSize(),

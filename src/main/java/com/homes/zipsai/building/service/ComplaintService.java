@@ -1,5 +1,6 @@
 package com.homes.zipsai.building.service;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -27,7 +28,9 @@ import com.homes.zipsai.building.dto.response.ResidentComplaintListResponse;
 import com.homes.zipsai.building.repository.BuildingRepository;
 import com.homes.zipsai.building.repository.ComplaintDetailRepository;
 import com.homes.zipsai.building.repository.ComplaintRepository;
+import com.homes.zipsai.common.config.StorageProperties;
 import com.homes.zipsai.common.domain.File;
+import com.homes.zipsai.common.service.S3StorageService;
 import com.homes.zipsai.conversation.ai.AiComplaintDraft;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.service.ConversationService;
@@ -50,6 +53,8 @@ public class ComplaintService {
     private final BuildingRepository buildingRepository;
     private final ResidentRoomService residentRoomService;
     private final ConversationService conversationService;
+    private final S3StorageService s3StorageService;
+    private final StorageProperties storageProperties;
 
     @Transactional
     public ComplaintCreateResponse createComplaint(Long userId, ComplaintCreateRequest request) {
@@ -84,7 +89,7 @@ public class ComplaintService {
         Complaint complaint = getManagerComplaintEntity(managerId, complaintId);
         ComplaintDetail detail = complaintDetailRepository.findById(complaintId)
             .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.COMPLAINT));
-        return ComplaintDetailResponse.from(complaint, detail);
+        return ComplaintDetailResponse.from(complaint, detail, this::attachmentUrl);
     }
 
     @Transactional
@@ -115,7 +120,7 @@ public class ComplaintService {
         Pageable pageable = PageRequest.of(page, size, MANAGER_COMPLAINT_SORT);
         Page<Complaint> complaints = complaintRepository.findManagerComplaints(
             building.getId(), normalizedKeyword, statuses, urgentOnly, Complaint.URGENCY_THRESHOLD, pageable);
-        return ComplaintListResponse.from(complaints);
+        return ComplaintListResponse.from(complaints, this::attachmentUrl);
     }
 
     @Transactional(readOnly = true)
@@ -130,7 +135,7 @@ public class ComplaintService {
         Pageable pageable = PageRequest.of(page, size, MANAGER_COMPLAINT_SORT);
         Page<Complaint> complaints = complaintRepository.findResidentComplaints(
             residentId, normalizeKeyword(keyword), normalizeStatuses(statusValues), pageable);
-        return ResidentComplaintListResponse.from(complaints);
+        return ResidentComplaintListResponse.from(complaints, this::attachmentUrl);
     }
 
     @Transactional(readOnly = true)
@@ -146,7 +151,15 @@ public class ComplaintService {
         }
         ComplaintDetail detail = complaintDetailRepository.findById(complaintId)
             .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.COMPLAINT));
-        return ResidentComplaintDetailResponse.from(complaint, detail);
+        return ResidentComplaintDetailResponse.from(complaint, detail, this::attachmentUrl);
+    }
+
+    private String attachmentUrl(File attachment) {
+        if (attachment == null) {
+            return null;
+        }
+        Duration ttl = Duration.ofSeconds(storageProperties.presignedUrlTtlSeconds());
+        return s3StorageService.prepareDownload(attachment.getFileKey(), ttl).url();
     }
 
     private File representativeImage(Long conversationId) {
