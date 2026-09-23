@@ -19,10 +19,10 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.homes.zipsai.ZipsaiBackendApplication;
 import com.homes.zipsai.building.domain.Building;
@@ -32,6 +32,7 @@ import com.homes.zipsai.building.domain.Room;
 import com.homes.zipsai.building.repository.BuildingRepository;
 import com.homes.zipsai.building.repository.ComplaintRepository;
 import com.homes.zipsai.building.repository.RoomRepository;
+import com.homes.zipsai.common.service.S3StorageService;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
@@ -39,7 +40,6 @@ import com.homes.zipsai.global.security.AuthPrincipal;
 import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.domain.UserRole;
 import com.homes.zipsai.user.repository.UserRepository;
-import com.homes.zipsai.common.service.S3StorageService;
 
 @SpringBootTest(classes = ZipsaiBackendApplication.class)
 @AutoConfigureMockMvc

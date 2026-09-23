@@ -92,7 +92,8 @@ public class ConversationService {
 
     @Transactional(readOnly = true)
     public ConversationMessagesResponse getMessages(Long userId, Long conversationId, Long cursor, int size) {
-        return readMessages(getOwnedConversation(userId, conversationId), cursor, size);
+        Conversation conversation = getOwnedConversation(userId, conversationId);
+        return readMessages(conversation, findComplaint(conversation), cursor, size);
     }
 
     @Transactional(readOnly = true)
@@ -100,17 +101,22 @@ public class ConversationService {
                                                                       Long cursor, int size) {
         Conversation conversation = conversationRepository.findByIdAndDeletedAtIsNull(conversationId)
             .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.CONVERSATION));
-        Complaint complaint = findComplaints(List.of(conversation)).get(conversationId);
+        Complaint complaint = findComplaint(conversation);
         if (complaint == null || complaint.getBuilding().getDeletedAt() != null) {
             throw new NotFoundException(NotFoundException.Resource.CONVERSATION);
         }
         if (!complaint.getBuilding().getManager().getId().equals(managerId)) {
             throw new ForbiddenException();
         }
-        return readMessages(conversation, cursor, size);
+        return readMessages(conversation, complaint, cursor, size);
     }
 
-    private ConversationMessagesResponse readMessages(Conversation conversation, Long cursor, int size) {
+    private Complaint findComplaint(Conversation conversation) {
+        return findComplaints(List.of(conversation)).get(conversation.getId());
+    }
+
+    private ConversationMessagesResponse readMessages(Conversation conversation, Complaint complaint,
+                                                      Long cursor, int size) {
         Long conversationId = conversation.getId();
         Limit limit = Limit.of(size + 1);
         List<Message> found;
@@ -129,7 +135,6 @@ public class ConversationService {
             .map(message -> MessageResponse.of(message, attachments.getOrDefault(message.getId(), List.of())))
             .toList();
 
-        Complaint complaint = findComplaints(List.of(conversation)).get(conversationId);
         return ConversationMessagesResponse.of(conversation, complaint, messages, hasNext, nextCursor);
     }
 
