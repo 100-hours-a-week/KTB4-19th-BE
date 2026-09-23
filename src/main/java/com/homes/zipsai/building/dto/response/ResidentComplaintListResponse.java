@@ -2,6 +2,7 @@ package com.homes.zipsai.building.dto.response;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.function.Function;
 
 import org.springframework.data.domain.Page;
 
@@ -17,13 +18,13 @@ public record ResidentComplaintListResponse(
         List<ComplaintItem> complaints
 ) {
 
-    public static ResidentComplaintListResponse from(Page<Complaint> page) {
+    public static ResidentComplaintListResponse from(Page<Complaint> page, Function<File, String> fileUrl) {
         return new ResidentComplaintListResponse(
             page.getTotalElements(),
             page.getNumber(),
             page.getSize(),
             page.hasNext(),
-            page.getContent().stream().map(ComplaintItem::from).toList()
+            page.getContent().stream().map(complaint -> ComplaintItem.from(complaint, fileUrl)).toList()
         );
     }
 
@@ -36,19 +37,15 @@ public record ResidentComplaintListResponse(
             LocalDateTime createdAt
     ) {
 
-        private static ComplaintItem from(Complaint complaint) {
+        private static ComplaintItem from(Complaint complaint, Function<File, String> fileUrl) {
             return new ComplaintItem(
                 complaint.getId(),
                 complaint.getTitle(),
                 complaint.getStatus(),
                 complaint.getStatus().getLabel(),
-                ResidentComplaintListResponse.fileUrl(complaint.getAttachment()),
+                fileUrl.apply(complaint.getAttachment()),
                 complaint.getCreatedAt()
             );
         }
-    }
-
-    static String fileUrl(File file) {
-        return file == null ? null : "/api/v1/files/" + file.getId();
     }
 }
