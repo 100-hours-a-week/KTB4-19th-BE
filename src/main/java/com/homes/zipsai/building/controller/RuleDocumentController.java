@@ -35,13 +35,13 @@ public class RuleDocumentController {
     public ResponseEntity<ApiResponse<RuleDocumentResponse>> create(
             @AuthenticationPrincipal AuthPrincipal principal,
             @Valid @RequestBody RuleDocumentCreateRequest request) {
-        return ResponseEntity.status(201).body(ApiResponse.data(ruleDocumentService.create(principal, request)));
+        return ResponseEntity.status(201).body(ApiResponse.data(ruleDocumentService.create(principal.userId(), request)));
     }
 
     @GetMapping
     @Operation(summary = "운영 문서 목록 조회")
     public ApiResponse<List<RuleDocumentResponse>> list(@AuthenticationPrincipal AuthPrincipal principal) {
-        return ApiResponse.data(ruleDocumentService.list(principal));
+        return ApiResponse.data(ruleDocumentService.list(principal.userId()));
     }
 
     @GetMapping("/{documentId}")
@@ -49,7 +49,7 @@ public class RuleDocumentController {
     public ApiResponse<RuleDocumentResponse> get(
             @AuthenticationPrincipal AuthPrincipal principal,
             @org.springframework.web.bind.annotation.PathVariable long documentId) {
-        return ApiResponse.data(ruleDocumentService.get(principal, documentId));
+        return ApiResponse.data(ruleDocumentService.get(principal.userId(), documentId));
     }
 
     @org.springframework.web.bind.annotation.PatchMapping("/{documentId}")
@@ -57,6 +57,6 @@ public class RuleDocumentController {
             @AuthenticationPrincipal AuthPrincipal principal,
             @org.springframework.web.bind.annotation.PathVariable long documentId,
             @Valid @RequestBody RuleDocumentUpdateRequest request) {
-        return ApiResponse.data(ruleDocumentService.update(principal, documentId, request));
+        return ApiResponse.data(ruleDocumentService.update(principal.userId(), documentId, request));
     }
 }

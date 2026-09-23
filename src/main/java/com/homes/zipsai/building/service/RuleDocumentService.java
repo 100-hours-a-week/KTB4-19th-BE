@@ -25,7 +25,6 @@ import com.homes.zipsai.conversation.ai.AiIndexingRequest;
 import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.global.exception.ForbiddenException;
 import com.homes.zipsai.global.exception.NotFoundException;
-import com.homes.zipsai.global.security.AuthPrincipal;
 
 import lombok.RequiredArgsConstructor;
 
@@ -42,12 +41,12 @@ public class RuleDocumentService {
     private final ObjectProvider<AiIndexingClient> aiIndexingClient;
 
     @Transactional
-    public RuleDocumentResponse create(AuthPrincipal principal, RuleDocumentCreateRequest request) {
-        Building building = buildingRepository.findByManager_IdAndDeletedAtIsNull(principal.userId())
+    public RuleDocumentResponse create(Long userId, RuleDocumentCreateRequest request) {
+        Building building = buildingRepository.findByManager_IdAndDeletedAtIsNull(userId)
                 .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.BUILDING));
         File file = fileRepository.findById(request.attachmentId())
                 .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.ATTACHMENT));
-        if (file.getOwner() == null || !file.getOwner().getId().equals(principal.userId())) {
+        if (file.getOwner() == null || !file.getOwner().getId().equals(userId)) {
             throw new ForbiddenException();
         }
         if (file.getStatus() != FileStatus.UPLOADED) {
@@ -60,16 +59,16 @@ public class RuleDocumentService {
     }
 
     @Transactional(readOnly = true)
-    public List<RuleDocumentResponse> list(AuthPrincipal principal) {
-        Building building = buildingRepository.findByManager_IdAndDeletedAtIsNull(principal.userId())
+    public List<RuleDocumentResponse> list(Long userId) {
+        Building building = buildingRepository.findByManager_IdAndDeletedAtIsNull(userId)
                 .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.BUILDING));
         return documentRepository.findAllByBuilding_IdAndDeletedAtIsNullOrderByUpdatedAtDesc(building.getId())
                 .stream().map(this::response).toList();
     }
 
     @Transactional(readOnly = true)
-    public RuleDocumentResponse get(AuthPrincipal principal, long documentId) {
-        Building building = buildingRepository.findByManager_IdAndDeletedAtIsNull(principal.userId())
+    public RuleDocumentResponse get(Long userId, long documentId) {
+        Building building = buildingRepository.findByManager_IdAndDeletedAtIsNull(userId)
                 .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.BUILDING));
         RuleDocument document = documentRepository.findById(documentId)
                 .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.DOCUMENT));
@@ -80,8 +79,8 @@ public class RuleDocumentService {
     }
 
     @Transactional
-    public RuleDocumentResponse update(AuthPrincipal principal, long documentId, RuleDocumentUpdateRequest request) {
-        Building building = buildingRepository.findByManager_IdAndDeletedAtIsNull(principal.userId())
+    public RuleDocumentResponse update(Long userId, long documentId, RuleDocumentUpdateRequest request) {
+        Building building = buildingRepository.findByManager_IdAndDeletedAtIsNull(userId)
                 .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.BUILDING));
         RuleDocument document = documentRepository.findById(documentId)
                 .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.DOCUMENT));
