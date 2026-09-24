@@ -113,7 +113,7 @@ class ComplaintServiceImageTest {
     }
 
     private static ComplaintCreateRequest createRequest() {
-        return new ComplaintCreateRequest(CONVERSATION_ID, null, null, null, List.of());
+        return new ComplaintCreateRequest(CONVERSATION_ID, null, null, null);
     }
 
     private static Conversation readyConversation() {
