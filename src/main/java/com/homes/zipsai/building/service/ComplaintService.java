@@ -68,7 +68,7 @@ public class ComplaintService {
             .conversation(conversation)
             .user(room.getResident())
             .building(room.getBuilding())
-            .attachment(representativeImage(conversation.getId()))
+            .attachment(conversationService.findRepresentativeImage(conversation.getId()))
             .title(content.title())
             .urgency(URGENCY_NOT_EVALUATED)
             .roomNo(room.getRoomNo())
@@ -162,10 +162,6 @@ public class ComplaintService {
         }
         Duration ttl = Duration.ofSeconds(storageProperties.presignedUrlTtlSeconds());
         return s3StorageService.prepareDownload(attachment.getFileKey(), ttl).url();
-    }
-
-    private File representativeImage(Long conversationId) {
-        return conversationService.findImages(conversationId).stream().findFirst().orElse(null);
     }
 
     private String normalizeKeyword(String keyword) {

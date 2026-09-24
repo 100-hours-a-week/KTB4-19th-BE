@@ -214,9 +214,17 @@ public class ConversationService {
 
     @Transactional(readOnly = true)
     public List<File> findImages(Long conversationId) {
-        return messageFileGroupRepository.findAllByConversationId(conversationId).stream()
+        return messageFileGroupRepository.findAllByConversationId(conversationId, Limit.unlimited()).stream()
             .map(MessageFileGroup::getAttachment)
             .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public File findRepresentativeImage(Long conversationId) {
+        return messageFileGroupRepository.findAllByConversationId(conversationId, Limit.of(1)).stream()
+            .map(MessageFileGroup::getAttachment)
+            .findFirst()
+            .orElse(null);
     }
 
     public Conversation getOwnedConversation(Long userId, Long conversationId) {
