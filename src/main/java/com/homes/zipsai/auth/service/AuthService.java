@@ -48,16 +48,13 @@ public class AuthService {
         dummyHash = passwordEncoder.encode("dummy-password");
     }
 
-    public Long signup(String emailInput, String passwordInput, String passwordConfirm,
+    public Long signup(String email, String password, String passwordConfirm,
                        String userNameInput, String phoneInput, List<AgreementRequest> agreementRequests) {
-        String email = UserInput.email(emailInput);
-        String password = UserInput.password(passwordInput);
         if (!password.equals(passwordConfirm)) {
             throw UserInput.invalid(
                     "passwordConfirm", Reason.PASSWORD_CONFIRMATION_MISMATCH);
         }
-        String name = UserInput.name(userNameInput);
-        String phone = UserInput.phone(phoneInput);
+        String phone = UserInput.normalizePhone(phoneInput);
         var agreements = UserInput.agreements(agreementRequests, true);
         if (userRepository.existsByEmail(email)) {
             throw duplicate();
@@ -65,7 +62,7 @@ public class AuthService {
         String hash = passwordEncoder.encode(password);
         try {
             return tx.execute(status -> {
-                User user = new User(email, hash, name, phone);
+                User user = new User(email, hash, userNameInput, phone);
                 agreements.forEach((type, agreed) -> user.agree(termsRepository.getLatest(type), agreed));
                 return userRepository.saveAndFlush(user).getId();
             });
@@ -84,9 +81,7 @@ public class AuthService {
     public record Tokens(Map<String, Object> data, String refreshToken, Instant expiresAt) {
     }
 
-    public Tokens login(String emailInput, String passwordInput) {
-        String email = UserInput.email(emailInput);
-        String password = UserInput.password(passwordInput);
+    public Tokens login(String email, String password) {
         User user = userRepository.findByEmail(email).orElse(null);
         boolean matches = passwordEncoder.matches(password, user == null ? dummyHash : user.getPassword());
         if (user == null || !matches || user.getStatus() != UserStatus.ACTIVE) {

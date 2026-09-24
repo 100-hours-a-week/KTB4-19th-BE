@@ -193,11 +193,11 @@ public class UserService {
             tokenType = "Bearer";
         }
         if (requestedName != null) {
-            user.changeUserName(UserInput.name(requestedName));
+            user.changeUserName(requestedName);
             updatedUserName = user.getUserName();
         }
         if (requestedPhone != null) {
-            user.changePhone(UserInput.phone(requestedPhone));
+            user.changePhone(UserInput.normalizePhone(requestedPhone));
             updatedPhone = user.getPhone();
         }
         Map<TermsType, Boolean> updates = UserInput.agreements(agreementRequests, false);

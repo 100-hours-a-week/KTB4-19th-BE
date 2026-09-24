@@ -70,39 +70,15 @@ public final class UserInput {
             throw missing("email");
         }
         String normalized = value.trim().toLowerCase(Locale.ROOT);
-        if (normalized.length() > 254 || !EMAIL.matcher(normalized).matches()) {
+        if (!EMAIL.matcher(normalized).matches()) {
             throw invalid("email", Reason.INVALID_EMAIL_FORMAT);
         }
         return normalized;
     }
 
-    public static String password(String value) {
-        if (value == null || value.isBlank()) {
-            throw missing("password");
-        }
-        if (!value.matches("(?=.*[A-Za-z])(?=.*[0-9])(?=.*[^A-Za-z0-9])[!-~]{8,20}")) {
-            throw invalid("password", Reason.INVALID_PASSWORD_FORMAT);
-        }
-        return value;
-    }
-
-    public static String name(String value) {
-        if (value == null) {
-            return null;
-        }
-        value = value.trim();
-        if (value.isEmpty() || value.length() > 7) {
-            throw invalid("userName", Reason.INVALID_USER_NAME_LENGTH);
-        }
-        return value;
-    }
-
-    public static String phone(String value) {
+    public static String normalizePhone(String value) {
         if (value == null || value.isBlank()) {
             return null;
-        }
-        if (!value.matches("[0-9]{10,11}|[0-9]{3}-[0-9]{3,4}-[0-9]{4}")) {
-            throw invalid("phone", Reason.INVALID_PHONE_FORMAT);
         }
         String digits = value.replace("-", "");
         return digits.substring(0, 3)
@@ -128,14 +104,7 @@ public final class UserInput {
             }
 
             TermsType type = item.termsType();
-            if (type == null) {
-                throw missing("termsType");
-            }
-
             Boolean agreed = item.isAgreed();
-            if (agreed == null) {
-                throw invalid("isAgreed", Reason.IS_AGREED_NOT_BOOLEAN);
-            }
 
             if (result.put(type, agreed) != null) {
                 throw invalid("agreements", Reason.DUPLICATE_TERMS_TYPE);
