@@ -15,6 +15,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -48,6 +49,7 @@ import com.homes.zipsai.user.repository.UserRepository;
 
 @SpringBootTest(classes = ZipsaiBackendApplication.class)
 @AutoConfigureMockMvc
+@DisplayName("입주민 민원 목록 API")
 class ResidentComplaintListApiTest {
 
     @MockitoBean
@@ -86,6 +88,7 @@ class ResidentComplaintListApiTest {
     EntityManager entityManager;
 
     @Test
+    @DisplayName("입주민은 본인 민원과 페이지 요약을 조회한다")
     @Transactional
     void returnsOnlyOwnComplaintsWithNumericIdsAndSummaryFields() throws Exception {
         ResidentRoom residentRoom = residentRoom("302");
@@ -120,6 +123,7 @@ class ResidentComplaintListApiTest {
     }
 
     @Test
+    @DisplayName("제목·상태 필터와 전체 상태 기본값을 적용한다")
     void filtersByTitleAndStatusAndReturnsAllStatusesWhenStatusIsMissing() throws Exception {
         ResidentRoom residentRoom = residentRoom("302");
         Complaint titleMatch = complaint(residentRoom, "천장 누수", ComplaintStatus.PENDING, 1);
@@ -147,6 +151,7 @@ class ResidentComplaintListApiTest {
     }
 
     @Test
+    @DisplayName("마지막 페이지를 넘으면 빈 목록을 반환한다")
     void returnsEmptyPageWhenPageExceedsLastManagerPage() throws Exception {
         ResidentRoom residentRoom = residentRoom("302");
         complaint(residentRoom, "첫 번째", ComplaintStatus.PENDING, 1);
@@ -162,9 +167,15 @@ class ResidentComplaintListApiTest {
             .andExpect(jsonPath("$.data.pageSize").value(1))
             .andExpect(jsonPath("$.data.hasNext").value(false))
             .andExpect(jsonPath("$.data.complaints.length()").value(0));
+
+        mvc.perform(get(COMPLAINTS).param("size", "100")
+                .with(resident(residentRoom.resident().getId())))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.pageSize").value(100));
     }
 
     @Test
+    @DisplayName("무인증·관리자·미연결 입주민과 잘못된 조회 조건을 거부한다")
     void rejectsUnauthenticatedWrongRoleUnconnectedResidentAndInvalidQueries() throws Exception {
         mvc.perform(get(COMPLAINTS))
             .andExpect(status().isUnauthorized());
@@ -186,6 +197,13 @@ class ResidentComplaintListApiTest {
         mvc.perform(get(COMPLAINTS).param("size", "101").with(resident(residentRoom.resident().getId())))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error.code").value("INVALID_QUERY_PARAMETER"));
+        mvc.perform(get(COMPLAINTS).param("size", "0").with(resident(residentRoom.resident().getId())))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("INVALID_QUERY_PARAMETER"));
+        mvc.perform(get(COMPLAINTS).param("page", "not-a-number")
+                .with(resident(residentRoom.resident().getId())))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("INVALID_QUERY_PARAMETER"));
         mvc.perform(get(COMPLAINTS).param("status", "UNKNOWN")
                 .with(resident(residentRoom.resident().getId())))
             .andExpect(status().isBadRequest())
@@ -193,6 +211,7 @@ class ResidentComplaintListApiTest {
     }
 
     @Test
+    @DisplayName("퇴거한 입주민의 민원 목록 접근을 거부한다")
     void deniesAccessAfterResidentMovesOut() throws Exception {
         ResidentRoom residentRoom = residentRoom("302");
         complaint(residentRoom, "퇴실 이후 민원", ComplaintStatus.PENDING, 1);
