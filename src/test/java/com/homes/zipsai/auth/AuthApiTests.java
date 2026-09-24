@@ -7,6 +7,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -20,6 +23,7 @@ import java.util.concurrent.Executors;
 import jakarta.servlet.http.Cookie;
 
 import org.assertj.core.api.Assertions;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -32,10 +36,13 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.homes.zipsai.ZipsaiBackendApplication;
+import com.homes.zipsai.auth.service.AuthService;
+import com.homes.zipsai.user.service.UserService;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -51,6 +58,12 @@ class AuthApiTests {
 
     @Autowired
     JdbcTemplate jdbc;
+
+    @MockitoSpyBean
+    AuthService authService;
+
+    @MockitoSpyBean
+    UserService userService;
 
     private String email() {
         return UUID.randomUUID() + "@example.com";
@@ -108,7 +121,17 @@ class AuthApiTests {
     @Test
     void duplicateEmailIsCanonicalAndDoesNotDuplicateAgreements() throws Exception {
         String email = email();
-        signup(email);
+        String signupWithProfile = signupBody(email).replace(
+                "\"email\"",
+                "\"userName\":\"  김관리  \",\"phone\":\"01012345678\",\"email\"");
+        mvc.perform(post("/api/v1/auth/signup")
+                        .contentType("application/json")
+                        .content(signupWithProfile))
+                .andExpect(status().isCreated());
+        Assertions.assertThat(jdbc.queryForObject("select user_name from Users where email=?", String.class, email))
+                .isEqualTo("김관리");
+        Assertions.assertThat(jdbc.queryForObject("select phone from Users where email=?", String.class, email))
+                .isEqualTo("010-1234-5678");
 
         mvc.perform(
                 post("/api/v1/auth/signup")
@@ -116,6 +139,12 @@ class AuthApiTests {
                         .content(signupBody("  " + email.toUpperCase() + "  "))
         ).andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("EMAIL_ALREADY_EXISTS"));
+
+        mvc.perform(post("/api/v1/auth/login")
+                        .contentType("application/json")
+                        .content("{\"email\":\"  " + email.toUpperCase()
+                                + "  \",\"password\":\"Asdf!12345\"}"))
+                .andExpect(status().isOk());
 
         mvc.perform(get("/api/v1/users/email-availability").param("email", email))
                 .andExpect(status().isOk())
@@ -171,6 +200,15 @@ class AuthApiTests {
                     .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
         }
 
+        mvc.perform(post("/api/v1/auth/signup")
+                        .contentType("application/json")
+                        .content(signupBody(email()).replace(
+                                "\"passwordConfirm\":\"Asdf!12345\"",
+                                "\"passwordConfirm\":\"Different!12\"")))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error.details.violations[0].field").value("passwordConfirm"))
+                .andExpect(jsonPath("$.error.details.violations[0].reason").value("비밀번호가 일치하지 않습니다."));
+
         mvc.perform(
                 post("/api/v1/auth/login")
                         .contentType("application/json")
@@ -183,6 +221,147 @@ class AuthApiTests {
                         .contentType("application/json")
                         .content("{")
         ).andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("회원가입 필드 형식과 약관 항목은 서비스 호출 전에 검증한다")
+    void validatesSignupRequestBeforeCallingService() throws Exception {
+        String signupEmail = email();
+        String valid = signupBody(signupEmail);
+
+        mvc.perform(post("/api/v1/auth/signup")
+                        .contentType("application/json")
+                        .content(valid.replace(signupEmail, "")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("MISSING_REQUIRED_FIELD"))
+                .andExpect(jsonPath("$.error.details.violations[0].field").value("email"))
+                .andExpect(jsonPath("$.error.details.violations[0].reason").value("필수 입력값입니다."));
+
+        mvc.perform(post("/api/v1/auth/signup")
+                        .contentType("application/json")
+                        .content(valid.replace(signupEmail, "bad")))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error.details.violations[0].field").value("email"))
+                .andExpect(jsonPath("$.error.details.violations[0].reason")
+                        .value("이메일 형식이 올바르지 않습니다."));
+
+        mvc.perform(post("/api/v1/auth/signup")
+                        .contentType("application/json")
+                        .content(valid.replace("\"password\":\"Asdf!12345\"", "\"password\":\"short\"")))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.error.details.violations[0].field").value("password"))
+                .andExpect(jsonPath("$.error.details.violations[0].reason")
+                        .value("비밀번호 형식이 올바르지 않습니다."));
+
+        verify(authService, never()).signup(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("로그인 필수값과 형식은 서비스 호출 전에 검증한다")
+    void validatesLoginRequestBeforeCallingService() throws Exception {
+        mvc.perform(post("/api/v1/auth/login")
+                        .contentType("application/json")
+                        .content("{\"password\":\"Asdf!12345\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("MISSING_REQUIRED_FIELD"))
+                .andExpect(jsonPath("$.error.details.violations[0].field").value("email"));
+
+        mvc.perform(post("/api/v1/auth/login")
+                        .contentType("application/json")
+                        .content("{\"email\":\"\",\"password\":\"Asdf!12345\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.details.violations[0].field").value("email"));
+
+        mvc.perform(post("/api/v1/auth/login")
+                        .contentType("application/json")
+                        .content("{\"email\":\"valid@example.com\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.details.violations[0].field").value("password"));
+
+        mvc.perform(post("/api/v1/auth/login")
+                        .contentType("application/json")
+                        .content("{\"email\":\"valid@example.com\",\"password\":\"\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.details.violations[0].field").value("password"));
+
+        mvc.perform(post("/api/v1/auth/login")
+                        .contentType("application/json")
+                        .content("{\"email\":\"invalid\",\"password\":\"Asdf!12345\"}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error.details.violations[0].field").value("email"))
+                .andExpect(jsonPath("$.error.details.violations[0].reason")
+                        .value("이메일 형식이 올바르지 않습니다."));
+
+        mvc.perform(post("/api/v1/auth/login")
+                        .contentType("application/json")
+                        .content("{\"email\":\"valid@example.com\",\"password\":\"short\"}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error.details.violations[0].field").value("password"))
+                .andExpect(jsonPath("$.error.details.violations[0].reason")
+                        .value("비밀번호 형식이 올바르지 않습니다."));
+
+        verify(authService, never()).login(any(), any());
+    }
+
+    @Test
+    @DisplayName("중첩 약관 필수값은 서비스 호출 전에 기존 오류 계약으로 검증한다")
+    void validatesNestedAgreementRequestBeforeCallingService() throws Exception {
+        String missingAgreements = """
+                {"email":"%s","password":"Asdf!12345","passwordConfirm":"Asdf!12345"}
+                """.formatted(email());
+        mvc.perform(post("/api/v1/auth/signup")
+                        .contentType("application/json")
+                        .content(missingAgreements))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.details.violations[0].field").value("agreements"))
+                .andExpect(jsonPath("$.error.details.violations[0].reason").value("필수 입력값입니다."));
+
+        String missingTermsType = signupBody(email()).replace("\"termsType\":\"SERVICE\",", "");
+        mvc.perform(post("/api/v1/auth/signup")
+                        .contentType("application/json")
+                        .content(missingTermsType))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.details.violations[0].field").value("termsType"))
+                .andExpect(jsonPath("$.error.details.violations[0].reason").value("필수 입력값입니다."));
+
+        String missingAgreementValue = signupBody(email())
+                .replace("\"termsType\":\"SERVICE\",\"isAgreed\":true", "\"termsType\":\"SERVICE\"");
+        mvc.perform(post("/api/v1/auth/signup")
+                        .contentType("application/json")
+                        .content(missingAgreementValue))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error.details.violations[0].field").value("isAgreed"))
+                .andExpect(jsonPath("$.error.details.violations[0].reason")
+                        .value("동의 여부는 boolean이어야 합니다."));
+
+        verify(authService, never()).signup(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("프로필 필드 형식은 서비스 호출 전에 검증한다")
+    void validatesUserPatchRequestBeforeCallingService() throws Exception {
+        String email = email();
+        signup(email);
+        String token = access(login(email));
+
+        patchMe(token, "{\"phone\":\"bad\"}")
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error.details.violations[0].field").value("phone"))
+                .andExpect(jsonPath("$.error.details.violations[0].reason").value("연락처 형식이 올바르지 않습니다."));
+
+        patchMe(token, "{\"userName\":\"   \"}")
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error.details.violations[0].field").value("userName"))
+                .andExpect(jsonPath("$.error.details.violations[0].reason").value("이름은 1~7자여야 합니다."));
+
+        patchMe(token, "{\"agreements\":[{\"termsType\":\"MARKETING\"}]}")
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error.details.violations[0].field").value("isAgreed"))
+                .andExpect(jsonPath("$.error.details.violations[0].reason")
+                        .value("동의 여부는 boolean이어야 합니다."));
+
+        verify(userService, never()).patch(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -279,8 +458,9 @@ class AuthApiTests {
         signup(email);
         String token = access(login(email));
 
-        patchMe(token, "{\"userName\":\"김관리\",\"phone\":\"01012345678\"}")
+        patchMe(token, "{\"userName\":\"  김관리  \",\"phone\":\"01012345678\"}")
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.userName").value("김관리"))
                 .andExpect(jsonPath("$.data.phone").value("010-1234-5678"));
         patchMe(token, "{\"phone\":\"\"}")
                 .andExpect(status().isOk())
