@@ -1,7 +1,6 @@
 package com.homes.zipsai.building.dto.request;
 
 import java.time.OffsetDateTime;
-import java.util.List;
 
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -26,11 +25,7 @@ public record ComplaintCreateRequest(
 
     @Schema(description = "수정한 증상", example = "천장 가운데에서 물이 떨어짐")
     @Size(max = 100, message = "증상은 100자 이하여야 합니다.")
-    String symptom,
-
-    @Schema(description = "업로드 완료된 첨부 ID")
-    @Size(max = 3, message = "첨부 사진은 3장 이하여야 합니다.")
-    List<Long> attachmentIds
+    String symptom
 ) {
 
     public AiComplaintDraft toDraftEdits() {

@@ -3,7 +3,6 @@ package com.homes.zipsai.conversation.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.BDDMockito.given;
 
 import java.util.List;
@@ -15,8 +14,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.homes.zipsai.building.domain.Building;
@@ -31,6 +28,7 @@ import com.homes.zipsai.conversation.domain.Message;
 import com.homes.zipsai.conversation.domain.MessageType;
 import com.homes.zipsai.conversation.domain.SenderType;
 import com.homes.zipsai.conversation.dto.response.ConversationMessagesResponse;
+import com.homes.zipsai.conversation.dto.response.MessageResponse;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
@@ -39,7 +37,6 @@ import com.homes.zipsai.global.exception.NotFoundException;
 import com.homes.zipsai.user.domain.User;
 
 @ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 class ManagerConversationReadTest {
 
     private static final long MANAGER_ID = 9L;
@@ -74,43 +71,47 @@ class ManagerConversationReadTest {
             messageFileGroupRepository, fileRepository, residentRoomService, s3StorageService,
             new StorageProperties(null, null, null, 300, 0));
         conversation = conversation();
-        given(conversationRepository.findByIdAndDeletedAtIsNull(CONVERSATION_ID))
-            .willReturn(Optional.of(conversation));
-        given(messageRepository.findLatestByConversationId(any(), any()))
-            .willReturn(List.of(message("천장에서 물이 새요")));
-        given(messageFileGroupRepository.findAllByMessageIds(anyList())).willReturn(List.of());
     }
 
     @Test
     @DisplayName("담당 건물의 민원이 접수된 대화를 읽는다")
     void readsConversationOfOwnBuildingComplaint() {
+        givenConversationExists();
         givenComplaintOwnedBy(MANAGER_ID);
+        given(messageRepository.findLatestByConversationId(any(), any()))
+            .willReturn(List.of(message("천장에서 물이 새요")));
 
         ConversationMessagesResponse response = conversationService.getComplaintMessagesForManager(
             MANAGER_ID, CONVERSATION_ID, null, 20);
 
         assertThat(response.conversationId()).isEqualTo(CONVERSATION_ID);
-        assertThat(response.messages()).hasSize(1);
+        assertThat(response.messages()).singleElement()
+            .extracting(MessageResponse::content)
+            .isEqualTo("천장에서 물이 새요");
     }
 
     @Test
     @DisplayName("다른 관리자의 건물에 접수된 대화는 읽을 수 없다")
     void rejectsConversationOfAnotherManagerBuilding() {
+        givenConversationExists();
         givenComplaintOwnedBy(OTHER_MANAGER_ID);
 
         assertThatThrownBy(() -> conversationService.getComplaintMessagesForManager(
             MANAGER_ID, CONVERSATION_ID, null, 20))
-            .isInstanceOf(ForbiddenException.class);
+            .isInstanceOf(ForbiddenException.class)
+            .hasFieldOrPropertyWithValue("code", "FORBIDDEN");
     }
 
     @Test
     @DisplayName("민원이 접수되지 않은 대화는 찾을 수 없다")
     void rejectsConversationWithoutComplaint() {
-        given(conversationRepository.findComplaintsByConversationIds(anyList())).willReturn(List.of());
+        givenConversationExists();
+        given(conversationRepository.findComplaintByConversationId(CONVERSATION_ID)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> conversationService.getComplaintMessagesForManager(
             MANAGER_ID, CONVERSATION_ID, null, 20))
-            .isInstanceOf(NotFoundException.class);
+            .isInstanceOf(NotFoundException.class)
+            .hasFieldOrPropertyWithValue("code", "CONVERSATION_NOT_FOUND");
     }
 
     @Test
@@ -120,12 +121,18 @@ class ManagerConversationReadTest {
 
         assertThatThrownBy(() -> conversationService.getComplaintMessagesForManager(
             MANAGER_ID, CONVERSATION_ID, null, 20))
-            .isInstanceOf(NotFoundException.class);
+            .isInstanceOf(NotFoundException.class)
+            .hasFieldOrPropertyWithValue("code", "CONVERSATION_NOT_FOUND");
+    }
+
+    private void givenConversationExists() {
+        given(conversationRepository.findByIdAndDeletedAtIsNull(CONVERSATION_ID))
+            .willReturn(Optional.of(conversation));
     }
 
     private void givenComplaintOwnedBy(long managerId) {
-        given(conversationRepository.findComplaintsByConversationIds(anyList()))
-            .willReturn(List.of(complaint(managerId)));
+        given(conversationRepository.findComplaintByConversationId(CONVERSATION_ID))
+            .willReturn(Optional.of(complaint(managerId)));
     }
 
     private Complaint complaint(long managerId) {
