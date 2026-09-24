@@ -1,5 +1,7 @@
 package com.homes.zipsai.user.controller;
 
+import jakarta.validation.Valid;
+
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -59,7 +61,7 @@ public class UserController {
     @Operation(summary = "내 프로필·역할 변경")
     public ResponseEntity<ApiResponse<UserPatchResponse>> patch(
             @AuthenticationPrincipal AuthPrincipal principal,
-            @RequestBody UserPatchRequest userPatchRequest
+            @Valid @RequestBody UserPatchRequest userPatchRequest
     ) {
         return ResponseEntity.ok(ApiResponse.data(service.patch(
                 principal, userPatchRequest.userRole(), userPatchRequest.userName(), userPatchRequest.phone(), userPatchRequest.agreements())));
