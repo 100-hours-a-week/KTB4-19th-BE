@@ -112,7 +112,7 @@ public class ConversationService {
     }
 
     private Complaint findComplaint(Conversation conversation) {
-        return findComplaints(List.of(conversation)).get(conversation.getId());
+        return conversationRepository.findComplaintByConversationId(conversation.getId()).orElse(null);
     }
 
     private ConversationMessagesResponse readMessages(Conversation conversation, Complaint complaint,
