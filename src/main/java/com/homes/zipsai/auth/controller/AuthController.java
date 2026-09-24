@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.Map;
 
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
@@ -44,7 +45,7 @@ public class AuthController {
     @PostMapping("/signup")
     @Operation(summary = "회원가입")
     public ResponseEntity<ApiResponse<SignupResponse>> signup(
-            @RequestBody SignupRequest request
+            @Valid @RequestBody SignupRequest request
     ) {
         SignupResponse response = new SignupResponse(authService.signup(
                 request.email(), request.password(), request.passwordConfirm(),
@@ -55,7 +56,7 @@ public class AuthController {
     @PostMapping("/login")
     @Operation(summary = "로그인", description = "access token을 응답하고 refresh token을 쿠키로 발급한다.")
     public ApiResponse<LoginResponse> login(
-            @RequestBody LoginRequest loginRequest,
+            @Valid @RequestBody LoginRequest loginRequest,
             HttpServletResponse response
     ) {
         return result(authService.login(loginRequest.email(), loginRequest.password()), response);

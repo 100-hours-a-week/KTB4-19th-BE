@@ -16,12 +16,15 @@ import com.homes.zipsai.user.domain.TermsType;
 import tools.jackson.databind.JsonNode;
 
 public final class UserInput {
-    private static final Pattern EMAIL = Pattern.compile(
-            "^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+"
+    public static final String EMAIL_PATTERN = "^(?=.{1,254}$)[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+"
                     + "(?:\\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*"
                     + "@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
-                    + "(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$"
-    );
+                    + "(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$";
+    public static final String PASSWORD_PATTERN = "(?=.*[A-Za-z])(?=.*[0-9])(?=.*[^A-Za-z0-9])[!-~]{8,20}";
+    public static final String PHONE_PATTERN =
+            "[0-9]{10,11}|[0-9]{3}-[0-9]{3,4}-[0-9]{4}|\\p{javaWhitespace}*";
+
+    private static final Pattern EMAIL = Pattern.compile(EMAIL_PATTERN);
 
     private UserInput() {
     }
