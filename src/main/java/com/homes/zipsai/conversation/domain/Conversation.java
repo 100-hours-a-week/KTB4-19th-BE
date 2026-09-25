@@ -141,15 +141,6 @@ public class Conversation extends BaseTimeEntity {
         return complaintState == AiComplaintState.READY_TO_CONFIRM;
     }
 
-    public void resolve() {
-        if (!isActive()) {
-            return;
-        }
-        this.status = ConversationStatus.RESOLVED;
-        this.currentRoute = null;
-        this.complaintState = null;
-    }
-
     public void markComplaintCreated(String complaintTitle, AiComplaintDraft confirmedDraft) {
         this.type = ConversationType.COMPLAINT;
         this.status = ConversationStatus.COMPLAINT_CREATED;

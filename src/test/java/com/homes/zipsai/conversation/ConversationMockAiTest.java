@@ -9,12 +9,10 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.times;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -250,36 +248,6 @@ class ConversationMockAiTest {
                 .contentType("application/json").content("{\"content\":\"몇 시까지인가요?\"}"))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.data.assistantMessage.messageType").value("TEXT"));
-    }
-
-    @Test
-    void conversationResolvedWhileAiIsRespondingStaysClosed() throws Exception {
-        String token = fixture.login(mvc, json, fixture.livingResident("302"));
-        AiComplaintDraft draft =
-            new AiComplaintDraft("안방 천장", "천장에서 물이 새요", OffsetDateTime.now());
-        CountDownLatch aiEntered = new CountDownLatch(1);
-        CountDownLatch releaseAi = new CountDownLatch(1);
-        given(aiConverseClient.converse(any()))
-            .willAnswer(ConversationMockAiTest::collecting)
-            .willAnswer(invocation -> {
-                aiEntered.countDown();
-                releaseAi.await(5, TimeUnit.SECONDS);
-                return complaint(request(invocation).traceId(), null, "접수할까요?", draft, List.of());
-            });
-        long conversationId = startConversation(token);
-
-        CompletableFuture<Integer> send = CompletableFuture.supplyAsync(() -> sendStatus(token, conversationId));
-        assertThat(aiEntered.await(5, TimeUnit.SECONDS)).isTrue();
-        mvc.perform(patch(CONVERSATIONS + "/" + conversationId).header("Authorization", "Bearer " + token)
-                .contentType("application/json").content("{\"conversationStatus\":\"RESOLVED\"}"))
-            .andExpect(status().isOk());
-        releaseAi.countDown();
-        assertThat(send.get(5, TimeUnit.SECONDS)).isEqualTo(201);
-
-        mvc.perform(get(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", "Bearer " + token))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.conversationStatus").value("RESOLVED"))
-            .andExpect(jsonPath("$.data.messages[3].messageType").value("TEXT"));
     }
 
     @Test
