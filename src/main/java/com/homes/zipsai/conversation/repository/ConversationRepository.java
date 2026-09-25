@@ -38,4 +38,7 @@ public interface ConversationRepository extends JpaRepository<Conversation, Long
 
     @Query("select c from Complaint c where c.conversation.id in :conversationIds and c.deletedAt is null")
     List<Complaint> findComplaintsByConversationIds(@Param("conversationIds") Collection<Long> conversationIds);
+
+    @Query("select c from Complaint c where c.conversation.id = :conversationId and c.deletedAt is null")
+    Optional<Complaint> findComplaintByConversationId(@Param("conversationId") Long conversationId);
 }

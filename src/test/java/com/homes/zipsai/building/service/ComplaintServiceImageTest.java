@@ -5,8 +5,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 
-import java.util.List;
-
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -58,17 +56,15 @@ class ComplaintServiceImageTest {
     S3StorageService s3StorageService;
 
     ComplaintService complaintService;
-    User resident;
 
     @BeforeEach
     void setUp() {
         complaintService = new ComplaintService(complaintRepository, complaintDetailRepository,
             buildingRepository, residentRoomService, conversationService, s3StorageService,
             new StorageProperties(null, null, null, 300, 0));
-        resident = user(RESIDENT_ID);
         given(conversationService.getOwnedConversation(RESIDENT_ID, CONVERSATION_ID))
             .willReturn(readyConversation());
-        given(residentRoomService.getLivingRoom(RESIDENT_ID)).willReturn(livingRoom(resident));
+        given(residentRoomService.getLivingRoom(RESIDENT_ID)).willReturn(livingRoom(user(RESIDENT_ID)));
         given(complaintRepository.save(any(Complaint.class)))
             .willAnswer(invocation -> withId(invocation.getArgument(0), 100L));
         given(complaintDetailRepository.save(any(ComplaintDetail.class)))
@@ -76,34 +72,24 @@ class ComplaintServiceImageTest {
     }
 
     @Test
-    @DisplayName("대화에 올린 첫 사진을 민원 대표 사진으로 저장한다")
-    void savesFirstConversationImageAsRepresentative() {
-        File first = uploaded(4L);
-        given(conversationService.findImages(CONVERSATION_ID)).willReturn(List.of(first, uploaded(5L)));
+    @DisplayName("대화의 대표 사진을 민원 대표 사진으로 저장한다")
+    void savesConversationRepresentativeImage() {
+        File representative = uploaded(4L);
+        given(conversationService.findRepresentativeImage(CONVERSATION_ID)).willReturn(representative);
 
         complaintService.createComplaint(RESIDENT_ID, createRequest());
 
-        assertThat(savedComplaint().getAttachment()).isEqualTo(first);
+        assertThat(savedComplaint().getAttachment()).isEqualTo(representative);
     }
 
     @Test
     @DisplayName("대화에 사진이 없으면 대표 사진 없이 저장한다")
     void savesComplaintWithoutRepresentativeWhenNoImage() {
-        given(conversationService.findImages(CONVERSATION_ID)).willReturn(List.of());
+        given(conversationService.findRepresentativeImage(CONVERSATION_ID)).willReturn(null);
 
         complaintService.createComplaint(RESIDENT_ID, createRequest());
 
         assertThat(savedComplaint().getAttachment()).isNull();
-    }
-
-    @Test
-    @DisplayName("대표 사진은 민원이 시작된 대화에서만 찾는다")
-    void looksUpImagesOfComplaintConversationOnly() {
-        given(conversationService.findImages(CONVERSATION_ID)).willReturn(List.of(uploaded(4L)));
-
-        complaintService.createComplaint(RESIDENT_ID, createRequest());
-
-        then(conversationService).should().findImages(CONVERSATION_ID);
     }
 
     private Complaint savedComplaint() {
@@ -113,7 +99,7 @@ class ComplaintServiceImageTest {
     }
 
     private static ComplaintCreateRequest createRequest() {
-        return new ComplaintCreateRequest(CONVERSATION_ID, null, null, null, List.of());
+        return new ComplaintCreateRequest(CONVERSATION_ID, null, null, null);
     }
 
     private static Conversation readyConversation() {
