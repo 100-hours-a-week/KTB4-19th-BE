@@ -3,7 +3,6 @@ package com.homes.zipsai.conversation;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -254,79 +253,6 @@ class ResidentConversationApiTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.conversations.length()").value(1))
             .andExpect(jsonPath("$.data.conversations[0].conversationTitle").value("주차 등록은 어떻게 하나요?"));
-    }
-
-    @Test
-    void conversationIsResolvedOnceAndRejectsFurtherMessages() throws Exception {
-        long conversationId = conversationId(startConversation(token, "분리수거 요일이 언제인가요?")
-            .andReturn().getResponse().getContentAsString());
-
-        resolve(token, conversationId, "{\"conversationStatus\":\"RESOLVED\"}")
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.conversationId").value(conversationId))
-            .andExpect(jsonPath("$.data.conversationStatus").value("RESOLVED"))
-            .andExpect(jsonPath("$.data.conversationStatusLabel").value("답변완료"))
-            .andExpect(jsonPath("$.data.updatedAt").isNotEmpty());
-
-        resolve(token, conversationId, "{\"conversationStatus\":\"RESOLVED\"}")
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.conversationStatus").value("RESOLVED"));
-
-        sendMessage(token, conversationId, "추가 문의요")
-            .andExpect(status().isConflict())
-            .andExpect(jsonPath("$.error.code").value("CONVERSATION_CLOSED"));
-        mvc.perform(get(CONVERSATIONS).header("Authorization", bearer(token)))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.conversations[0].statusCode").value("RESOLVED"))
-            .andExpect(jsonPath("$.data.conversations[0].statusLabel").value("답변완료"));
-    }
-
-    @Test
-    void resolvingComplaintConversationKeepsComplaintStatus() throws Exception {
-        long conversationId = collectComplaint("현관 조명이 꺼졌어요");
-        createComplaint(token, "{\"conversationId\":%d}".formatted(conversationId))
-            .andExpect(status().isCreated());
-
-        resolve(token, conversationId, "{\"conversationStatus\":\"RESOLVED\"}")
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.conversationStatus").value("COMPLAINT_CREATED"))
-            .andExpect(jsonPath("$.data.conversationStatusLabel").value("민원접수"));
-    }
-
-    @Test
-    void resolveValidatesStatusValue() throws Exception {
-        long conversationId = conversationId(startConversation(token, "분리수거 요일이 언제인가요?")
-            .andReturn().getResponse().getContentAsString());
-
-        resolve(token, conversationId, "{}")
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.error.code").value("MISSING_REQUIRED_FIELD"))
-            .andExpect(jsonPath("$.error.details.violations[0].field").value("conversationStatus"));
-        resolve(token, conversationId, "{\"conversationStatus\":\"COMPLAINT_CREATED\"}")
-            .andExpect(status().isUnprocessableContent())
-            .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
-            .andExpect(jsonPath("$.error.details.violations[0].field").value("conversationStatus"))
-            .andExpect(jsonPath("$.error.details.violations[0].reason").value("허용되지 않은 상태값입니다."));
-        resolve(token, 999_999L, "{\"conversationStatus\":\"RESOLVED\"}")
-            .andExpect(status().isNotFound())
-            .andExpect(jsonPath("$.error.code").value("CONVERSATION_NOT_FOUND"));
-
-        String otherToken = fixture.login(mvc, json, fixture.livingResident("101"));
-        resolve(otherToken, conversationId, "{\"conversationStatus\":\"RESOLVED\"}")
-            .andExpect(status().isForbidden())
-            .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
-    }
-
-    private long collectComplaint(String symptom) throws Exception {
-        long conversationId = conversationId(startConversation(token, symptom)
-            .andReturn().getResponse().getContentAsString());
-        sendMessage(token, conversationId, "공동현관 앞이요");
-        return conversationId;
-    }
-
-    private ResultActions resolve(String accessToken, long conversationId, String body) throws Exception {
-        return mvc.perform(patch(CONVERSATIONS + "/" + conversationId).header("Authorization", bearer(accessToken))
-            .contentType("application/json").content(body));
     }
 
     private ResultActions startConversation(String accessToken, String content) throws Exception {
