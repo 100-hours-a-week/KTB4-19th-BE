@@ -14,10 +14,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.homes.zipsai.building.dto.InvitationCodeResponse;
-import com.homes.zipsai.building.dto.InvitationCodeValidationResponse;
-import com.homes.zipsai.building.dto.RoomConnectionRequest;
-import com.homes.zipsai.building.dto.RoomConnectionResponse;
+import com.homes.zipsai.building.dto.request.RoomConnectionRequest;
+import com.homes.zipsai.building.dto.response.InvitationCodeResponse;
+import com.homes.zipsai.building.dto.response.InvitationCodeValidationResponse;
+import com.homes.zipsai.building.dto.response.RoomConnectionResponse;
 import com.homes.zipsai.building.service.InvitationCodeService;
 import com.homes.zipsai.building.service.RoomConnectionService;
 import com.homes.zipsai.global.response.ApiResponse;

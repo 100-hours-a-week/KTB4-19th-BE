@@ -8,8 +8,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.homes.zipsai.global.response.ApiResponse;
 import com.homes.zipsai.global.security.AuthPrincipal;
-import com.homes.zipsai.user.dto.ManagerMyPageResponse;
-import com.homes.zipsai.user.dto.ResidentMyPageResponse;
+import com.homes.zipsai.user.dto.response.ManagerMyPageResponse;
+import com.homes.zipsai.user.dto.response.ResidentMyPageResponse;
 import com.homes.zipsai.user.service.UserService;
 
 import io.swagger.v3.oas.annotations.Operation;

@@ -140,7 +140,7 @@ public class ApiExceptionHandler {
     private static List<Map<String, String>> violations(Errors bindingResult) {
         List<Map<String, String>> fieldViolations = bindingResult.getFieldErrors().stream()
                 .map(error -> Map.of(
-                        "field", error.getField(),
+                        "field", validationField(error.getField()),
                         "reason", isMissingRequiredField(error) ? "필수 입력값입니다." : reason(error)))
                 .toList();
         if (!fieldViolations.isEmpty()) {
@@ -155,12 +155,20 @@ public class ApiExceptionHandler {
         if (error.getRejectedValue() != null || error.getCodes() == null) {
             return false;
         }
+        if ("isAgreed".equals(validationField(error.getField()))) {
+            return false;
+        }
         for (String code : error.getCodes()) {
             if (isRequiredConstraintCode(code)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static String validationField(String field) {
+        int nestedFieldStart = field.startsWith("agreements[") ? field.indexOf("].") : -1;
+        return nestedFieldStart < 0 ? field : field.substring(nestedFieldStart + 2);
     }
 
     private static boolean isRequiredConstraintCode(String code) {

@@ -11,18 +11,18 @@ import org.springframework.http.ResponseEntity;
 
 import com.homes.zipsai.global.response.ApiResponse;
 import com.homes.zipsai.global.security.AuthPrincipal;
-import com.homes.zipsai.user.dto.UserPatchRequest;
+import com.homes.zipsai.user.dto.request.UserPatchRequest;
 
 class UserControllerDtoContractTest {
 
     @Test
     void userEndpointsExposeTypedResponseDtos() throws NoSuchMethodException {
         assertThat(responseDataType("available", String.class))
-                .isEqualTo("com.homes.zipsai.user.dto.EmailAvailabilityResponse");
+                .isEqualTo("com.homes.zipsai.user.dto.response.EmailAvailabilityResponse");
         assertThat(responseDataType("me", AuthPrincipal.class))
-                .isEqualTo("com.homes.zipsai.user.dto.UserProfileResponse");
+                .isEqualTo("com.homes.zipsai.user.dto.response.UserProfileResponse");
         assertThat(responseDataType("patch", AuthPrincipal.class, UserPatchRequest.class))
-                .isEqualTo("com.homes.zipsai.user.dto.UserPatchResponse");
+                .isEqualTo("com.homes.zipsai.user.dto.response.UserPatchResponse");
     }
 
     private String responseDataType(String methodName, Class<?>... parameterTypes) throws NoSuchMethodException {

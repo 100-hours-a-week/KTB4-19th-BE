@@ -10,8 +10,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.homes.zipsai.building.dto.BuildingRegistrationRequest;
-import com.homes.zipsai.building.dto.BuildingResponse;
+import com.homes.zipsai.building.dto.request.BuildingRegistrationRequest;
+import com.homes.zipsai.building.dto.response.BuildingResponse;
 import com.homes.zipsai.building.dto.response.ManagerBuildingDetailResponse;
 import com.homes.zipsai.building.dto.response.ManagerComplaintSummaryResponse;
 import com.homes.zipsai.building.dto.response.ManagerRoomListResponse;

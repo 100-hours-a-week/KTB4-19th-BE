@@ -9,7 +9,7 @@ import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.homes.zipsai.auth.dto.AgreementRequest;
+import com.homes.zipsai.auth.dto.request.AgreementRequest;
 import com.homes.zipsai.auth.service.TokenService;
 import com.homes.zipsai.building.domain.Building;
 import com.homes.zipsai.building.domain.Room;
@@ -26,13 +26,13 @@ import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.domain.UserAgreement;
 import com.homes.zipsai.user.domain.UserRole;
 import com.homes.zipsai.user.domain.UserStatus;
-import com.homes.zipsai.user.dto.EmailAvailabilityResponse;
-import com.homes.zipsai.user.dto.ManagerMyPageResponse;
-import com.homes.zipsai.user.dto.OnboardingStatusResponse;
-import com.homes.zipsai.user.dto.ResidentMyPageResponse;
-import com.homes.zipsai.user.dto.UserAgreementResponse;
-import com.homes.zipsai.user.dto.UserPatchResponse;
-import com.homes.zipsai.user.dto.UserProfileResponse;
+import com.homes.zipsai.user.dto.response.EmailAvailabilityResponse;
+import com.homes.zipsai.user.dto.response.ManagerMyPageResponse;
+import com.homes.zipsai.user.dto.response.OnboardingStatusResponse;
+import com.homes.zipsai.user.dto.response.ResidentMyPageResponse;
+import com.homes.zipsai.user.dto.response.UserAgreementResponse;
+import com.homes.zipsai.user.dto.response.UserPatchResponse;
+import com.homes.zipsai.user.dto.response.UserProfileResponse;
 import com.homes.zipsai.user.repository.TermsRepository;
 import com.homes.zipsai.user.repository.UserRepository;
 import com.homes.zipsai.user.validator.UserInput;
@@ -193,11 +193,11 @@ public class UserService {
             tokenType = "Bearer";
         }
         if (requestedName != null) {
-            user.changeUserName(UserInput.name(requestedName));
+            user.changeUserName(requestedName);
             updatedUserName = user.getUserName();
         }
         if (requestedPhone != null) {
-            user.changePhone(UserInput.phone(requestedPhone));
+            user.changePhone(UserInput.normalizePhone(requestedPhone));
             updatedPhone = user.getPhone();
         }
         Map<TermsType, Boolean> updates = UserInput.agreements(agreementRequests, false);

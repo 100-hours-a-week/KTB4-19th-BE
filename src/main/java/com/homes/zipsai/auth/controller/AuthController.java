@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.Map;
 
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
@@ -16,22 +17,22 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.homes.zipsai.auth.dto.LoginRequest;
-import com.homes.zipsai.auth.dto.LoginResponse;
-import com.homes.zipsai.auth.dto.ReissueResponse;
-import com.homes.zipsai.auth.dto.SignupRequest;
-import com.homes.zipsai.auth.dto.SignupResponse;
+import com.homes.zipsai.auth.dto.request.LoginRequest;
+import com.homes.zipsai.auth.dto.request.SignupRequest;
+import com.homes.zipsai.auth.dto.response.LoginResponse;
+import com.homes.zipsai.auth.dto.response.ReissueResponse;
+import com.homes.zipsai.auth.dto.response.SignupResponse;
 import com.homes.zipsai.auth.service.AuthService;
 import com.homes.zipsai.auth.validator.RefreshTokenValidator;
 import com.homes.zipsai.global.response.ApiResponse;
 import com.homes.zipsai.global.security.AuthPrincipal;
 import com.homes.zipsai.global.security.AuthProperties;
 import com.homes.zipsai.user.domain.UserRole;
-import com.homes.zipsai.user.dto.UserResponse;
+import com.homes.zipsai.user.dto.response.UserResponse;
 
-import lombok.RequiredArgsConstructor;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequiredArgsConstructor
@@ -44,7 +45,7 @@ public class AuthController {
     @PostMapping("/signup")
     @Operation(summary = "회원가입")
     public ResponseEntity<ApiResponse<SignupResponse>> signup(
-            @RequestBody SignupRequest request
+            @Valid @RequestBody SignupRequest request
     ) {
         SignupResponse response = new SignupResponse(authService.signup(
                 request.email(), request.password(), request.passwordConfirm(),
@@ -55,7 +56,7 @@ public class AuthController {
     @PostMapping("/login")
     @Operation(summary = "로그인", description = "access token을 응답하고 refresh token을 쿠키로 발급한다.")
     public ApiResponse<LoginResponse> login(
-            @RequestBody LoginRequest loginRequest,
+            @Valid @RequestBody LoginRequest loginRequest,
             HttpServletResponse response
     ) {
         return result(authService.login(loginRequest.email(), loginRequest.password()), response);

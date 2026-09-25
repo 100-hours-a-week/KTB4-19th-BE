@@ -10,8 +10,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.homes.zipsai.building.domain.Building;
 import com.homes.zipsai.building.domain.RuleDocument;
-import com.homes.zipsai.building.dto.RuleDocumentCreateRequest;
-import com.homes.zipsai.building.dto.RuleDocumentResponse;
+import com.homes.zipsai.building.dto.request.RuleDocumentCreateRequest;
+import com.homes.zipsai.building.dto.response.RuleDocumentResponse;
 import com.homes.zipsai.building.repository.BuildingRepository;
 import com.homes.zipsai.building.repository.RuleDocumentRepository;
 import com.homes.zipsai.common.config.StorageProperties;

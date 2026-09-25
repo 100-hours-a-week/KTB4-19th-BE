@@ -13,7 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.homes.zipsai.building.domain.Building;
 import com.homes.zipsai.building.domain.Room;
 import com.homes.zipsai.building.domain.RoomStatus;
-import com.homes.zipsai.building.dto.BuildingResponse;
+import com.homes.zipsai.building.dto.response.BuildingResponse;
 import com.homes.zipsai.building.dto.response.ManagerBuildingDetailResponse;
 import com.homes.zipsai.building.dto.response.ManagerComplaintSummaryResponse;
 import com.homes.zipsai.building.dto.response.ManagerRoomItemResponse;

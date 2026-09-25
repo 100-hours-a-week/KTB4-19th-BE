@@ -6,16 +6,16 @@ import jakarta.validation.Valid;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.homes.zipsai.building.dto.RuleDocumentCreateRequest;
-import com.homes.zipsai.building.dto.RuleDocumentResponse;
-import com.homes.zipsai.building.dto.RuleDocumentUpdateRequest;
+import com.homes.zipsai.building.dto.request.RuleDocumentCreateRequest;
+import com.homes.zipsai.building.dto.request.RuleDocumentUpdateRequest;
+import com.homes.zipsai.building.dto.response.RuleDocumentResponse;
 import com.homes.zipsai.building.service.RuleDocumentService;
 import com.homes.zipsai.global.response.ApiResponse;
 import com.homes.zipsai.global.security.AuthPrincipal;

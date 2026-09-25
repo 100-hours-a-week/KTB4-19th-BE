@@ -11,13 +11,15 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.homes.zipsai.building.dto.RoomBulkCreateRequest;
-import com.homes.zipsai.building.dto.RoomBulkCreateResponse;
+import com.homes.zipsai.building.dto.request.RoomBulkCreateRequest;
+import com.homes.zipsai.building.dto.response.RoomBulkCreateResponse;
 import com.homes.zipsai.building.service.RoomService;
 import com.homes.zipsai.global.response.ApiResponse;
 import com.homes.zipsai.global.security.AuthPrincipal;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequestMapping("/api/v1/managers/me")
