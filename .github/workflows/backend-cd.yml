@@ -139,3 +139,69 @@ jobs:
             --type String \
             --value "$deploy_sha" \
             --overwrite > /dev/null
+
+          # 현재 배포 SHA와 바로 직전 정상 SHA만 남겨 EC2의 Backend Image 누적을 방지한다.
+          # 정리에 실패해도 Health Check를 통과한 배포 자체는 성공으로 유지한다.
+          cleanup_remote_images() {
+            local encoded_script command_id status
+
+            {
+              printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
+              printf 'ECR_REGISTRY=%q\n' "$ECR_REGISTRY"
+              printf 'CURRENT_SHA=%q\n' "$deploy_sha"
+              printf 'PREVIOUS_SHA=%q\n' "$PREVIOUS_SHA"
+              cat <<'REMOTE_CLEANUP'
+              repository="$ECR_REGISTRY/zipsai-backend"
+
+              sudo docker image ls "$repository" --format '{{.Repository}}:{{.Tag}}' \
+                | while IFS= read -r image_ref; do
+                    case "$image_ref" in
+                      "$repository:$CURRENT_SHA"|"$repository:$PREVIOUS_SHA")
+                        echo "keep $image_ref"
+                        ;;
+                      "$repository:<none>")
+                        ;;
+                      *)
+                        echo "remove unused image $image_ref"
+                        sudo docker image rm "$image_ref" \
+                          || echo "could not remove $image_ref; it may still be referenced by a Container"
+                        ;;
+                    esac
+                  done
+          REMOTE_CLEANUP
+            } > remote-cleanup.sh
+
+            encoded_script="$(base64 < remote-cleanup.sh | tr -d '\n')"
+            jq -n \
+              --arg command "echo '$encoded_script' | base64 --decode | bash" \
+              '{commands: [$command]}' > ssm-cleanup-parameters.json
+
+            command_id="$(aws ssm send-command \
+              --document-name AWS-RunShellScript \
+              --instance-ids "$INSTANCE_ID" \
+              --parameters file://ssm-cleanup-parameters.json \
+              --comment "Clean unused Backend images" \
+              --query 'Command.CommandId' \
+              --output text)"
+
+            for _ in $(seq 1 36); do
+              status="$(aws ssm get-command-invocation \
+                --command-id "$command_id" \
+                --instance-id "$INSTANCE_ID" \
+                --query 'Status' \
+                --output text 2>/dev/null || true)"
+              case "$status" in
+                Success)
+                  return 0
+                  ;;
+                Failed|Cancelled|TimedOut|Cancelling)
+                  return 1
+                  ;;
+              esac
+              sleep 5
+            done
+
+            return 1
+          }
+
+          cleanup_remote_images || echo "::warning::Unused Backend image cleanup failed. The deployment itself succeeded."
