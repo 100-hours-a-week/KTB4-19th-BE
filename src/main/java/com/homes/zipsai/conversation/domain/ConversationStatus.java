@@ -7,7 +7,6 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public enum ConversationStatus {
     ACTIVE("진행중"),
-    RESOLVED("답변완료"),
     COMPLAINT_CREATED("민원접수");
 
     private final String label;
