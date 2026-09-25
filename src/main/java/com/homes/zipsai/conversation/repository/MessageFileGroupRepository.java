@@ -2,6 +2,7 @@ package com.homes.zipsai.conversation.repository;
 
 import java.util.List;
 
+import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -25,7 +26,7 @@ public interface MessageFileGroupRepository extends JpaRepository<MessageFileGro
         where g.message.conversation.id = :conversationId and g.deletedAt is null
         order by g.message.id asc, g.fileGroupSeq asc
         """)
-    List<MessageFileGroup> findAllByConversationId(@Param("conversationId") Long conversationId);
+    List<MessageFileGroup> findAllByConversationId(@Param("conversationId") Long conversationId, Limit limit);
 
     @Modifying
     @Query("delete from MessageFileGroup g where g.message.id = :messageId")

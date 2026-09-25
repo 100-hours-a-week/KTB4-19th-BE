@@ -58,7 +58,6 @@ public record AiConverseResponse(String code, String traceId, Data data) {
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Data(AiRoute route,
-                       // 계약에 없는 상태가 오면 비워 둔다. 접수 여부는 missingFields로 판단하므로 이 값이 없어도 된다.
                        @JsonFormat(with = JsonFormat.Feature.READ_UNKNOWN_ENUM_VALUES_AS_NULL)
                        AiComplaintState nextComplaintState,
                        String reply, Result result) {
@@ -89,8 +88,6 @@ public record AiConverseResponse(String code, String traceId, Data data) {
             return new AiComplaintDraft(location, symptom, parseOccurredAt(occurredAt));
         }
 
-        // AI는 오프셋을 붙이기도 하고 빼기도 한다. 계약상 기준 시간대가 Asia/Seoul이므로 없으면 KST로 읽는다.
-        // 시각은 선택 값이라 읽지 못해도 대화를 중단하지 않는다.
         private static OffsetDateTime parseOccurredAt(String value) {
             if (value == null || value.isBlank()) {
                 return null;
