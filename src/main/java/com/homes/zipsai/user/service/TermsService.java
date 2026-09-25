@@ -10,8 +10,8 @@ import com.homes.zipsai.global.exception.NotFoundException;
 import com.homes.zipsai.global.exception.ValidationFailedException.Reason;
 import com.homes.zipsai.user.domain.Terms;
 import com.homes.zipsai.user.domain.TermsType;
-import com.homes.zipsai.user.dto.TermsDetailResponse;
-import com.homes.zipsai.user.dto.TermsListResponse;
+import com.homes.zipsai.user.dto.response.TermsDetailResponse;
+import com.homes.zipsai.user.dto.response.TermsListResponse;
 import com.homes.zipsai.user.repository.TermsRepository;
 import com.homes.zipsai.user.validator.UserInput;
 

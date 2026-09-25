@@ -7,8 +7,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.homes.zipsai.global.response.ApiResponse;
-import com.homes.zipsai.user.dto.TermsDetailResponse;
-import com.homes.zipsai.user.dto.TermsListResponse;
+import com.homes.zipsai.user.dto.response.TermsDetailResponse;
+import com.homes.zipsai.user.dto.response.TermsListResponse;
 import com.homes.zipsai.user.service.TermsService;
 
 import io.swagger.v3.oas.annotations.Operation;

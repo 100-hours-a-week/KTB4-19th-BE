@@ -5,7 +5,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.homes.zipsai.building.domain.InvitationCode;
 import com.homes.zipsai.building.domain.Room;
-import com.homes.zipsai.building.dto.RoomConnectionResponse;
+import com.homes.zipsai.building.dto.response.RoomConnectionResponse;
 import com.homes.zipsai.building.repository.RoomRepository;
 import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.global.exception.ForbiddenException;

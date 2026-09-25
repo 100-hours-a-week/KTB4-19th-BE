@@ -7,7 +7,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-import com.homes.zipsai.auth.dto.AgreementRequest;
+import com.homes.zipsai.auth.dto.request.AgreementRequest;
 import com.homes.zipsai.global.exception.MissingFieldException;
 import com.homes.zipsai.global.exception.ValidationFailedException;
 import com.homes.zipsai.global.exception.ValidationFailedException.Reason;

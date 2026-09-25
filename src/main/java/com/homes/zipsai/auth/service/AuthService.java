@@ -14,7 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.homes.zipsai.auth.domain.RefreshSession;
-import com.homes.zipsai.auth.dto.AgreementRequest;
+import com.homes.zipsai.auth.dto.request.AgreementRequest;
 import com.homes.zipsai.auth.repository.RefreshSessionRepository;
 import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.global.exception.InvalidCredentialsException;

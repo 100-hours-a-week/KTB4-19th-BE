@@ -17,22 +17,22 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.homes.zipsai.auth.dto.LoginRequest;
-import com.homes.zipsai.auth.dto.LoginResponse;
-import com.homes.zipsai.auth.dto.ReissueResponse;
-import com.homes.zipsai.auth.dto.SignupRequest;
-import com.homes.zipsai.auth.dto.SignupResponse;
+import com.homes.zipsai.auth.dto.request.LoginRequest;
+import com.homes.zipsai.auth.dto.request.SignupRequest;
+import com.homes.zipsai.auth.dto.response.LoginResponse;
+import com.homes.zipsai.auth.dto.response.ReissueResponse;
+import com.homes.zipsai.auth.dto.response.SignupResponse;
 import com.homes.zipsai.auth.service.AuthService;
 import com.homes.zipsai.auth.validator.RefreshTokenValidator;
 import com.homes.zipsai.global.response.ApiResponse;
 import com.homes.zipsai.global.security.AuthPrincipal;
 import com.homes.zipsai.global.security.AuthProperties;
 import com.homes.zipsai.user.domain.UserRole;
-import com.homes.zipsai.user.dto.UserResponse;
+import com.homes.zipsai.user.dto.response.UserResponse;
 
-import lombok.RequiredArgsConstructor;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequiredArgsConstructor

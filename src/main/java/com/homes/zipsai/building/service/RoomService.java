@@ -9,8 +9,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.homes.zipsai.building.domain.Building;
 import com.homes.zipsai.building.domain.Room;
-import com.homes.zipsai.building.dto.RoomBulkCreateResponse;
-import com.homes.zipsai.building.dto.RoomResponse;
+import com.homes.zipsai.building.dto.response.RoomBulkCreateResponse;
+import com.homes.zipsai.building.dto.response.RoomResponse;
 import com.homes.zipsai.building.repository.BuildingRepository;
 import com.homes.zipsai.building.repository.RoomRepository;
 import com.homes.zipsai.global.exception.ConflictException;
