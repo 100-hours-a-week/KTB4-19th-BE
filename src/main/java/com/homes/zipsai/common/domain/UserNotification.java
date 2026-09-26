@@ -39,7 +39,6 @@ public class UserNotification extends BaseTimeEntity {
     @JoinColumn(name = "noti_id", nullable = false)
     private Notification notification;
 
-    // 읽지 않았으면 null
     @Column(name = "read_at")
     private LocalDateTime readAt;
 
