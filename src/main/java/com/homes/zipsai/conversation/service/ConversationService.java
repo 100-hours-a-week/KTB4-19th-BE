@@ -80,19 +80,16 @@ public class ConversationService {
         List<Conversation> conversations = hasNext ? found.subList(0, size) : found;
         String nextCursor = hasNext ? ConversationCursor.from(conversations.getLast()).encode() : null;
 
-        Map<Long, Complaint> complaints = findComplaints(conversations);
-        List<ConversationListItemResponse> items = new ArrayList<>();
-        for (Conversation conversation : conversations) {
-            Complaint complaint = complaints.get(conversation.getId());
-            items.add(ConversationListItemResponse.of(conversation, complaint));
-        }
+        List<ConversationListItemResponse> items = conversations.stream()
+            .map(conversation -> ConversationListItemResponse.from(conversation))
+            .toList();
         return new ConversationListResponse(hasNext, nextCursor, items);
     }
 
     @Transactional(readOnly = true)
     public ConversationMessagesResponse getMessages(Long userId, Long conversationId, Long cursor, int size) {
         Conversation conversation = getOwnedConversation(userId, conversationId);
-        return readMessages(conversation, findComplaint(conversation), cursor, size);
+        return readMessages(conversation, null, cursor, size);
     }
 
     @Transactional(readOnly = true)
@@ -100,21 +97,17 @@ public class ConversationService {
                                                                       Long cursor, int size) {
         Conversation conversation = conversationRepository.findByIdAndDeletedAtIsNull(conversationId)
             .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.CONVERSATION));
-        Complaint complaint = findComplaint(conversation);
+        Complaint complaint = conversationRepository.findComplaintByConversationId(conversationId).orElse(null);
         if (complaint == null || complaint.getBuilding().getDeletedAt() != null) {
             throw new NotFoundException(NotFoundException.Resource.CONVERSATION);
         }
         if (!complaint.getBuilding().getManager().getId().equals(managerId)) {
             throw new ForbiddenException();
         }
-        return readMessages(conversation, complaint, cursor, size);
+        return readMessages(conversation, complaint.getId(), cursor, size);
     }
 
-    private Complaint findComplaint(Conversation conversation) {
-        return conversationRepository.findComplaintByConversationId(conversation.getId()).orElse(null);
-    }
-
-    private ConversationMessagesResponse readMessages(Conversation conversation, Complaint complaint,
+    private ConversationMessagesResponse readMessages(Conversation conversation, Long complaintId,
                                                       Long cursor, int size) {
         Long conversationId = conversation.getId();
         Limit limit = Limit.of(size + 1);
@@ -134,7 +127,7 @@ public class ConversationService {
             .map(message -> MessageResponse.of(message, attachments.getOrDefault(message.getId(), List.of())))
             .toList();
 
-        return ConversationMessagesResponse.of(conversation, complaint, messages, hasNext, nextCursor);
+        return ConversationMessagesResponse.of(conversation, complaintId, messages, hasNext, nextCursor);
     }
 
     @Transactional
@@ -223,18 +216,6 @@ public class ConversationService {
             .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.CONVERSATION));
         conversation.verifyOwnedBy(userId);
         return conversation;
-    }
-
-    private Map<Long, Complaint> findComplaints(List<Conversation> conversations) {
-        List<Long> conversationIds = conversations.stream().map(Conversation::getId).toList();
-        Map<Long, Complaint> complaints = new HashMap<>();
-        if (conversationIds.isEmpty()) {
-            return complaints;
-        }
-        for (Complaint complaint : conversationRepository.findComplaintsByConversationIds(conversationIds)) {
-            complaints.put(complaint.getConversation().getId(), complaint);
-        }
-        return complaints;
     }
 
     private List<File> getAttachableImages(Long userId, List<Long> attachmentIds) {

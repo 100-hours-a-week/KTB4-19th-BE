@@ -2,7 +2,6 @@ package com.homes.zipsai.conversation.dto.response;
 
 import java.time.LocalDateTime;
 
-import com.homes.zipsai.building.domain.Complaint;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
 
@@ -15,9 +14,8 @@ public record ConversationListItemResponse(
     LocalDateTime lastMessageAt
 ) {
 
-    public static ConversationListItemResponse of(Conversation conversation, Complaint complaint) {
-        ConversationDisplayStatus status = ConversationDisplayStatus.of(conversation, complaint);
+    public static ConversationListItemResponse from(Conversation conversation) {
         return new ConversationListItemResponse(conversation.getId(), conversation.getTitle(), conversation.getType(),
-            status.code(), status.label(), conversation.getLastMessageAt());
+            conversation.getStatus().name(), conversation.getStatus().getLabel(), conversation.getLastMessageAt());
     }
 }
