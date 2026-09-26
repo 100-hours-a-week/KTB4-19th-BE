@@ -85,6 +85,7 @@ class ManagerConversationReadTest {
             MANAGER_ID, CONVERSATION_ID, null, 20);
 
         assertThat(response.conversationId()).isEqualTo(CONVERSATION_ID);
+        assertThat(response.complaintId()).isEqualTo(100L);
         assertThat(response.messages()).singleElement()
             .extracting(MessageResponse::content)
             .isEqualTo("천장에서 물이 새요");

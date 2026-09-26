@@ -1,7 +1,6 @@
 package com.homes.zipsai.conversation.repository;
 
 import java.time.LocalDateTime;
-import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -35,9 +34,6 @@ public interface ConversationRepository extends JpaRepository<Conversation, Long
     List<Conversation> findLatestByUserIdBefore(@Param("userId") Long userId, @Param("keyword") String keyword,
                                                 @Param("cursorAt") LocalDateTime cursorAt,
                                                 @Param("cursorId") Long cursorId, Limit limit);
-
-    @Query("select c from Complaint c where c.conversation.id in :conversationIds and c.deletedAt is null")
-    List<Complaint> findComplaintsByConversationIds(@Param("conversationIds") Collection<Long> conversationIds);
 
     @Query("select c from Complaint c where c.conversation.id = :conversationId and c.deletedAt is null")
     Optional<Complaint> findComplaintByConversationId(@Param("conversationId") Long conversationId);

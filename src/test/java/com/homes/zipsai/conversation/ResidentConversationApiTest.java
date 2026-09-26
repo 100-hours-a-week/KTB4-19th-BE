@@ -100,7 +100,9 @@ class ResidentConversationApiTest {
 
         mvc.perform(get(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", bearer(token)))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.complaintId").isNumber())
+            .andExpect(jsonPath("$.data.conversationStatus").value("COMPLAINT_CREATED"))
+            .andExpect(jsonPath("$.data.statusCode").value("COMPLAINT_CREATED"))
+            .andExpect(jsonPath("$.data.statusLabel").value("민원 생성 완료"))
             .andExpect(jsonPath("$.data.messages.length()").value(4))
             .andExpect(jsonPath("$.data.messages[3].messageType").value("SUMMARY_CARD"))
             .andExpect(jsonPath("$.data.messages[3].summaryCard.occurredTime").value(startsWith("2026-09-15T20:00")));
@@ -112,7 +114,8 @@ class ResidentConversationApiTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.conversations.length()").value(1))
             .andExpect(jsonPath("$.data.conversations[0].conversationType").value("COMPLAINT"))
-            .andExpect(jsonPath("$.data.conversations[0].statusCode").value("PENDING"));
+            .andExpect(jsonPath("$.data.conversations[0].statusCode").value("COMPLAINT_CREATED"))
+            .andExpect(jsonPath("$.data.conversations[0].statusLabel").value("민원 생성 완료"));
     }
 
     @Test
