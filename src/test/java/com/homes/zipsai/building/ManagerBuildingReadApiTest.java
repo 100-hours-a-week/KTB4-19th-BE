@@ -1,6 +1,9 @@
 package com.homes.zipsai.building;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.empty;
+import static org.hamcrest.Matchers.greaterThan;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -13,6 +16,7 @@ import java.time.temporal.TemporalAdjusters;
 import java.util.List;
 import java.util.UUID;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -21,7 +25,6 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import com.homes.zipsai.ZipsaiBackendApplication;
@@ -41,11 +44,9 @@ import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.domain.UserRole;
 import com.homes.zipsai.user.repository.UserRepository;
 
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-
 @SpringBootTest(classes = ZipsaiBackendApplication.class)
 @AutoConfigureMockMvc
+@DisplayName("관리자 건물 조회 API")
 class ManagerBuildingReadApiTest {
 
     private static final String BUILDING = "/api/v1/managers/me/building";
@@ -53,9 +54,6 @@ class ManagerBuildingReadApiTest {
 
     @Autowired
     MockMvc mvc;
-
-    @Autowired
-    ObjectMapper json;
 
     @Autowired
     UserRepository userRepository;
@@ -73,6 +71,7 @@ class ManagerBuildingReadApiTest {
     ComplaintRepository complaintRepository;
 
     @Test
+    @DisplayName("관리자는 건물 상세·호실 요약·호실 목록을 조회한다")
     void returnsBuildingDetailRoomSummaryAndRoomList() throws Exception {
         ManagerBuilding owner = managerBuilding("테스트타워");
         User resident = user(UserRole.RESIDENT, "홍길동");
@@ -82,16 +81,14 @@ class ManagerBuildingReadApiTest {
         Room deleted = room(owner.building(), "104", RoomStatus.EMPTY, null);
         delete(deleted);
 
-        JsonNode detail = data(mvc.perform(get(BUILDING)
+        mvc.perform(get(BUILDING)
                 .with(manager(owner.manager().getId())))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.buildingId").value(owner.building().getId()))
             .andExpect(jsonPath("$.data.buildingName").value("테스트타워"))
             .andExpect(jsonPath("$.data.roadAddress").value("서울 강남구 테스트로 1"))
             .andExpect(jsonPath("$.data.totalRoomCount").value(3))
-            .andExpect(jsonPath("$.data.updatedAt").isNotEmpty())
-            .andReturn());
-        assertThat(detail.path("totalRoomCount").asInt()).isEqualTo(3);
+            .andExpect(jsonPath("$.data.updatedAt").isNotEmpty());
 
         mvc.perform(get(BUILDING + "/rooms/summary")
                 .with(manager(owner.manager().getId())))
@@ -101,32 +98,27 @@ class ManagerBuildingReadApiTest {
             .andExpect(jsonPath("$.data.emptyCount").value(1))
             .andExpect(jsonPath("$.data.totalCount").value(3));
 
-        JsonNode rooms = data(mvc.perform(get(BUILDING + "/rooms")
+        mvc.perform(get(BUILDING + "/rooms")
                 .with(manager(owner.manager().getId())))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.buildingId").value(owner.building().getId()))
             .andExpect(jsonPath("$.data.buildingName").value("테스트타워"))
             .andExpect(jsonPath("$.data.totalCount").value(3))
             .andExpect(jsonPath("$.data.rooms.length()").value(3))
-            .andReturn());
-
-        JsonNode empty = room(rooms, "101");
-        assertThat(empty.path("roomId").asLong()).isPositive();
-        assertThat(empty.path("roomStatus").asText()).isEqualTo("EMPTY");
-        assertThat(empty.path("roomStatusLabel").asText()).isEqualTo("공실");
-        assertThat(empty.path("residentName").isNull()).isTrue();
-
-        JsonNode invited = room(rooms, "102");
-        assertThat(invited.path("roomStatusLabel").asText()).isEqualTo("초대됨");
-
-        JsonNode living = room(rooms, "103");
-        assertThat(living.path("roomStatus").asText()).isEqualTo("LIVING");
-        assertThat(living.path("roomStatusLabel").asText()).isEqualTo("입주");
-        assertThat(living.path("residentName").asText()).isEqualTo("홍길동");
-        assertThat(room(rooms, "104")).isNull();
+            .andExpect(jsonPath("$.data.rooms[?(@.roomNo == '101')].roomId").value(contains(greaterThan(0))))
+            .andExpect(jsonPath("$.data.rooms[?(@.roomNo == '101')].roomStatus").value(contains("EMPTY")))
+            .andExpect(jsonPath("$.data.rooms[?(@.roomNo == '101')].roomStatusLabel").value(contains("공실")))
+            .andExpect(jsonPath("$.data.rooms[?(@.roomNo == '101')].residentName")
+                    .value(contains(nullValue())))
+            .andExpect(jsonPath("$.data.rooms[?(@.roomNo == '102')].roomStatusLabel").value(contains("초대됨")))
+            .andExpect(jsonPath("$.data.rooms[?(@.roomNo == '103')].roomStatus").value(contains("LIVING")))
+            .andExpect(jsonPath("$.data.rooms[?(@.roomNo == '103')].roomStatusLabel").value(contains("입주")))
+            .andExpect(jsonPath("$.data.rooms[?(@.roomNo == '103')].residentName").value(contains("홍길동")))
+            .andExpect(jsonPath("$.data.rooms[?(@.roomNo == '104')].roomNo").value(empty()));
     }
 
     @Test
+    @DisplayName("호실이 없는 건물은 빈 목록과 0건 요약을 반환한다")
     void returnsNullableBuildingNameAndZeroCountsWhenBuildingHasNoRooms() throws Exception {
         ManagerBuilding owner = managerBuilding(null);
 
@@ -161,6 +153,7 @@ class ManagerBuildingReadApiTest {
     }
 
     @Test
+    @DisplayName("민원 요약은 담당 건물의 이번 주 완료 건수를 집계한다")
     void returnsComplaintSummaryForActiveBuildingComplaints() throws Exception {
         ManagerBuilding owner = managerBuilding("민원건물");
         User resident = user(UserRole.RESIDENT, "퇴실 입주민");
@@ -171,8 +164,10 @@ class ManagerBuildingReadApiTest {
                 .atStartOfDay();
 
         complaint(owner.building(), resident, occupied.getRoomNo(), "접수 민원", ComplaintStatus.PENDING, null);
-        complaint(owner.building(), resident, occupied.getRoomNo(), "처리중 민원", ComplaintStatus.IN_PROGRESS, null);
-        complaint(owner.building(), resident, occupied.getRoomNo(), "이번 주 완료", ComplaintStatus.DONE, weekStart);
+        complaint(owner.building(), resident, occupied.getRoomNo(), "처리중 민원",
+                ComplaintStatus.IN_PROGRESS, null);
+        complaint(owner.building(), resident, occupied.getRoomNo(), "이번 주 완료",
+                ComplaintStatus.DONE, weekStart);
         complaint(owner.building(), resident, occupied.getRoomNo(), "지난 완료", ComplaintStatus.DONE,
                 weekStart.minusSeconds(1));
         complaint(owner.building(), resident, occupied.getRoomNo(), "미래 완료", ComplaintStatus.DONE,
@@ -196,6 +191,7 @@ class ManagerBuildingReadApiTest {
     }
 
     @Test
+    @DisplayName("담당 건물이 없거나 삭제된 관리자 요청은 404를 반환한다")
     void rejectsManagerWithoutActiveBuilding() throws Exception {
         User manager = user(UserRole.MANAGER, "관리자");
         ManagerBuilding deleted = managerBuilding("삭제건물");
@@ -211,6 +207,7 @@ class ManagerBuildingReadApiTest {
     }
 
     @Test
+    @DisplayName("관리자 요청은 인증 사용자의 건물만 반환한다")
     void returnsOnlyAuthenticatedManagersBuilding() throws Exception {
         managerBuilding("타인건물");
         ManagerBuilding owner = managerBuilding("소유건물");
@@ -222,13 +219,13 @@ class ManagerBuildingReadApiTest {
     }
 
     @Test
+    @DisplayName("건물 조회는 관리자 인증을 요구하고 입주민 접근을 거부한다")
     void requiresManagerAuthentication() throws Exception {
-        mvc.perform(get(BUILDING))
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
-        mvc.perform(get(BUILDING + "/complaints/summary"))
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
+        for (String suffix : List.of("", "/rooms/summary", "/rooms", "/complaints/summary")) {
+            mvc.perform(get(BUILDING + suffix))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
+        }
 
         User resident = user(UserRole.RESIDENT, "입주민");
         for (String suffix : List.of("", "/rooms/summary", "/rooms", "/complaints/summary")) {
@@ -236,19 +233,6 @@ class ManagerBuildingReadApiTest {
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
         }
-    }
-
-    private JsonNode data(MvcResult result) throws Exception {
-        return json.readTree(result.getResponse().getContentAsString()).path("data");
-    }
-
-    private JsonNode room(JsonNode data, String roomNo) {
-        for (JsonNode room : data.path("rooms")) {
-            if (roomNo.equals(room.path("roomNo").asText())) {
-                return room;
-            }
-        }
-        return null;
     }
 
     private ManagerBuilding managerBuilding(String buildingName) {
