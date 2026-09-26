@@ -165,7 +165,7 @@ public class UserService {
     }
 
     @Transactional
-    public UserPatchResponse patch(AuthPrincipal principal, UserRole requestedRole, String requestedName,
+    public UserPatchResponse patch(AuthPrincipal principal, String requestedEmail, UserRole requestedRole, String requestedName,
                                    String requestedPhone, List<AgreementRequest> agreementRequests) {
         User user = userRepository.findLocked(principal.userId()).orElseThrow(UnauthorizedException::new);
         if (user.getStatus() != UserStatus.ACTIVE) {
@@ -174,6 +174,7 @@ public class UserService {
         UserRole updatedRole = null;
         String updatedUserName = null;
         String updatedPhone = null;
+        String updatedEmail = null;
         List<UserAgreementResponse> updatedAgreements = null;
         String accessToken = null;
         String tokenType = null;
@@ -195,6 +196,14 @@ public class UserService {
         if (requestedName != null) {
             user.changeUserName(UserInput.name(requestedName));
             updatedUserName = user.getUserName();
+        }
+        if (requestedEmail != null) {
+            String email = UserInput.email(requestedEmail);
+            if (!email.equals(user.getEmail()) && userRepository.existsByEmail(email)) {
+                throw new ConflictException(ConflictException.Reason.EMAIL_ALREADY_EXISTS);
+            }
+            user.changeEmail(email);
+            updatedEmail = email;
         }
         if (requestedPhone != null) {
             user.changePhone(UserInput.phone(requestedPhone));
@@ -218,6 +227,7 @@ public class UserService {
         }
         return new UserPatchResponse(
                 user.getId(),
+                updatedEmail,
                 updatedRole,
                 updatedUserName,
                 updatedPhone,

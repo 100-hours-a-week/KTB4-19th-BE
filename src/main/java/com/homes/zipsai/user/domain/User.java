@@ -86,6 +86,10 @@ public class User extends BaseTimeEntity {
         this.phone = phone;
     }
 
+    public void changeEmail(String email) {
+        this.email = email;
+    }
+
     public void agree(Terms terms, boolean agreed) {
         agreements.add(new UserAgreement(this, terms, agreed));
     }
