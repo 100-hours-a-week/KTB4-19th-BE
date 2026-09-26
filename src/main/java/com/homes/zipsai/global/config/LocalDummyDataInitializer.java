@@ -27,11 +27,6 @@ import com.homes.zipsai.user.repository.UserRepository;
 
 import lombok.RequiredArgsConstructor;
 
-/**
- * 로컬 개발용 더미 데이터. 건물 등록, 호실 생성, 초대 API가 구현되기 전까지 채팅/민원 기능을 확인하기 위해 사용한다.
- *
- * <p>모든 계정 비밀번호는 {@value #PASSWORD}이다. 관리자 계정이 이미 있으면 다시 만들지 않는다.
- */
 @Component
 @Profile("local")
 @RequiredArgsConstructor
@@ -69,7 +64,6 @@ public class LocalDummyDataInitializer implements ApplicationRunner {
 
         moveIn(rooms.get("302"), createUser("resident@zipsai.com", "박입주", "010-9876-5432", UserRole.RESIDENT));
         moveIn(rooms.get("301"), createUser("resident2@zipsai.com", "이입주", "010-2222-3333", UserRole.RESIDENT));
-        // 역할만 선택하고 호실에 연결되지 않은 입주민 (403 확인용)
         createUser("resident3@zipsai.com", "최대기", "010-4444-5555", UserRole.RESIDENT);
 
         LOG.info("로컬 더미 데이터 생성 완료: {}, resident@zipsai.com(302호), resident2@zipsai.com(301호), "

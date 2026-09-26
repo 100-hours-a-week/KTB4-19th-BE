@@ -31,11 +31,9 @@ public class File extends BaseTimeEntity {
     @Column(name = "attachment_id")
     private Long id;
 
-    // S3 파일 키
     @Column(name = "file_key", nullable = false, length = 255)
     private String fileKey;
 
-    // 바이트 단위, 최대 10MB
     @Column(name = "file_size", nullable = false)
     private int fileSize;
 
