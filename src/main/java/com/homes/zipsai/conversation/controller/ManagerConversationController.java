@@ -38,6 +38,7 @@ public class ManagerConversationController {
         @PathVariable @Positive(message = "1 이상의 정수여야 합니다.") Long conversationId,
         @Parameter(description = "마지막으로 조회한 가장 오래된 messageId")
         @RequestParam(required = false) @Positive(message = "1 이상의 정수여야 합니다.") Long cursor,
+        @Parameter(description = "조회 개수 (최대 100)")
         @RequestParam(defaultValue = "20") @Min(value = 1, message = "1 이상이어야 합니다.")
         @Max(value = 100, message = "100 이하여야 합니다.") int size
     ) {
