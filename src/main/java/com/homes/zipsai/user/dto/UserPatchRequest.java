@@ -8,6 +8,7 @@ import com.homes.zipsai.user.domain.UserRole;
 
 @JsonIgnoreProperties(ignoreUnknown = false)
 public record UserPatchRequest(
+    String email,
     UserRole userRole,
     String userName,
     String phone,

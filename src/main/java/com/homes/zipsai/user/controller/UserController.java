@@ -62,6 +62,7 @@ public class UserController {
             @RequestBody UserPatchRequest userPatchRequest
     ) {
         return ResponseEntity.ok(ApiResponse.data(service.patch(
-                principal, userPatchRequest.userRole(), userPatchRequest.userName(), userPatchRequest.phone(), userPatchRequest.agreements())));
+                principal, userPatchRequest.email(), userPatchRequest.userRole(), userPatchRequest.userName(),
+                userPatchRequest.phone(), userPatchRequest.agreements())));
     }
 }
