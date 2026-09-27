@@ -8,13 +8,10 @@ public record SummaryCardResponse(
     String location,
     OffsetDateTime occurredTime,
     String symptom,
-    int attachmentCount
+    long attachmentCount
 ) {
 
-    private static final int ATTACHMENT_COUNT_NOT_SUPPORTED = 0;
-
-    public static SummaryCardResponse from(AiComplaintDraft draft) {
-        return new SummaryCardResponse(draft.location(), draft.occurredAt(), draft.symptom(),
-            ATTACHMENT_COUNT_NOT_SUPPORTED);
+    public static SummaryCardResponse of(AiComplaintDraft draft, long attachmentCount) {
+        return new SummaryCardResponse(draft.location(), draft.occurredAt(), draft.symptom(), attachmentCount);
     }
 }

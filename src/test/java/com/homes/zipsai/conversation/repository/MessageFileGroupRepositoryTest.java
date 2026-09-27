@@ -81,6 +81,30 @@ class MessageFileGroupRepositoryTest {
         assertThat(found).isEmpty();
     }
 
+    @Test
+    @DisplayName("대화의 사진 수는 그 대화에 올린 사진만 센다")
+    void countsImagesOfConversationOnly() {
+        Message message = saveMessage();
+        attach(message, saveFile("first"), 1);
+        attach(message, saveFile("second"), 2);
+        Conversation otherConversation = conversationRepository.save(Conversation.builder()
+            .user(conversation.getUser())
+            .type(ConversationType.INQUIRY)
+            .title("다른 대화")
+            .build());
+        Message otherMessage = messageRepository.save(Message.builder()
+            .conversation(otherConversation)
+            .content("사진")
+            .senderType(SenderType.RESIDENT)
+            .messageType(MessageType.TEXT)
+            .build());
+        attach(otherMessage, saveFile("other"), 1);
+
+        long count = messageFileGroupRepository.countByConversationId(conversation.getId());
+
+        assertThat(count).isEqualTo(2L);
+    }
+
     private Message saveMessage() {
         return messageRepository.save(Message.builder()
             .conversation(conversation)

@@ -36,6 +36,7 @@ import com.homes.zipsai.conversation.dto.response.ConversationListItemResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationListResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationMessagesResponse;
 import com.homes.zipsai.conversation.dto.response.MessageResponse;
+import com.homes.zipsai.conversation.dto.response.SummaryCardResponse;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
@@ -123,8 +124,10 @@ public class ConversationService {
         List<Message> latestMessages = hasNext ? found.subList(0, size) : found;
         Long nextCursor = hasNext ? latestMessages.getLast().getId() : null;
         Map<Long, List<AttachmentResponse>> attachments = findAttachments(latestMessages);
+        SummaryCardResponse summaryCard = summaryCardOf(conversation, latestMessages);
         List<MessageResponse> messages = latestMessages.reversed().stream()
-            .map(message -> MessageResponse.of(message, attachments.getOrDefault(message.getId(), List.of())))
+            .map(message -> MessageResponse.of(message, attachments.getOrDefault(message.getId(), List.of()),
+                summaryCard))
             .toList();
 
         return ConversationMessagesResponse.of(conversation, complaintId, messages, hasNext, nextCursor);
@@ -179,7 +182,7 @@ public class ConversationService {
         String reply = TextUtils.truncate(aiResponse.reply(), Message.CONTENT_MAX_LENGTH);
         String traceId = pendingReply.aiRequest().traceId();
         Message assistantMessage = saveMessage(conversation, reply, SenderType.ASSISTANT, messageType, traceId);
-        return MessageResponse.from(assistantMessage);
+        return MessageResponse.of(assistantMessage, List.of(), summaryCardOf(conversation, List.of(assistantMessage)));
     }
 
     @Transactional
@@ -268,6 +271,16 @@ public class ConversationService {
             history.add(HistoryMessage.of(message, fileUrls(attachments.getOrDefault(message.getId(), List.of()))));
         }
         return history;
+    }
+
+    private SummaryCardResponse summaryCardOf(Conversation conversation, List<Message> messages) {
+        boolean hasSummaryCard = messages.stream()
+            .anyMatch(message -> message.getMessageType() == MessageType.SUMMARY_CARD);
+        if (!hasSummaryCard) {
+            return null;
+        }
+        long imageCount = messageFileGroupRepository.countByConversationId(conversation.getId());
+        return SummaryCardResponse.of(conversation.currentDraft(), imageCount);
     }
 
     private Map<Long, List<AttachmentResponse>> findAttachments(List<Message> messages) {
