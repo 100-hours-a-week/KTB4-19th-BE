@@ -30,9 +30,8 @@ public class ConversationMessageService {
 
     public ConversationCreateResponse createConversation(Long userId, String content, List<Long> attachmentIds) {
         PendingAiReply pendingReply = conversationService.saveFirstMessage(userId, content, attachmentIds);
-        MessageResponse assistantMessage = askAiAndSaveReply(pendingReply);
-        return ConversationCreateResponse.of(pendingReply.conversation(), pendingReply.residentMessage(),
-            assistantMessage);
+        askAiAndSaveReply(pendingReply);
+        return new ConversationCreateResponse(pendingReply.conversation().getId());
     }
 
     public MessageSendResponse sendMessage(Long userId, Long conversationId, String content,

@@ -46,12 +46,16 @@ class ResidentConversationApiTest {
     void chatCollectsComplaintInfoAndCreatesComplaintOnce() throws Exception {
         long conversationId = startConversation(token, "천장에서 물이 새요")
             .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.conversationType").value("INQUIRY"))
-            .andExpect(jsonPath("$.data.conversationStatus").value("ACTIVE"))
-            .andExpect(jsonPath("$.data.message.senderType").value("RESIDENT"))
-            .andExpect(jsonPath("$.data.assistantMessage.messageType").value("TEXT"))
-            .andExpect(jsonPath("$.data.assistantMessage.summaryCard").doesNotExist())
+            .andExpect(jsonPath("$.data.conversationId").isNumber())
+            .andExpect(jsonPath("$.data.assistantMessage").doesNotExist())
             .andReturn().getResponse().getContentAsString().transform(this::conversationId);
+
+        mvc.perform(get(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", bearer(token)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.conversationStatus").value("ACTIVE"))
+            .andExpect(jsonPath("$.data.messages[0].senderType").value("RESIDENT"))
+            .andExpect(jsonPath("$.data.messages[1].messageType").value("TEXT"))
+            .andExpect(jsonPath("$.data.messages[1].summaryCard").doesNotExist());
 
         sendMessage(token, conversationId, "안방 천장 가운데요")
             .andExpect(status().isCreated())
@@ -121,10 +125,14 @@ class ResidentConversationApiTest {
 
     @Test
     void inquiryGetsGuideAnswer() throws Exception {
-        startConversation(token, "분리수거 요일이 언제인가요?")
+        long conversationId = conversationId(startConversation(token, "분리수거 요일이 언제인가요?")
             .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.assistantMessage.messageType").value("TEXT"))
-            .andExpect(jsonPath("$.data.assistantMessage.content").isNotEmpty());
+            .andReturn().getResponse().getContentAsString());
+
+        mvc.perform(get(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", bearer(token)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.messages[1].messageType").value("TEXT"))
+            .andExpect(jsonPath("$.data.messages[1].content").isNotEmpty());
     }
 
     @Test
