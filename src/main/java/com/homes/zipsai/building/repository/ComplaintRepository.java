@@ -39,7 +39,7 @@ public interface ComplaintRepository extends JpaRepository<Complaint, Long> {
     @EntityGraph(attributePaths = {"building", "conversation", "attachment"})
     Optional<Complaint> findByIdAndDeletedAtIsNull(Long complaintId);
 
-    @EntityGraph(attributePaths = "building")
+    @EntityGraph(attributePaths = {"building", "attachment"})
     @Query("""
             select c from Complaint c
             where c.building.id = :buildingId
