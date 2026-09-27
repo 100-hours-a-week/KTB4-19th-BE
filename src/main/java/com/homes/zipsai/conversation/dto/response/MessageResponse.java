@@ -19,15 +19,16 @@ public record MessageResponse(
     LocalDateTime createdAt
 ) {
 
-    public static MessageResponse from(Message message) {
-        return of(message, List.of());
+    public static MessageResponse of(Message message, List<AttachmentResponse> attachments) {
+        return of(message, attachments, null);
     }
 
-    public static MessageResponse of(Message message, List<AttachmentResponse> attachments) {
-        SummaryCardResponse summaryCard = message.getMessageType() == MessageType.SUMMARY_CARD
-            ? SummaryCardResponse.from(message.getConversation().currentDraft())
+    public static MessageResponse of(Message message, List<AttachmentResponse> attachments,
+                                     SummaryCardResponse summaryCard) {
+        SummaryCardResponse shownSummaryCard = message.getMessageType() == MessageType.SUMMARY_CARD
+            ? summaryCard
             : null;
         return new MessageResponse(message.getId(), message.getSenderType(), message.getMessageType(),
-            message.getContent(), attachments, summaryCard, message.getCreatedAt());
+            message.getContent(), attachments, shownSummaryCard, message.getCreatedAt());
     }
 }

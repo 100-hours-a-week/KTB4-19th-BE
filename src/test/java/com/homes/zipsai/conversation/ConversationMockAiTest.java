@@ -178,10 +178,10 @@ class ConversationMockAiTest {
         given(aiConverseClient.converse(any())).willAnswer(invocation ->
             knowledge(request(invocation).traceId(), "가".repeat(900), CITATIONS));
 
-        mvc.perform(post(CONVERSATIONS).header("Authorization", "Bearer " + token)
-                .contentType("application/json").content("{\"content\":\"분리수거 요일이 언제인가요?\"}"))
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.assistantMessage.content").value(hasLength(800)));
+        long conversationId = startConversation(token, "분리수거 요일이 언제인가요?");
+
+        getMessages(token, conversationId)
+            .andExpect(jsonPath("$.data.messages[1].content").value(hasLength(800)));
     }
 
     @Test
@@ -191,13 +191,11 @@ class ConversationMockAiTest {
             request(invocation).traceId(), AiRoute.KNOWLEDGE,
             "건물 문서에서 근거를 찾지 못했습니다. 질문을 관리인에게 전달해 두었습니다.", "엘리베이터 정기 점검 일정 문의"));
 
-        String created = mvc.perform(post(CONVERSATIONS).header("Authorization", "Bearer " + token)
-                .contentType("application/json").content("{\"content\":\"엘리베이터 점검은 언제 하나요?\"}"))
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.assistantMessage.messageType").value("SUMMARY_CARD"))
-            .andExpect(jsonPath("$.data.assistantMessage.summaryCard.symptom").value("엘리베이터 정기 점검 일정 문의"))
-            .andReturn().getResponse().getContentAsString();
-        long conversationId = json.readTree(created).path("data").path("conversationId").asLong();
+        long conversationId = startConversation(token, "엘리베이터 점검은 언제 하나요?");
+
+        getMessages(token, conversationId)
+            .andExpect(jsonPath("$.data.messages[1].messageType").value("SUMMARY_CARD"))
+            .andExpect(jsonPath("$.data.messages[1].summaryCard.symptom").value("엘리베이터 정기 점검 일정 문의"));
 
         mvc.perform(post(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", "Bearer " + token)
                 .contentType("application/json").content("{\"content\":\"그럼 언제 알 수 있나요?\"}"))
@@ -218,12 +216,10 @@ class ConversationMockAiTest {
         given(aiConverseClient.converse(any())).willAnswer(invocation ->
             knowledge(request(invocation).traceId(), "답변드리기 어렵습니다.", List.of()));
 
-        String created = mvc.perform(post(CONVERSATIONS).header("Authorization", "Bearer " + token)
-                .contentType("application/json").content("{\"content\":\"택배 보관함은 어디 있나요?\"}"))
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.assistantMessage.messageType").value("SUMMARY_CARD"))
-            .andReturn().getResponse().getContentAsString();
-        long conversationId = json.readTree(created).path("data").path("conversationId").asLong();
+        long conversationId = startConversation(token, "택배 보관함은 어디 있나요?");
+
+        getMessages(token, conversationId)
+            .andExpect(jsonPath("$.data.messages[1].messageType").value("SUMMARY_CARD"));
 
         mvc.perform(post(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", "Bearer " + token)
                 .contentType("application/json").content("{\"content\":\"그럼 어디로 가야 하나요?\"}"))
@@ -237,12 +233,10 @@ class ConversationMockAiTest {
         given(aiConverseClient.converse(any())).willAnswer(invocation ->
             knowledge(request(invocation).traceId(), "화요일과 금요일입니다.", CITATIONS));
 
-        String created = mvc.perform(post(CONVERSATIONS).header("Authorization", "Bearer " + token)
-                .contentType("application/json").content("{\"content\":\"분리수거 요일이 언제인가요?\"}"))
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.assistantMessage.messageType").value("TEXT"))
-            .andReturn().getResponse().getContentAsString();
-        long conversationId = json.readTree(created).path("data").path("conversationId").asLong();
+        long conversationId = startConversation(token, "분리수거 요일이 언제인가요?");
+
+        getMessages(token, conversationId)
+            .andExpect(jsonPath("$.data.messages[1].messageType").value("TEXT"));
 
         mvc.perform(post(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", "Bearer " + token)
                 .contentType("application/json").content("{\"content\":\"몇 시까지인가요?\"}"))
@@ -263,10 +257,6 @@ class ConversationMockAiTest {
                 .contentType("application/json")
                 .content("{\"content\":\"천장에서 물이 새요\",\"attachmentIds\":[%d]}".formatted(firstImage)))
             .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.message.attachments.length()").value(1))
-            .andExpect(jsonPath("$.data.message.attachments[0].attachmentId").value(firstImage))
-            .andExpect(jsonPath("$.data.message.attachments[0].fileUrl").value(startsWith("https://s3.test/")))
-            .andExpect(jsonPath("$.data.message.attachments[0].seq").value(1))
             .andReturn().getResponse().getContentAsString();
         long conversationId = json.readTree(created).path("data").path("conversationId").asLong();
 
@@ -284,9 +274,11 @@ class ConversationMockAiTest {
         assertThat(followUp.conversationHistory().getFirst().imageUrls()).hasSize(1);
         assertThat(followUp.conversationHistory().getLast().imageUrls()).isEmpty();
 
-        mvc.perform(get(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", "Bearer " + token))
-            .andExpect(status().isOk())
+        getMessages(token, conversationId)
+            .andExpect(jsonPath("$.data.messages[0].attachments.length()").value(1))
             .andExpect(jsonPath("$.data.messages[0].attachments[0].attachmentId").value(firstImage))
+            .andExpect(jsonPath("$.data.messages[0].attachments[0].fileUrl").value(startsWith("https://s3.test/")))
+            .andExpect(jsonPath("$.data.messages[0].attachments[0].seq").value(1))
             .andExpect(jsonPath("$.data.messages[1].attachments.length()").value(0))
             .andExpect(jsonPath("$.data.messages[2].attachments[0].attachmentId").value(secondImage));
     }
@@ -299,13 +291,17 @@ class ConversationMockAiTest {
         long image = fixture.uploadedFile(email, "jpg");
         given(aiConverseClient.converse(any())).willAnswer(ConversationMockAiTest::collecting);
 
-        mvc.perform(post(CONVERSATIONS).header("Authorization", "Bearer " + token)
+        String created = mvc.perform(post(CONVERSATIONS).header("Authorization", "Bearer " + token)
                 .contentType("application/json")
                 .content("{\"content\":\"\",\"attachmentIds\":[%d]}".formatted(image)))
             .andExpect(status().isCreated())
+            .andReturn().getResponse().getContentAsString();
+        long conversationId = json.readTree(created).path("data").path("conversationId").asLong();
+
+        getMessages(token, conversationId)
             .andExpect(jsonPath("$.data.conversationTitle").value("사진 문의"))
-            .andExpect(jsonPath("$.data.message.content").value(""))
-            .andExpect(jsonPath("$.data.message.attachments[0].attachmentId").value(image));
+            .andExpect(jsonPath("$.data.messages[0].content").value(""))
+            .andExpect(jsonPath("$.data.messages[0].attachments[0].attachmentId").value(image));
     }
 
     @Test
@@ -323,10 +319,13 @@ class ConversationMockAiTest {
             .andExpect(status().isInternalServerError());
         assertThat(conversationRepository.count()).isEqualTo(before);
 
-        startConversationWith(token, image)
+        String created = startConversationWith(token, image)
             .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.message.attachments[0].attachmentId").value(image));
+            .andReturn().getResponse().getContentAsString();
+        long conversationId = json.readTree(created).path("data").path("conversationId").asLong();
         assertThat(conversationRepository.count()).isEqualTo(before + 1);
+        getMessages(token, conversationId)
+            .andExpect(jsonPath("$.data.messages[0].attachments[0].attachmentId").value(image));
     }
 
     private static AiConverseResponse collecting(InvocationOnMock invocation) {
@@ -366,11 +365,21 @@ class ConversationMockAiTest {
     }
 
     private long startConversation(String token) throws Exception {
+        return startConversation(token, "천장에서 물이 새요");
+    }
+
+    private long startConversation(String token, String content) throws Exception {
         String created = mvc.perform(post(CONVERSATIONS).header("Authorization", "Bearer " + token)
-                .contentType("application/json").content("{\"content\":\"천장에서 물이 새요\"}"))
+                .contentType("application/json").content("{\"content\":\"%s\"}".formatted(content)))
             .andExpect(status().isCreated())
             .andReturn().getResponse().getContentAsString();
         return json.readTree(created).path("data").path("conversationId").asLong();
+    }
+
+    private ResultActions getMessages(String token, long conversationId) throws Exception {
+        return mvc.perform(get(CONVERSATIONS + "/" + conversationId + "/messages")
+                .header("Authorization", "Bearer " + token))
+            .andExpect(status().isOk());
     }
 
     private ResultActions startConversationWith(String token, long attachmentId)

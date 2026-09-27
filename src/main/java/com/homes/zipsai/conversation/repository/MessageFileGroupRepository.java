@@ -28,6 +28,12 @@ public interface MessageFileGroupRepository extends JpaRepository<MessageFileGro
         """)
     List<MessageFileGroup> findAllByConversationId(@Param("conversationId") Long conversationId, Limit limit);
 
+    @Query("""
+        select count(g) from MessageFileGroup g
+        where g.message.conversation.id = :conversationId and g.deletedAt is null
+        """)
+    long countByConversationId(@Param("conversationId") Long conversationId);
+
     @Modifying
     @Query("delete from MessageFileGroup g where g.message.id = :messageId")
     void deleteAllByMessageId(@Param("messageId") Long messageId);
