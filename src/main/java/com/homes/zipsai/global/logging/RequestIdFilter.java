@@ -2,8 +2,6 @@ package com.homes.zipsai.global.logging;
 
 import java.io.IOException;
 import java.util.UUID;
-import java.util.Map;
-import java.util.LinkedHashMap;
 
 import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
