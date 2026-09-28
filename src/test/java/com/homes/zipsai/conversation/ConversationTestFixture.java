@@ -1,13 +1,14 @@
 package com.homes.zipsai.conversation;
 
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.boot.test.context.TestComponent;
-import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.homes.zipsai.building.domain.Building;
@@ -16,35 +17,30 @@ import com.homes.zipsai.building.repository.BuildingRepository;
 import com.homes.zipsai.building.repository.RoomRepository;
 import com.homes.zipsai.common.domain.File;
 import com.homes.zipsai.common.repository.FileRepository;
+import com.homes.zipsai.global.security.AuthPrincipal;
 import com.homes.zipsai.user.domain.TermsType;
 import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.domain.UserRole;
 import com.homes.zipsai.user.repository.TermsRepository;
 import com.homes.zipsai.user.repository.UserRepository;
 
-import tools.jackson.databind.ObjectMapper;
-
 @TestComponent
 public class ConversationTestFixture {
-
-    static final String PASSWORD = "Asdf!12345";
 
     private final UserRepository userRepository;
     private final TermsRepository termsRepository;
     private final BuildingRepository buildingRepository;
     private final RoomRepository roomRepository;
     private final FileRepository fileRepository;
-    private final PasswordEncoder passwordEncoder;
 
     public ConversationTestFixture(UserRepository userRepository, TermsRepository termsRepository,
                                    BuildingRepository buildingRepository, RoomRepository roomRepository,
-                                   FileRepository fileRepository, PasswordEncoder passwordEncoder) {
+                                   FileRepository fileRepository) {
         this.userRepository = userRepository;
         this.termsRepository = termsRepository;
         this.buildingRepository = buildingRepository;
         this.roomRepository = roomRepository;
         this.fileRepository = fileRepository;
-        this.passwordEncoder = passwordEncoder;
     }
 
     @Transactional
@@ -71,17 +67,11 @@ public class ConversationTestFixture {
         return file.getId();
     }
 
-    @Transactional
-    public long pendingFile(String email) {
-        return pendingFile(email, "jpg").getId();
-    }
-
-    public String login(MockMvc mvc, ObjectMapper json, String email) throws Exception {
-        String body = mvc.perform(post("/api/v1/auth/login").contentType("application/json")
-                .content("{\"email\":\"%s\",\"password\":\"%s\"}".formatted(email, PASSWORD)))
-            .andExpect(status().isOk())
-            .andReturn().getResponse().getContentAsString();
-        return json.readTree(body).path("data").path("accessToken").asText();
+    public RequestPostProcessor authenticatedAs(String email) {
+        User user = userRepository.findByEmail(email).orElseThrow();
+        AuthPrincipal principal = new AuthPrincipal(user.getId(), UUID.randomUUID().toString());
+        List<SimpleGrantedAuthority> authorities = List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole()));
+        return authentication(new UsernamePasswordAuthenticationToken(principal, null, authorities));
     }
 
     private File pendingFile(String email, String fileType) {
@@ -91,7 +81,7 @@ public class ConversationTestFixture {
     }
 
     private User user(UserRole role) {
-        User user = new User(UUID.randomUUID() + "@example.com", passwordEncoder.encode(PASSWORD), "테스트", null);
+        User user = new User(UUID.randomUUID() + "@example.com", "password", "테스트", null);
         for (TermsType type : TermsType.values()) {
             user.agree(termsRepository.getLatest(type), true);
         }

@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import tools.jackson.databind.json.JsonMapper;
 
-class AiConverseUnknownStateTest {
+class AiConverseResponseUnknownStateTest {
 
     private static final JsonMapper MAPPER = JsonMapper.builder().build();
 

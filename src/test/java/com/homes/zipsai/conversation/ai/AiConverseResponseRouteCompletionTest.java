@@ -11,7 +11,7 @@ import com.homes.zipsai.conversation.ai.AiConverseResponse.Citation;
 import com.homes.zipsai.conversation.ai.AiConverseResponse.Data;
 import com.homes.zipsai.conversation.ai.AiConverseResponse.Result;
 
-class AiConverseRouteCompletionTest {
+class AiConverseResponseRouteCompletionTest {
 
     @Test
     @DisplayName("민원은 모아야 할 정보가 남아 있으면 종료하지 않는다")
