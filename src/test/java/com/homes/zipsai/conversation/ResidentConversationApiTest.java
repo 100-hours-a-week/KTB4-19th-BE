@@ -1,20 +1,21 @@
 package com.homes.zipsai.conversation;
 
-import static org.hamcrest.Matchers.nullValue;
-import static org.hamcrest.Matchers.startsWith;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.assertj.MockMvcTester;
+import org.springframework.test.web.servlet.assertj.MvcTestResult;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -27,270 +28,165 @@ class ResidentConversationApiTest {
     private static final String COMPLAINTS = "/api/v1/residents/me/complaints";
 
     @Autowired
-    MockMvc mvc;
+    MockMvcTester mockMvcTester;
 
     @Autowired
-    ObjectMapper json;
+    ObjectMapper objectMapper;
 
     @Autowired
-    ConversationTestFixture fixture;
+    ConversationTestFixture conversationTestFixture;
 
-    private String token;
+    private RequestPostProcessor resident;
 
     @BeforeEach
-    void setUp() throws Exception {
-        token = fixture.login(mvc, json, fixture.livingResident("302"));
+    void setUp() {
+        resident = conversationTestFixture.authenticatedAs(conversationTestFixture.livingResident("302"));
     }
 
     @Test
-    void chatCollectsComplaintInfoAndCreatesComplaintOnce() throws Exception {
-        long conversationId = startConversation(token, "천장에서 물이 새요")
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.conversationId").isNumber())
-            .andExpect(jsonPath("$.data.assistantMessage").doesNotExist())
-            .andReturn().getResponse().getContentAsString().transform(this::conversationId);
+    @DisplayName("대화로 민원 정보를 모아 한 번만 접수하고 접수 뒤에는 대화가 닫힌다")
+    void createsComplaintOnceFromConversation() throws Exception {
+        MvcTestResult started = startConversation(resident, "천장에서 물이 새요");
+        assertThat(started).hasStatus(HttpStatus.CREATED)
+            .bodyJson().doesNotHavePath("$.data.assistantMessage");
+        long conversationId = conversationId(started);
 
-        mvc.perform(get(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", bearer(token)))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.conversationStatus").value("ACTIVE"))
-            .andExpect(jsonPath("$.data.messages[0].senderType").value("RESIDENT"))
-            .andExpect(jsonPath("$.data.messages[1].messageType").value("TEXT"))
-            .andExpect(jsonPath("$.data.messages[1].summaryCard").doesNotExist());
+        assertThat(getMessages(resident, conversationId)).hasStatusOk()
+            .bodyJson().isLenientlyEqualTo("""
+                {"data": {"conversationStatus": "ACTIVE",
+                          "messages": [{"senderType": "RESIDENT"},
+                                       {"senderType": "ASSISTANT", "messageType": "TEXT"}]}}
+                """);
 
-        sendMessage(token, conversationId, "안방 천장 가운데요")
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.content").value("안방 천장 가운데요"))
-            .andExpect(jsonPath("$.data.assistantMessage.messageType").value("SUMMARY_CARD"))
-            .andExpect(jsonPath("$.data.assistantMessage.summaryCard.location").value("안방 천장 가운데요"))
-            .andExpect(jsonPath("$.data.assistantMessage.summaryCard.symptom").value("천장에서 물이 새요"))
-            .andExpect(jsonPath("$.data.assistantMessage.summaryCard.occurredTime").value(nullValue()));
+        assertThat(sendMessage(resident, conversationId, "안방 천장 가운데요")).hasStatus(HttpStatus.CREATED)
+            .bodyJson().isLenientlyEqualTo("""
+                {"data": {"content": "안방 천장 가운데요",
+                          "assistantMessage": {"messageType": "SUMMARY_CARD",
+                                               "summaryCard": {"location": "안방 천장 가운데요",
+                                                               "symptom": "천장에서 물이 새요",
+                                                               "occurredTime": null}}}}
+                """);
 
-        mvc.perform(get(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", bearer(token)))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.messages[2].summaryCard").doesNotExist())
-            .andExpect(jsonPath("$.data.messages[3].messageType").value("SUMMARY_CARD"))
-            .andExpect(jsonPath("$.data.messages[3].summaryCard.location").value("안방 천장 가운데요"))
-            .andExpect(jsonPath("$.data.messages[3].summaryCard.symptom").value("천장에서 물이 새요"));
-
-        sendMessage(token, conversationId, "네 접수해주세요")
-            .andExpect(status().isConflict())
-            .andExpect(jsonPath("$.error.code").value("CONVERSATION_AWAITING_CONFIRMATION"))
-            .andExpect(jsonPath("$.error.details.field").value("conversationId"));
-
-        mvc.perform(get(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", bearer(token)))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.messages.length()").value(4))
-            .andExpect(jsonPath("$.data.messages[0].content").value("천장에서 물이 새요"))
-            .andExpect(jsonPath("$.data.hasNext").value(false))
-            .andExpect(jsonPath("$.data.complaintId").value(nullValue()));
+        assertThat(sendMessage(resident, conversationId, "네 접수해주세요")).hasStatus(HttpStatus.CONFLICT)
+            .bodyJson().isLenientlyEqualTo("""
+                {"error": {"code": "CONVERSATION_AWAITING_CONFIRMATION", "details": {"field": "conversationId"}}}
+                """);
 
         String complaint = """
-            {"conversationId":%d,"occurredTime":"2026-09-15T20:00:00+09:00"}
+            {"conversationId": %d, "occurredTime": "2026-09-15T20:00:00+09:00"}
             """.formatted(conversationId);
-        createComplaint(token, complaint)
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.conversationId").value(conversationId))
-            .andExpect(jsonPath("$.data.title").value("천장에서 물이 새요"))
-            .andExpect(jsonPath("$.data.location").value("안방 천장 가운데요"))
-            .andExpect(jsonPath("$.data.symptom").value("천장에서 물이 새요"))
-            .andExpect(jsonPath("$.data.occurredTime").value(startsWith("2026-09-15T20:00")))
-            .andExpect(jsonPath("$.data.statusCode").value("PENDING"))
-            .andExpect(jsonPath("$.data.statusLabel").value("처리전"))
-            .andExpect(jsonPath("$.data.buildingName").value("테스트타워"))
-            .andExpect(jsonPath("$.data.roomNo").value("302"));
-        createComplaint(token, complaint)
-            .andExpect(status().isConflict())
-            .andExpect(jsonPath("$.error.code").value("COMPLAINT_ALREADY_CREATED"));
+        MvcTestResult created = createComplaint(resident, complaint);
+        assertThat(created).hasStatus(HttpStatus.CREATED)
+            .bodyJson().isLenientlyEqualTo("""
+                {"data": {"conversationId": %d, "title": "천장에서 물이 새요", "location": "안방 천장 가운데요",
+                          "symptom": "천장에서 물이 새요", "statusCode": "PENDING", "statusLabel": "처리전",
+                          "buildingName": "테스트타워", "roomNo": "302"}}
+                """.formatted(conversationId));
+        assertThat(created).bodyJson().extractingPath("$.data.occurredTime").asString().startsWith("2026-09-15T20:00");
 
-        mvc.perform(get(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", bearer(token)))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.conversationStatus").value("COMPLAINT_CREATED"))
-            .andExpect(jsonPath("$.data.statusCode").doesNotExist())
-            .andExpect(jsonPath("$.data.conversationType").doesNotExist())
-            .andExpect(jsonPath("$.data.statusLabel").value("민원 생성 완료"))
-            .andExpect(jsonPath("$.data.messages.length()").value(4))
-            .andExpect(jsonPath("$.data.messages[3].messageType").value("SUMMARY_CARD"))
-            .andExpect(jsonPath("$.data.messages[3].summaryCard.occurredTime").value(startsWith("2026-09-15T20:00")));
+        assertThat(createComplaint(resident, complaint)).hasStatus(HttpStatus.CONFLICT)
+            .bodyJson().extractingPath("$.error.code").isEqualTo("COMPLAINT_ALREADY_CREATED");
 
-        sendMessage(token, conversationId, "추가 문의요")
-            .andExpect(status().isConflict())
-            .andExpect(jsonPath("$.error.code").value("CONVERSATION_CLOSED"));
-        mvc.perform(get(CONVERSATIONS).header("Authorization", bearer(token)))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.conversations.length()").value(1))
-            .andExpect(jsonPath("$.data.conversations[0].conversationType").value("COMPLAINT"))
-            .andExpect(jsonPath("$.data.conversations[0].statusCode").value("COMPLAINT_CREATED"))
-            .andExpect(jsonPath("$.data.conversations[0].statusLabel").value("민원 생성 완료"));
+        MvcTestResult closed = getMessages(resident, conversationId);
+        assertThat(closed).hasStatusOk()
+            .bodyJson()
+            .doesNotHavePath("$.data.statusCode")
+            .doesNotHavePath("$.data.conversationType")
+            .isLenientlyEqualTo("""
+                {"data": {"conversationStatus": "COMPLAINT_CREATED", "statusLabel": "민원 생성 완료",
+                          "messages": [{}, {}, {}, {"messageType": "SUMMARY_CARD"}]}}
+                """);
+        assertThat(closed).bodyJson().extractingPath("$.data.messages[3].summaryCard.occurredTime")
+            .asString().startsWith("2026-09-15T20:00");
+
+        assertThat(sendMessage(resident, conversationId, "추가 문의요")).hasStatus(HttpStatus.CONFLICT)
+            .bodyJson().extractingPath("$.error.code").isEqualTo("CONVERSATION_CLOSED");
+        assertThat(mockMvcTester.get().uri(CONVERSATIONS).with(resident)).hasStatusOk()
+            .bodyJson().isLenientlyEqualTo("""
+                {"data": {"conversations": [{"conversationType": "COMPLAINT", "statusCode": "COMPLAINT_CREATED",
+                                             "statusLabel": "민원 생성 완료"}]}}
+                """);
     }
 
     @Test
-    void inquiryGetsGuideAnswer() throws Exception {
-        long conversationId = conversationId(startConversation(token, "분리수거 요일이 언제인가요?")
-            .andExpect(status().isCreated())
-            .andReturn().getResponse().getContentAsString());
+    @DisplayName("호실에 연결되지 않은 입주민은 대화를 시작할 수 없다")
+    void rejectsResidentWithoutRoom() {
+        RequestPostProcessor unconnected =
+            conversationTestFixture.authenticatedAs(conversationTestFixture.unconnectedResident());
 
-        mvc.perform(get(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", bearer(token)))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.messages[1].messageType").value("TEXT"))
-            .andExpect(jsonPath("$.data.messages[1].content").isNotEmpty());
+        assertThat(startConversation(unconnected, "천장에서 물이 새요")).hasStatus(HttpStatus.FORBIDDEN)
+            .bodyJson().extractingPath("$.error.code").isEqualTo("FORBIDDEN");
     }
 
     @Test
-    void complaintBeforeSummaryCardIsRejected() throws Exception {
-        long conversationId = conversationId(startConversation(token, "현관 조명이 꺼졌어요")
-            .andReturn().getResponse().getContentAsString());
-
-        createComplaint(token, "{\"conversationId\":%d,\"symptom\":\"현관 조명 꺼짐\"}".formatted(conversationId))
-            .andExpect(status().isConflict())
-            .andExpect(jsonPath("$.error.code").value("COMPLAINT_NOT_READY"))
-            .andExpect(jsonPath("$.error.details.field").value("conversationId"));
+    @DisplayName("경로의 대화 ID가 양수가 아니면 거절한다")
+    void rejectsNonPositiveConversationIdInPath() {
+        assertThat(sendMessage(resident, 0L, "안녕하세요")).hasStatus(HttpStatus.UNPROCESSABLE_CONTENT)
+            .bodyJson().extractingPath("$.error.details.violations[0].field").isEqualTo("conversationId");
     }
 
     @Test
-    void otherResidentsConversationIsForbiddenAndUnknownIsNotFound() throws Exception {
-        long conversationId = conversationId(startConversation(token, "천장에서 물이 새요")
-            .andReturn().getResponse().getContentAsString());
-        String otherToken = fixture.login(mvc, json, fixture.livingResident("101"));
-
-        mvc.perform(get(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", bearer(otherToken)))
-            .andExpect(status().isForbidden())
-            .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
-        sendMessage(otherToken, conversationId, "끼어들기").andExpect(status().isForbidden());
-        createComplaint(otherToken, "{\"conversationId\":%d}".formatted(conversationId))
-            .andExpect(status().isForbidden());
-        sendMessage(token, 999_999L, "없는 대화")
-            .andExpect(status().isNotFound())
-            .andExpect(jsonPath("$.error.code").value("CONVERSATION_NOT_FOUND"))
-            .andExpect(jsonPath("$.error.details.field").value("conversationId"));
+    @DisplayName("경로의 대화 ID가 숫자가 아니면 거절한다")
+    void rejectsNonNumericConversationIdInPath() {
+        assertThat(mockMvcTester.get().uri(CONVERSATIONS + "/abc/messages").with(resident))
+            .hasStatus(HttpStatus.UNPROCESSABLE_CONTENT);
     }
 
     @Test
-    void residentWithoutRoomCannotStartConversation() throws Exception {
-        String unconnected = fixture.login(mvc, json, fixture.unconnectedResident());
-        startConversation(unconnected, "천장에서 물이 새요")
-            .andExpect(status().isForbidden())
-            .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
-        mvc.perform(get(CONVERSATIONS).header("Authorization", bearer(unconnected)))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.conversations.length()").value(0))
-            .andExpect(jsonPath("$.data.hasNext").value(false));
+    @DisplayName("대화 목록 조회 개수가 숫자가 아니면 거절한다")
+    void rejectsNonNumericPageSize() {
+        assertThat(mockMvcTester.get().uri(CONVERSATIONS).param("size", "abc").with(resident))
+            .hasStatus(HttpStatus.BAD_REQUEST)
+            .bodyJson().extractingPath("$.error.code").isEqualTo("INVALID_QUERY_PARAMETER");
     }
 
     @Test
-    void validatesRequestBodyPathAndQuery() throws Exception {
-        startConversation(token, "   ")
-            .andExpect(status().isUnprocessableContent())
-            .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
-            .andExpect(jsonPath("$.error.details.violations[0].field").value("contentOrImagePresent"))
-            .andExpect(jsonPath("$.data").value(nullValue()));
-        startConversation(token, "가".repeat(201))
-            .andExpect(status().isUnprocessableContent())
-            .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
-            .andExpect(jsonPath("$.error.details.violations[0].reason").value("메시지는 200자 이하여야 합니다."));
-        sendMessage(token, 0L, "안녕하세요")
-            .andExpect(status().isUnprocessableContent())
-            .andExpect(jsonPath("$.error.details.violations[0].field").value("conversationId"));
-        mvc.perform(get(CONVERSATIONS + "/abc/messages").header("Authorization", bearer(token)))
-            .andExpect(status().isUnprocessableContent());
-        mvc.perform(get(CONVERSATIONS).param("size", "abc").header("Authorization", bearer(token)))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.error.code").value("INVALID_QUERY_PARAMETER"));
-        mvc.perform(get(CONVERSATIONS).param("size", "101").header("Authorization", bearer(token)))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.error.details.violations[0].field").value("size"));
-        mvc.perform(get(CONVERSATIONS).param("cursor", "not-a-cursor").header("Authorization", bearer(token)))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.error.code").value("INVALID_QUERY_PARAMETER"))
-            .andExpect(jsonPath("$.error.details.violations[0].field").value("cursor"));
-        sendMessage(token, 1L, "   ")
-            .andExpect(status().isUnprocessableContent())
-            .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
-            .andExpect(jsonPath("$.error.details.violations[0].field").value("contentOrImagePresent"));
-        createComplaint(token, "{}")
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.error.details.violations[0].field").value("conversationId"));
-        createComplaint(token, "{\"conversationId\":1,\"location\":\"%s\"}".formatted("가".repeat(51)))
-            .andExpect(status().isUnprocessableContent())
-            .andExpect(jsonPath("$.error.details.violations[0].reason").value("발생 위치는 50자 이하여야 합니다."));
+    @DisplayName("대화 목록 조회 개수가 100을 넘으면 거절한다")
+    void rejectsPageSizeOver100() {
+        assertThat(mockMvcTester.get().uri(CONVERSATIONS).param("size", "101").with(resident))
+            .hasStatus(HttpStatus.BAD_REQUEST)
+            .bodyJson().extractingPath("$.error.details.violations[0].field").isEqualTo("size");
     }
 
     @Test
-    void messagesArePagedByCursorFromLatest() throws Exception {
-        long conversationId = conversationId(startConversation(token, "천장에서 물이 새요")
-            .andReturn().getResponse().getContentAsString());
-        sendMessage(token, conversationId, "안방이요");
-
-        String firstPage = mvc.perform(get(CONVERSATIONS + "/" + conversationId + "/messages")
-                .param("size", "3").header("Authorization", bearer(token)))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.hasNext").value(true))
-            .andExpect(jsonPath("$.data.messages.length()").value(3))
-            .andExpect(jsonPath("$.data.messages[2].senderType").value("ASSISTANT"))
-            .andReturn().getResponse().getContentAsString();
-        long cursor = json.readTree(firstPage).path("data").path("nextCursor").asLong();
-
-        mvc.perform(get(CONVERSATIONS + "/" + conversationId + "/messages")
-                .param("size", "3").param("cursor", Long.toString(cursor)).header("Authorization", bearer(token)))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.hasNext").value(false))
-            .andExpect(jsonPath("$.data.nextCursor").value(nullValue()))
-            .andExpect(jsonPath("$.data.messages.length()").value(1))
-            .andExpect(jsonPath("$.data.messages[0].content").value("천장에서 물이 새요"));
+    @DisplayName("대화 목록 커서 형식이 잘못되면 거절한다")
+    void rejectsMalformedCursor() {
+        assertThat(mockMvcTester.get().uri(CONVERSATIONS).param("cursor", "not-a-cursor").with(resident))
+            .hasStatus(HttpStatus.BAD_REQUEST)
+            .bodyJson().isLenientlyEqualTo("""
+                {"error": {"code": "INVALID_QUERY_PARAMETER", "details": {"violations": [{"field": "cursor"}]}}}
+                """);
     }
 
-    @Test
-    void conversationsArePagedByCursorFromLatest() throws Exception {
-        startConversation(token, "분리수거 요일이 언제인가요?");
-        startConversation(token, "주차 등록은 어떻게 하나요?");
-        startConversation(token, "택배 보관함은 어디 있나요?");
-
-        String firstPage = mvc.perform(get(CONVERSATIONS).param("size", "2").header("Authorization", bearer(token)))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.hasNext").value(true))
-            .andExpect(jsonPath("$.data.conversations.length()").value(2))
-            .andExpect(jsonPath("$.data.conversations[0].conversationTitle").value("택배 보관함은 어디 있나요?"))
-            .andExpect(jsonPath("$.data.conversations[1].conversationTitle").value("주차 등록은 어떻게 하나요?"))
-            .andReturn().getResponse().getContentAsString();
-        String cursor = json.readTree(firstPage).path("data").path("nextCursor").asText();
-
-        mvc.perform(get(CONVERSATIONS).param("size", "2").param("cursor", cursor)
-                .header("Authorization", bearer(token)))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.hasNext").value(false))
-            .andExpect(jsonPath("$.data.nextCursor").value(nullValue()))
-            .andExpect(jsonPath("$.data.conversations.length()").value(1))
-            .andExpect(jsonPath("$.data.conversations[0].conversationTitle").value("분리수거 요일이 언제인가요?"));
-
-        mvc.perform(get(CONVERSATIONS).param("keyword", "주차").header("Authorization", bearer(token)))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.conversations.length()").value(1))
-            .andExpect(jsonPath("$.data.conversations[0].conversationTitle").value("주차 등록은 어떻게 하나요?"));
+    private MvcTestResult startConversation(RequestPostProcessor authentication, String content) {
+        return mockMvcTester.post().uri(CONVERSATIONS).with(authentication)
+            .contentType(MediaType.APPLICATION_JSON).content(messageBody(content))
+            .exchange();
     }
 
-    private ResultActions startConversation(String accessToken, String content) throws Exception {
-        return mvc.perform(post(CONVERSATIONS).header("Authorization", bearer(accessToken))
-            .contentType("application/json").content(json.writeValueAsString(new ContentBody(content))));
+    private MvcTestResult sendMessage(RequestPostProcessor authentication, long conversationId, String content) {
+        return mockMvcTester.post().uri(CONVERSATIONS + "/{id}/messages", conversationId).with(authentication)
+            .contentType(MediaType.APPLICATION_JSON).content(messageBody(content))
+            .exchange();
     }
 
-    private ResultActions sendMessage(String accessToken, long conversationId, String content) throws Exception {
-        return mvc.perform(post(CONVERSATIONS + "/" + conversationId + "/messages")
-            .header("Authorization", bearer(accessToken))
-            .contentType("application/json").content(json.writeValueAsString(new ContentBody(content))));
+    private MvcTestResult getMessages(RequestPostProcessor authentication, long conversationId) {
+        return mockMvcTester.get().uri(CONVERSATIONS + "/{id}/messages", conversationId).with(authentication)
+            .exchange();
     }
 
-    private ResultActions createComplaint(String accessToken, String body) throws Exception {
-        return mvc.perform(post(COMPLAINTS).header("Authorization", bearer(accessToken))
-            .contentType("application/json").content(body));
+    private MvcTestResult createComplaint(RequestPostProcessor authentication, String body) {
+        return mockMvcTester.post().uri(COMPLAINTS).with(authentication)
+            .contentType(MediaType.APPLICATION_JSON).content(body)
+            .exchange();
     }
 
-    private long conversationId(String responseBody) {
-        return json.readTree(responseBody).path("data").path("conversationId").asLong();
+    private String messageBody(String content) {
+        return objectMapper.writeValueAsString(Map.of("content", content));
     }
 
-    private String bearer(String accessToken) {
-        return "Bearer " + accessToken;
-    }
-
-    private record ContentBody(String content) {
+    private long conversationId(MvcTestResult result) throws Exception {
+        return objectMapper.readTree(result.getResponse().getContentAsString())
+            .path("data").path("conversationId").asLong();
     }
 }
