@@ -35,7 +35,6 @@ public class TokenService {
                 .subject(user.getId().toString())
                 .issuedAt(now)
                 .expiresAt(now.plus(authProperties.accessTtl()))
-                .claim("sid", sessionId)
                 .claim("ver", user.getAuthVersion())
                 .claim("role", user.getRole().name())
                 .build();

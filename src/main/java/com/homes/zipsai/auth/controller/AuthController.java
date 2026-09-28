@@ -85,9 +85,10 @@ public class AuthController {
     @Operation(summary = "로그아웃")
     public ApiResponse<Void> logout(
             @AuthenticationPrincipal AuthPrincipal principal,
+            @CookieValue(name = "refreshToken", required = false) String refresh,
             HttpServletResponse response
     ) {
-        authService.logout(principal);
+        authService.logout(principal, refresh);
         cookie(response, "", 0);
         return ApiResponse.data(null);
     }
