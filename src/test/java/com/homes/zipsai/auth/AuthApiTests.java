@@ -236,7 +236,8 @@ class AuthApiTests {
 
         mvc.perform(post("/api/v1/auth/reissue").cookie(refresh(loginResult)))
                 .andExpect(status().isUnauthorized());
-        mvc.perform(post("/api/v1/auth/logout").header("Authorization", "Bearer " + access(rotated)))
+        mvc.perform(post("/api/v1/auth/logout").cookie(refresh(rotated))
+                .header("Authorization", "Bearer " + access(rotated)))
                 .andExpect(status().isOk())
                 .andExpect(cookie().maxAge("refreshToken", 0));
         mvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + access(rotated)))
