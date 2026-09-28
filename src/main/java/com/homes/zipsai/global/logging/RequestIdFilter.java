@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.util.UUID;
 import java.util.Map;
 import java.util.LinkedHashMap;
-import java.time.Instant;
 
 import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
@@ -32,6 +31,8 @@ public class RequestIdFilter extends OncePerRequestFilter {
         }
         long started = System.nanoTime();
         MDC.put(TRACE_ID, traceId);
+        MDC.remove("dbMs");
+        MDC.remove("aiApiMs");
         response.setHeader(HEADER, traceId);
         structuredLogger.requestStarted(traceId, request.getRequestURI(), request.getMethod());
         try {
@@ -40,6 +41,8 @@ public class RequestIdFilter extends OncePerRequestFilter {
             structuredLogger.requestDone(traceId, request.getRequestURI(), request.getMethod(),
                 response.getStatus(), (System.nanoTime() - started) / 1_000_000, null);
             MDC.remove(TRACE_ID);
+            MDC.remove("dbMs");
+            MDC.remove("aiApiMs");
         }
     }
 }

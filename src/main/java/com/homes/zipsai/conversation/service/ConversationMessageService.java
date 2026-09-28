@@ -6,6 +6,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 
 import com.homes.zipsai.conversation.ai.AiConverseClient;
@@ -17,6 +18,7 @@ import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.global.exception.InternalServerException;
 
 import lombok.RequiredArgsConstructor;
+import com.homes.zipsai.global.logging.StructuredLogger;
 
 @Service
 @RequiredArgsConstructor
@@ -26,6 +28,7 @@ public class ConversationMessageService {
 
     private final ConversationService conversationService;
     private final AiConverseClient aiConverseClient;
+    private final StructuredLogger structuredLogger;
     private final Set<Long> conversationsWaitingForAi = ConcurrentHashMap.newKeySet();
 
     public ConversationCreateResponse createConversation(Long userId, String content, List<Long> attachmentIds) {
@@ -40,13 +43,20 @@ public class ConversationMessageService {
             throw new ConflictException(ConflictException.Reason.CONVERSATION_BUSY);
         }
         try {
-            PendingAiReply pendingReply =
-                conversationService.saveNextMessage(userId, conversationId, content, attachmentIds);
+            long dbStarted = System.nanoTime();
+            PendingAiReply pendingReply = conversationService.saveNextMessage(userId, conversationId, content, attachmentIds);
+            logDbStage(dbStarted);
             MessageResponse assistantMessage = askAiAndSaveReply(pendingReply);
             return MessageSendResponse.of(conversationId, pendingReply.residentMessage(), assistantMessage);
         } finally {
             conversationsWaitingForAi.remove(conversationId);
         }
+    }
+
+    private void logDbStage(long started) {
+        String traceId = MDC.get("traceId");
+        if (traceId != null) structuredLogger.stageDone(traceId, "conversation", "mysql",
+            (System.nanoTime() - started) / 1_000_000, "success");
     }
 
     private MessageResponse askAiAndSaveReply(PendingAiReply pendingReply) {
