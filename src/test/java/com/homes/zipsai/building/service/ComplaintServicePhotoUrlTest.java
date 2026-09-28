@@ -18,8 +18,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -44,8 +42,7 @@ import com.homes.zipsai.conversation.service.ConversationService;
 import com.homes.zipsai.user.domain.User;
 
 @ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
-class ComplaintPhotoUrlTest {
+class ComplaintServicePhotoUrlTest {
 
     private static final long MANAGER_ID = 9L;
     private static final long RESIDENT_ID = 1L;
@@ -80,17 +77,13 @@ class ComplaintPhotoUrlTest {
             new StorageProperties(null, null, null, 300, 0));
         resident = user(RESIDENT_ID);
         building = withId(new Building(user(MANAGER_ID), "서울시 테스트로 1", "테스트빌"), 7L);
-        given(buildingRepository.findByManager_IdAndDeletedAtIsNull(MANAGER_ID))
-            .willReturn(Optional.of(building));
-        given(residentRoomService.getLivingRoom(RESIDENT_ID)).willReturn(livingRoom(resident));
-        given(s3StorageService.prepareDownload(anyString(), any())).willAnswer(invocation ->
-            new S3StorageService.PresignedDownload("https://s3.test/" + invocation.getArgument(0)));
     }
 
     @Test
     @DisplayName("관리자 목록의 대표 사진은 내려받을 수 있는 URL로 내려간다")
     void putsDownloadUrlOnManagerListItem() {
         givenManagerComplaints(complaint(uploaded(4L)));
+        givenPresignedUrls();
 
         ComplaintListResponse response = complaintService.getManagerComplaints(
             MANAGER_ID, null, null, false, 0, 20);
@@ -102,6 +95,7 @@ class ComplaintPhotoUrlTest {
     @DisplayName("입주민 목록의 대표 사진은 내려받을 수 있는 URL로 내려간다")
     void putsDownloadUrlOnResidentListItem() {
         givenResidentComplaints(complaint(uploaded(4L)));
+        givenPresignedUrls();
 
         ResidentComplaintListResponse response = complaintService.getResidentComplaints(
             RESIDENT_ID, null, null, 0, 20);
@@ -133,11 +127,8 @@ class ComplaintPhotoUrlTest {
     @Test
     @DisplayName("관리자 상세는 대화 사진을 내려받을 수 있는 URL로 내려준다")
     void putsDownloadUrlOnManagerDetailAttachment() {
-        Complaint complaint = complaint(uploaded(4L));
-        given(conversationService.findImages(any())).willReturn(List.of(uploaded(4L)));
-        given(complaintRepository.findByIdAndDeletedAtIsNull(COMPLAINT_ID)).willReturn(Optional.of(complaint));
-        given(complaintDetailRepository.findById(COMPLAINT_ID))
-            .willReturn(Optional.of(ComplaintDetail.builder().complaint(complaint).build()));
+        givenManagerDetail(List.of(uploaded(4L)));
+        givenPresignedUrls();
 
         ComplaintDetailResponse response = complaintService.getManagerComplaint(MANAGER_ID, COMPLAINT_ID);
 
@@ -148,6 +139,7 @@ class ComplaintPhotoUrlTest {
     @DisplayName("상세는 대화에 올린 사진을 모두 올린 순서대로 내려준다")
     void returnsAllConversationPhotosInOrder() {
         givenManagerDetail(List.of(uploaded(4L), uploaded(5L), uploaded(6L), uploaded(7L)));
+        givenPresignedUrls();
 
         ComplaintDetailResponse response = complaintService.getManagerComplaint(MANAGER_ID, COMPLAINT_ID);
 
@@ -159,10 +151,20 @@ class ComplaintPhotoUrlTest {
     @DisplayName("상세의 사진 개수는 내려준 사진 수와 같다")
     void reportsTotalPhotoCountOnDetail() {
         givenManagerDetail(List.of(uploaded(4L), uploaded(5L), uploaded(6L), uploaded(7L)));
+        givenPresignedUrls();
 
         ComplaintDetailResponse response = complaintService.getManagerComplaint(MANAGER_ID, COMPLAINT_ID);
 
         assertThat(response.attachmentCount()).isEqualTo(4);
+    }
+
+    private void givenPresignedUrls() {
+        given(s3StorageService.prepareDownload(anyString(), any())).willAnswer(invocation ->
+            new S3StorageService.PresignedDownload("https://s3.test/" + invocation.getArgument(0)));
+    }
+
+    private void givenManagedBuilding() {
+        given(buildingRepository.findByManager_IdAndDeletedAtIsNull(MANAGER_ID)).willReturn(Optional.of(building));
     }
 
     private void givenManagerDetail(List<File> images) {
@@ -174,11 +176,13 @@ class ComplaintPhotoUrlTest {
     }
 
     private void givenManagerComplaints(Complaint complaint) {
+        givenManagedBuilding();
         given(complaintRepository.findManagerComplaints(any(), any(), any(), anyBoolean(), anyInt(), any()))
             .willReturn(page(complaint));
     }
 
     private void givenResidentComplaints(Complaint complaint) {
+        given(residentRoomService.getLivingRoom(RESIDENT_ID)).willReturn(livingRoom(resident));
         given(complaintRepository.findResidentComplaints(any(), any(), any(), any()))
             .willReturn(page(complaint));
     }

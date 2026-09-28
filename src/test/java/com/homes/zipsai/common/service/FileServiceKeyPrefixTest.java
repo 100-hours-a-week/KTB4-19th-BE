@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.atLeastOnce;
 
 import java.time.Duration;
 
@@ -14,8 +16,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 
 import com.homes.zipsai.common.config.StorageProperties;
 import com.homes.zipsai.common.domain.File;
@@ -26,7 +26,6 @@ import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.repository.UserRepository;
 
 @ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 class FileServiceKeyPrefixTest {
 
     private static final AuthPrincipal PRINCIPAL = new AuthPrincipal(1L, "session");
@@ -88,15 +87,15 @@ class FileServiceKeyPrefixTest {
     void presignsUploadWithSavedKey() {
         fileService.createUpload(PRINCIPAL, "leak.jpg", "jpg", 1024, FilePurpose.CONVERSATION);
 
-        ArgumentCaptor<String> key = ArgumentCaptor.forClass(String.class);
-        org.mockito.BDDMockito.then(s3StorageService).should()
-            .prepareUpload(key.capture(), anyString(), any(Duration.class));
-        assertThat(key.getValue()).isEqualTo(savedKey());
+        ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
+        then(s3StorageService).should()
+            .prepareUpload(keyCaptor.capture(), anyString(), any(Duration.class));
+        assertThat(keyCaptor.getValue()).isEqualTo(savedKey());
     }
 
     private String savedKey() {
-        ArgumentCaptor<File> file = ArgumentCaptor.forClass(File.class);
-        org.mockito.BDDMockito.then(fileRepository).should(org.mockito.Mockito.atLeastOnce()).save(file.capture());
-        return file.getValue().getFileKey();
+        ArgumentCaptor<File> fileCaptor = ArgumentCaptor.forClass(File.class);
+        then(fileRepository).should(atLeastOnce()).save(fileCaptor.capture());
+        return fileCaptor.getValue().getFileKey();
     }
 }
