@@ -23,16 +23,14 @@ public class AccessTokenAuthenticationConverter
     public AbstractAuthenticationToken convert(Jwt token) {
         try {
             long userId = Long.parseLong(token.getSubject());
-            String sessionId = token.getClaimAsString("sid");
             String role = token.getClaimAsString("role");
 
-            if (sessionId == null || sessionId.isBlank()
-                    || role == null || role.isBlank()) {
+            if (role == null || role.isBlank()) {
                 throw new UnauthorizedException();
             }
 
             return new UsernamePasswordAuthenticationToken(
-                    new AuthPrincipal(userId, sessionId),
+                    new AuthPrincipal(userId),
                     null,
                     List.of(new SimpleGrantedAuthority("ROLE_" + role))
             );

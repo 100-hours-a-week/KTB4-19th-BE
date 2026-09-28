@@ -134,13 +134,12 @@ public class AuthService {
         });
     }
 
-    public void logout(AuthPrincipal principal) {
+    public void logout(AuthPrincipal principal, String refreshToken) {
+        if (refreshToken == null || refreshToken.isBlank()) return;
         tx.executeWithoutResult(status -> {
-            RefreshSession session = refreshSessionRepository.findLockedById(principal.sessionId())
+            RefreshSession session = refreshSessionRepository.findLockedByHash(TokenService.hash(refreshToken))
                     .orElseThrow(UnauthorizedException::new);
-            if (!session.getUserId().equals(principal.userId())) {
-                throw new UnauthorizedException();
-            }
+            if (!session.getUserId().equals(principal.userId())) throw new UnauthorizedException();
             session.revoke();
         });
     }

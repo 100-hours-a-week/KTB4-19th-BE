@@ -190,7 +190,7 @@ public class UserService {
                 user.selectRole(role);
             }
             updatedRole = role;
-            accessToken = tokenService.access(user, principal.sessionId());
+            accessToken = tokenService.access(user, null);
             tokenType = "Bearer";
         }
         if (requestedName != null) {
