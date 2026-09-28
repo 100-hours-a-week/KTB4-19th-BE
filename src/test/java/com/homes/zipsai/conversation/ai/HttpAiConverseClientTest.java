@@ -32,19 +32,20 @@ class HttpAiConverseClientTest {
     private static final String CONVERSE_URL = BASE_URL + CONVERSE_PATH;
     private static final String TRACE_ID = "6f6d8b2e-0b0b-4a1e-9f2a-3f9d5c1a7e11";
 
-    private MockRestServiceServer server;
-    private HttpAiConverseClient client;
+    private MockRestServiceServer mockRestServiceServer;
+    private HttpAiConverseClient httpAiConverseClient;
 
     @BeforeEach
     void setUp() {
         RestClient.Builder builder = RestClient.builder();
-        server = MockRestServiceServer.bindTo(builder).build();
-        client = new HttpAiConverseClient(builder, BASE_URL, CONVERSE_PATH, new JsonMapper());
+        mockRestServiceServer = MockRestServiceServer.bindTo(builder).build();
+        httpAiConverseClient = new HttpAiConverseClient(builder, BASE_URL, CONVERSE_PATH, new JsonMapper());
     }
 
     @Test
-    void sendsContractFieldsAndReadsComplaintReply() {
-        server.expect(requestTo(CONVERSE_URL))
+    @DisplayName("계약한 필드 이름과 값으로 AI 서버에 요청한다")
+    void sendsContractFields() {
+        mockRestServiceServer.expect(requestTo(CONVERSE_URL))
             .andExpect(method(HttpMethod.POST))
             .andExpect(jsonPath("$.building_id").value(1))
             .andExpect(jsonPath("$.room_no").value("302"))
@@ -60,33 +61,20 @@ class HttpAiConverseClientTest {
             .andExpect(jsonPath("$.conversation_history[0].message_id").value("19"))
             .andExpect(jsonPath("$.conversation_history[0].text").value("천장에서 물이 새요"))
             .andExpect(jsonPath("$.complaint_draft.symptom").value("천장에서 물이 새요"))
-            .andRespond(withSuccess("""
-                {
-                  "code": "ai_response_success",
-                  "trace_id": "%s",
-                  "data": {
-                    "route": "complaint",
-                    "complaint_intent": "register",
-                    "next_complaint_state": null,
-                    "reply": "아래 내용으로 민원을 접수할까요?",
-                    "result": {
-                      "complaint_draft": {
-                        "issue_type": "water_supply",
-                        "location": "안방 천장",
-                        "symptom": "천장에서 물이 새요"
-                      },
-                      "qa_card_draft": null,
-                      "missing_fields": [],
-                      "citations": [],
-                      "has_sufficient_evidence": null,
-                      "image_analysis": null
-                    },
-                    "meta": { "model": "gpt-5-nano", "timing_ms": 842 }
-                  }
-                }
-                """.formatted(TRACE_ID), MediaType.APPLICATION_JSON));
+            .andRespond(withSuccess(complaintReply(), MediaType.APPLICATION_JSON));
 
-        AiConverseResponse response = client.converse(request());
+        httpAiConverseClient.converse(request());
+
+        mockRestServiceServer.verify();
+    }
+
+    @Test
+    @DisplayName("AI 서버의 민원 응답을 읽는다")
+    void readsComplaintReply() {
+        mockRestServiceServer.expect(requestTo(CONVERSE_URL))
+            .andRespond(withSuccess(complaintReply(), MediaType.APPLICATION_JSON));
+
+        AiConverseResponse response = httpAiConverseClient.converse(request());
 
         assertThat(response.isSuccess()).isTrue();
         assertThat(response.traceId()).isEqualTo(TRACE_ID);
@@ -96,13 +84,13 @@ class HttpAiConverseClientTest {
         assertThat(response.draftPatch().location()).isEqualTo("안방 천장");
         assertThat(response.qaCardQuestion()).isNull();
         assertThat(response.isConversationComplete()).isTrue();
-        server.verify();
+        mockRestServiceServer.verify();
     }
 
     @Test
     @DisplayName("오프셋 없는 발생 시각이 담긴 응답도 읽는다")
     void readsResponseWithoutOffsetOnOccurredAt() {
-        server.expect(requestTo(CONVERSE_URL))
+        mockRestServiceServer.expect(requestTo(CONVERSE_URL))
             .andRespond(withSuccess("""
                 {
                   "code": "ai_response_success",
@@ -124,12 +112,12 @@ class HttpAiConverseClientTest {
                 }
                 """.formatted(TRACE_ID), MediaType.APPLICATION_JSON));
 
-        AiConverseResponse response = client.converse(request());
+        AiConverseResponse response = httpAiConverseClient.converse(request());
 
         assertThat(response.isSuccess()).isTrue();
         assertThat(response.draftPatch().occurredAt())
             .isEqualTo(OffsetDateTime.parse("2026-09-23T00:00:00+09:00"));
-        server.verify();
+        mockRestServiceServer.verify();
     }
 
     @Test
@@ -141,12 +129,12 @@ class HttpAiConverseClientTest {
             new ch.qos.logback.core.read.ListAppender<>();
         appender.start();
         logger.addAppender(appender);
-        server.expect(requestTo(CONVERSE_URL))
+        mockRestServiceServer.expect(requestTo(CONVERSE_URL))
             .andRespond(withSuccess("{\"code\": \"ai_response_success\", \"data\": 12345}",
                 MediaType.APPLICATION_JSON));
 
         try {
-            assertThatThrownBy(() -> client.converse(request()))
+            assertThatThrownBy(() -> httpAiConverseClient.converse(request()))
                 .isInstanceOf(AiUnavailableException.class);
             assertThat(appender.list)
                 .anyMatch(event -> event.getFormattedMessage().contains("읽지 못했습니다")
@@ -157,8 +145,9 @@ class HttpAiConverseClientTest {
     }
 
     @Test
+    @DisplayName("근거가 없는 질의 응답에서 질문 카드를 읽는다")
     void readsQaCardDraftWhenEvidenceIsMissing() {
-        server.expect(requestTo(CONVERSE_URL))
+        mockRestServiceServer.expect(requestTo(CONVERSE_URL))
             .andRespond(withSuccess("""
                 {
                   "code": "ai_response_success",
@@ -177,22 +166,56 @@ class HttpAiConverseClientTest {
                 }
                 """.formatted(TRACE_ID), MediaType.APPLICATION_JSON));
 
-        AiConverseResponse response = client.converse(request());
+        AiConverseResponse response = httpAiConverseClient.converse(request());
 
         assertThat(response.route()).isEqualTo(AiRoute.KNOWLEDGE);
         assertThat(response.qaCardQuestion()).isEqualTo("엘리베이터 정기 점검 일정 문의");
         assertThat(response.isConversationComplete()).isTrue();
-        server.verify();
+        mockRestServiceServer.verify();
     }
 
     @Test
-    void mapsRateLimitAndDependencyFailuresToOwnErrors() {
-        server.expect(requestTo(CONVERSE_URL)).andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
-        assertThatThrownBy(() -> client.converse(request())).isInstanceOf(TooManyRequestsException.class);
+    @DisplayName("AI 서버가 요청 제한으로 거절하면 요청 과다 예외로 바꾼다")
+    void mapsRateLimitToTooManyRequests() {
+        mockRestServiceServer.expect(requestTo(CONVERSE_URL)).andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
 
-        server.reset();
-        server.expect(requestTo(CONVERSE_URL)).andRespond(withStatus(HttpStatus.GATEWAY_TIMEOUT));
-        assertThatThrownBy(() -> client.converse(request())).isInstanceOf(AiUnavailableException.class);
+        assertThatThrownBy(() -> httpAiConverseClient.converse(request())).isInstanceOf(TooManyRequestsException.class);
+    }
+
+    @Test
+    @DisplayName("AI 서버가 응답하지 못하면 AI 사용 불가 예외로 바꾼다")
+    void mapsGatewayTimeoutToAiUnavailable() {
+        mockRestServiceServer.expect(requestTo(CONVERSE_URL)).andRespond(withStatus(HttpStatus.GATEWAY_TIMEOUT));
+
+        assertThatThrownBy(() -> httpAiConverseClient.converse(request())).isInstanceOf(AiUnavailableException.class);
+    }
+
+    private static String complaintReply() {
+        return """
+            {
+              "code": "ai_response_success",
+              "trace_id": "%s",
+              "data": {
+                "route": "complaint",
+                "complaint_intent": "register",
+                "next_complaint_state": null,
+                "reply": "아래 내용으로 민원을 접수할까요?",
+                "result": {
+                  "complaint_draft": {
+                    "issue_type": "water_supply",
+                    "location": "안방 천장",
+                    "symptom": "천장에서 물이 새요"
+                  },
+                  "qa_card_draft": null,
+                  "missing_fields": [],
+                  "citations": [],
+                  "has_sufficient_evidence": null,
+                  "image_analysis": null
+                },
+                "meta": { "model": "gpt-5-nano", "timing_ms": 842 }
+              }
+            }
+            """.formatted(TRACE_ID);
     }
 
     private AiConverseRequest request() {

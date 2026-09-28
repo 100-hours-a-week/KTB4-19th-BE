@@ -20,8 +20,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.homes.zipsai.building.domain.Building;
@@ -46,7 +44,6 @@ import com.homes.zipsai.global.exception.ValidationFailedException;
 import com.homes.zipsai.user.domain.User;
 
 @ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 class ConversationServiceImageTest {
 
     private static final long RESIDENT_ID = 1L;
@@ -80,27 +77,22 @@ class ConversationServiceImageTest {
             new StorageProperties(null, null, null, 300, 0));
         resident = user(RESIDENT_ID);
         given(residentRoomService.getLivingRoom(RESIDENT_ID)).willReturn(livingRoom(resident));
-        given(conversationRepository.save(any(Conversation.class)))
-            .willAnswer(invocation -> withId(invocation.getArgument(0), 10L));
-        given(messageRepository.save(any(Message.class)))
-            .willAnswer(invocation -> withId(invocation.getArgument(0), 20L));
-        given(messageFileGroupRepository.save(any(MessageFileGroup.class)))
-            .willAnswer(invocation -> invocation.getArgument(0));
-        given(s3StorageService.prepareDownload(anyString(), any())).willAnswer(invocation ->
-            new S3StorageService.PresignedDownload("https://s3.test/" + invocation.getArgument(0)));
     }
 
     @Test
     @DisplayName("업로드를 마친 본인 사진은 보낸 순서대로 첨부된다")
     void attachesOwnUploadedImagesInSentOrder() {
         givenFiles(uploaded(4L, resident, "jpg"), uploaded(5L, resident, "png"));
+        givenSavedMessage();
+        givenAttachedImages();
 
-        PendingAiReply reply = conversationService.saveFirstMessage(RESIDENT_ID, "천장에서 물이 새요", List.of(5L, 4L));
+        PendingAiReply pendingAiReply =
+            conversationService.saveFirstMessage(RESIDENT_ID, "천장에서 물이 새요", List.of(5L, 4L));
 
-        assertThat(reply.residentMessage().attachments()).containsExactly(
+        assertThat(pendingAiReply.residentMessage().attachments()).containsExactly(
             new AttachmentResponse(5L, "https://s3.test/key-5", 1),
             new AttachmentResponse(4L, "https://s3.test/key-4", 2));
-        assertThat(reply.aiRequest().message().imageUrls())
+        assertThat(pendingAiReply.aiRequest().message().imageUrls())
             .containsExactly("https://s3.test/key-5", "https://s3.test/key-4");
     }
 
@@ -108,32 +100,39 @@ class ConversationServiceImageTest {
     @DisplayName("같은 사진을 두 번 보내면 한 번만 첨부된다")
     void attachesDuplicateImageOnce() {
         givenFiles(uploaded(4L, resident, "jpg"));
+        givenSavedMessage();
+        givenAttachedImages();
 
-        PendingAiReply reply = conversationService.saveFirstMessage(RESIDENT_ID, "천장에서 물이 새요", List.of(4L, 4L));
+        PendingAiReply pendingAiReply =
+            conversationService.saveFirstMessage(RESIDENT_ID, "천장에서 물이 새요", List.of(4L, 4L));
 
-        assertThat(reply.residentMessage().attachments()).hasSize(1);
-        assertThat(reply.aiRequest().message().imageUrls()).hasSize(1);
+        assertThat(pendingAiReply.residentMessage().attachments()).hasSize(1);
+        assertThat(pendingAiReply.aiRequest().message().imageUrls()).hasSize(1);
     }
 
     @Test
     @DisplayName("사진 없이 보내면 첨부 없이 저장된다")
     void savesMessageWithoutAttachmentsWhenNoImages() {
-        PendingAiReply reply = conversationService.saveFirstMessage(RESIDENT_ID, "천장에서 물이 새요", null);
+        givenSavedMessage();
 
-        assertThat(reply.residentMessage().attachments()).isEmpty();
-        assertThat(reply.aiRequest().message().imageUrls()).isEmpty();
+        PendingAiReply pendingAiReply = conversationService.saveFirstMessage(RESIDENT_ID, "천장에서 물이 새요", null);
+
+        assertThat(pendingAiReply.residentMessage().attachments()).isEmpty();
+        assertThat(pendingAiReply.aiRequest().message().imageUrls()).isEmpty();
     }
 
     @Test
     @DisplayName("사진만 보낸 첫 메시지는 사진 문의 제목으로 저장되고 AI에 사진만 전달된다")
     void savesImageOnlyFirstMessage() {
         givenFiles(uploaded(4L, resident, "jpg"));
+        givenSavedMessage();
+        givenAttachedImages();
 
-        PendingAiReply reply = conversationService.saveFirstMessage(RESIDENT_ID, "", List.of(4L));
+        PendingAiReply pendingAiReply = conversationService.saveFirstMessage(RESIDENT_ID, "", List.of(4L));
 
-        assertThat(reply.conversation().getTitle()).isEqualTo("사진 문의");
-        assertThat(reply.aiRequest().message().text()).isEmpty();
-        assertThat(reply.aiRequest().message().imageUrls()).containsExactly("https://s3.test/key-4");
+        assertThat(pendingAiReply.conversation().getTitle()).isEqualTo("사진 문의");
+        assertThat(pendingAiReply.aiRequest().message().text()).isEmpty();
+        assertThat(pendingAiReply.aiRequest().message().imageUrls()).containsExactly("https://s3.test/key-4");
     }
 
     @Test
@@ -202,6 +201,20 @@ class ConversationServiceImageTest {
         assertThatThrownBy(() -> conversationService.saveNextMessage(RESIDENT_ID, 10L, "안방이요", List.of(4L)))
             .isInstanceOf(ForbiddenException.class);
         then(messageRepository).should(never()).save(any());
+    }
+
+    private void givenSavedMessage() {
+        given(conversationRepository.save(any(Conversation.class)))
+            .willAnswer(invocation -> withId(invocation.getArgument(0), 10L));
+        given(messageRepository.save(any(Message.class)))
+            .willAnswer(invocation -> withId(invocation.getArgument(0), 20L));
+    }
+
+    private void givenAttachedImages() {
+        given(messageFileGroupRepository.save(any(MessageFileGroup.class)))
+            .willAnswer(invocation -> invocation.getArgument(0));
+        given(s3StorageService.prepareDownload(anyString(), any())).willAnswer(invocation ->
+            new S3StorageService.PresignedDownload("https://s3.test/" + invocation.getArgument(0)));
     }
 
     private void givenFiles(File... files) {

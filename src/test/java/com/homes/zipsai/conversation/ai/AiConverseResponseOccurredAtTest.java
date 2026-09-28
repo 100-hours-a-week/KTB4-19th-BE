@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import com.homes.zipsai.conversation.ai.AiConverseResponse.DraftPatch;
 
-class AiConverseOccurredAtTest {
+class AiConverseResponseOccurredAtTest {
 
     @Test
     @DisplayName("오프셋이 없는 시각은 한국 시간으로 읽는다")

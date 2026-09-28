@@ -37,7 +37,7 @@ import com.homes.zipsai.global.exception.NotFoundException;
 import com.homes.zipsai.user.domain.User;
 
 @ExtendWith(MockitoExtension.class)
-class ManagerConversationReadTest {
+class ConversationServiceManagerReadTest {
 
     private static final long MANAGER_ID = 9L;
     private static final long OTHER_MANAGER_ID = 8L;
