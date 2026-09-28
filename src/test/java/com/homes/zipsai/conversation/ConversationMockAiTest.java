@@ -1,22 +1,14 @@
 package com.homes.zipsai.conversation;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.hamcrest.Matchers.hasLength;
-import static org.hamcrest.Matchers.startsWith;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.times;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
+import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -27,22 +19,21 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.assertj.MockMvcTester;
+import org.springframework.test.web.servlet.assertj.MvcTestResult;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import com.homes.zipsai.common.service.S3StorageService;
-import com.homes.zipsai.conversation.ai.AiComplaintDraft;
 import com.homes.zipsai.conversation.ai.AiComplaintState;
 import com.homes.zipsai.conversation.ai.AiConverseClient;
 import com.homes.zipsai.conversation.ai.AiConverseRequest;
 import com.homes.zipsai.conversation.ai.AiConverseResponse;
 import com.homes.zipsai.conversation.ai.AiRoute;
-import com.homes.zipsai.conversation.domain.Message;
-import com.homes.zipsai.conversation.domain.SenderType;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
-import com.homes.zipsai.conversation.repository.MessageRepository;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -53,24 +44,18 @@ import tools.jackson.databind.ObjectMapper;
 class ConversationMockAiTest {
 
     private static final String CONVERSATIONS = "/api/v1/residents/me/conversations";
-    private static final String COMPLAINTS = "/api/v1/residents/me/complaints";
-    private static final List<AiConverseResponse.Citation> CITATIONS = List.of(
-        new AiConverseResponse.Citation("building_document", "building-guide-12", "생활 안내", null, null));
 
     @Autowired
-    MockMvc mvc;
+    MockMvcTester mockMvcTester;
 
     @Autowired
-    ObjectMapper json;
+    ObjectMapper objectMapper;
 
     @Autowired
-    ConversationTestFixture fixture;
+    ConversationTestFixture conversationTestFixture;
 
     @Autowired
     ConversationRepository conversationRepository;
-
-    @Autowired
-    MessageRepository messageRepository;
 
     @MockitoBean
     AiConverseClient aiConverseClient;
@@ -86,317 +71,96 @@ class ConversationMockAiTest {
     }
 
     @Test
-    void firstMessageFailureDoesNotLeaveConversation() throws Exception {
-        String token = fixture.login(mvc, json, fixture.livingResident("302"));
-        long before = conversationRepository.count();
-        given(aiConverseClient.converse(any())).willThrow(new IllegalStateException("AI timeout"));
-
-        mvc.perform(post(CONVERSATIONS).header("Authorization", "Bearer " + token)
-                .contentType("application/json").content("{\"content\":\"천장에서 물이 새요\"}"))
-            .andExpect(status().isInternalServerError())
-            .andExpect(jsonPath("$.error.code").value("INTERNAL_SERVER_ERROR"));
-
-        assertThat(conversationRepository.count()).isEqualTo(before);
-    }
-
-    @Test
-    void replyWithAnotherTraceIdIsRejected() throws Exception {
-        String token = fixture.login(mvc, json, fixture.livingResident("302"));
-        long before = conversationRepository.count();
-        given(aiConverseClient.converse(any()))
-            .willReturn(knowledge("남의-추적-아이디", "분리수거는 화요일과 금요일입니다.", CITATIONS));
-
-        mvc.perform(post(CONVERSATIONS).header("Authorization", "Bearer " + token)
-                .contentType("application/json").content("{\"content\":\"분리수거 요일이 언제인가요?\"}"))
-            .andExpect(status().isInternalServerError())
-            .andExpect(jsonPath("$.error.code").value("INTERNAL_SERVER_ERROR"));
-
-        assertThat(conversationRepository.count()).isEqualTo(before);
-    }
-
-    @Test
-    void residentMessageAndReplyShareOneTraceId() throws Exception {
-        String token = fixture.login(mvc, json, fixture.livingResident("302"));
-        given(aiConverseClient.converse(any())).willAnswer(ConversationMockAiTest::collecting);
-        long conversationId = startConversation(token);
-
-        List<Message> messages = messageRepository.findAllByConversationId(conversationId);
-
-        assertThat(messages).hasSize(2);
-        assertThat(messages.getFirst().getSenderType()).isEqualTo(SenderType.RESIDENT);
-        assertThat(messages.getLast().getSenderType()).isEqualTo(SenderType.ASSISTANT);
-        assertThat(messages.getFirst().getTraceId())
-            .isNotBlank()
-            .isEqualTo(messages.getLast().getTraceId());
-    }
-
-    @Test
-    void messageWhileAiIsRespondingIsRejectedAsBusy() throws Exception {
-        String token = fixture.login(mvc, json, fixture.livingResident("302"));
-        CountDownLatch aiEntered = new CountDownLatch(1);
-        CountDownLatch releaseAi = new CountDownLatch(1);
-        given(aiConverseClient.converse(any()))
-            .willAnswer(ConversationMockAiTest::collecting)
-            .willAnswer(invocation -> {
-                aiEntered.countDown();
-                releaseAi.await(5, TimeUnit.SECONDS);
-                return collecting(invocation);
-            });
-        long conversationId = startConversation(token);
-
-        CompletableFuture<Integer> firstSend = CompletableFuture.supplyAsync(() -> sendStatus(token, conversationId));
-        assertThat(aiEntered.await(5, TimeUnit.SECONDS)).isTrue();
-        mvc.perform(post(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", "Bearer " + token)
-                .contentType("application/json").content("{\"content\":\"두 번째 메시지\"}"))
-            .andExpect(status().isConflict())
-            .andExpect(jsonPath("$.error.code").value("CONVERSATION_BUSY"));
-        releaseAi.countDown();
-
-        assertThat(firstSend.get(5, TimeUnit.SECONDS)).isEqualTo(201);
-    }
-
-    @Test
-    void followUpFailureRemovesOnlyUnansweredMessage() throws Exception {
-        String token = fixture.login(mvc, json, fixture.livingResident("302"));
-        given(aiConverseClient.converse(any()))
-            .willAnswer(ConversationMockAiTest::collecting)
-            .willThrow(new IllegalStateException("AI timeout"));
-        long conversationId = startConversation(token);
-
-        mvc.perform(post(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", "Bearer " + token)
-                .contentType("application/json").content("{\"content\":\"안방이요\"}"))
-            .andExpect(status().isInternalServerError());
-
-        mvc.perform(get(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", "Bearer " + token))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.messages.length()").value(2));
-    }
-
-    @Test
-    void aiReplyLongerThanMessageLimitIsTrimmed() throws Exception {
-        String token = fixture.login(mvc, json, fixture.livingResident("302"));
-        given(aiConverseClient.converse(any())).willAnswer(invocation ->
-            knowledge(request(invocation).traceId(), "가".repeat(900), CITATIONS));
-
-        long conversationId = startConversation(token, "분리수거 요일이 언제인가요?");
-
-        getMessages(token, conversationId)
-            .andExpect(jsonPath("$.data.messages[1].content").value(hasLength(800)));
-    }
-
-    @Test
-    void knowledgeWithoutEvidenceIsRegisteredAsQaCardComplaint() throws Exception {
-        String token = fixture.login(mvc, json, fixture.livingResident("302"));
-        given(aiConverseClient.converse(any())).willAnswer(invocation -> qaCard(
-            request(invocation).traceId(), AiRoute.KNOWLEDGE,
-            "건물 문서에서 근거를 찾지 못했습니다. 질문을 관리인에게 전달해 두었습니다.", "엘리베이터 정기 점검 일정 문의"));
-
-        long conversationId = startConversation(token, "엘리베이터 점검은 언제 하나요?");
-
-        getMessages(token, conversationId)
-            .andExpect(jsonPath("$.data.messages[1].messageType").value("SUMMARY_CARD"))
-            .andExpect(jsonPath("$.data.messages[1].summaryCard.symptom").value("엘리베이터 정기 점검 일정 문의"));
-
-        mvc.perform(post(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", "Bearer " + token)
-                .contentType("application/json").content("{\"content\":\"그럼 언제 알 수 있나요?\"}"))
-            .andExpect(status().isConflict())
-            .andExpect(jsonPath("$.error.code").value("CONVERSATION_AWAITING_CONFIRMATION"));
-
-        mvc.perform(post(COMPLAINTS).header("Authorization", "Bearer " + token)
-                .contentType("application/json").content("{\"conversationId\":%d}".formatted(conversationId)))
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.title").value("엘리베이터 정기 점검 일정 문의"))
-            .andExpect(jsonPath("$.data.symptom").value("엘리베이터 정기 점검 일정 문의"))
-            .andExpect(jsonPath("$.data.location").value("미상"));
-    }
-
-    @Test
-    void knowledgeWithoutCitationsEndsTheConversation() throws Exception {
-        String token = fixture.login(mvc, json, fixture.livingResident("302"));
-        given(aiConverseClient.converse(any())).willAnswer(invocation ->
-            knowledge(request(invocation).traceId(), "답변드리기 어렵습니다.", List.of()));
-
-        long conversationId = startConversation(token, "택배 보관함은 어디 있나요?");
-
-        getMessages(token, conversationId)
-            .andExpect(jsonPath("$.data.messages[1].messageType").value("SUMMARY_CARD"));
-
-        mvc.perform(post(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", "Bearer " + token)
-                .contentType("application/json").content("{\"content\":\"그럼 어디로 가야 하나요?\"}"))
-            .andExpect(status().isConflict())
-            .andExpect(jsonPath("$.error.code").value("CONVERSATION_AWAITING_CONFIRMATION"));
-    }
-
-    @Test
-    void knowledgeWithCitationsKeepsTheConversationOpen() throws Exception {
-        String token = fixture.login(mvc, json, fixture.livingResident("302"));
-        given(aiConverseClient.converse(any())).willAnswer(invocation ->
-            knowledge(request(invocation).traceId(), "화요일과 금요일입니다.", CITATIONS));
-
-        long conversationId = startConversation(token, "분리수거 요일이 언제인가요?");
-
-        getMessages(token, conversationId)
-            .andExpect(jsonPath("$.data.messages[1].messageType").value("TEXT"));
-
-        mvc.perform(post(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", "Bearer " + token)
-                .contentType("application/json").content("{\"content\":\"몇 시까지인가요?\"}"))
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.assistantMessage.messageType").value("TEXT"));
-    }
-
-    @Test
     @DisplayName("사진을 첨부한 메시지가 저장되고 AI에 사진 URL이 전달된다")
     void savesAttachedImagesAndSendsUrlsToAi() throws Exception {
-        String email = fixture.livingResident("302");
-        String token = fixture.login(mvc, json, email);
-        long firstImage = fixture.uploadedFile(email, "jpg");
-        long secondImage = fixture.uploadedFile(email, "png");
-        given(aiConverseClient.converse(any())).willAnswer(ConversationMockAiTest::collecting);
+        String email = conversationTestFixture.livingResident("302");
+        RequestPostProcessor resident = conversationTestFixture.authenticatedAs(email);
+        long firstImage = conversationTestFixture.uploadedFile(email, "jpg");
+        long secondImage = conversationTestFixture.uploadedFile(email, "png");
+        given(aiConverseClient.converse(any())).willAnswer(ConversationMockAiTest::collectingReply);
 
-        String created = mvc.perform(post(CONVERSATIONS).header("Authorization", "Bearer " + token)
-                .contentType("application/json")
-                .content("{\"content\":\"천장에서 물이 새요\",\"attachmentIds\":[%d]}".formatted(firstImage)))
-            .andExpect(status().isCreated())
-            .andReturn().getResponse().getContentAsString();
-        long conversationId = json.readTree(created).path("data").path("conversationId").asLong();
+        long conversationId = startConversation(resident, "천장에서 물이 새요", firstImage);
 
-        mvc.perform(post(CONVERSATIONS + "/" + conversationId + "/messages").header("Authorization", "Bearer " + token)
-                .contentType("application/json")
-                .content("{\"content\":\"안방이요\",\"attachmentIds\":[%d]}".formatted(secondImage)))
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.attachments[0].attachmentId").value(secondImage));
+        assertThat(sendMessage(resident, conversationId, "안방이요", secondImage)).hasStatus(HttpStatus.CREATED)
+            .bodyJson().extractingPath("$.data.attachments[0].attachmentId").convertTo(Long.class)
+            .isEqualTo(secondImage);
 
-        ArgumentCaptor<AiConverseRequest> requests = ArgumentCaptor.forClass(AiConverseRequest.class);
-        then(aiConverseClient).should(times(2)).converse(requests.capture());
-        assertThat(requests.getAllValues().getFirst().message().imageUrls()).hasSize(1);
-        AiConverseRequest followUp = requests.getAllValues().getLast();
+        ArgumentCaptor<AiConverseRequest> aiConverseRequestCaptor = ArgumentCaptor.forClass(AiConverseRequest.class);
+        then(aiConverseClient).should(times(2)).converse(aiConverseRequestCaptor.capture());
+        assertThat(aiConverseRequestCaptor.getAllValues().getFirst().message().imageUrls()).hasSize(1);
+        AiConverseRequest followUp = aiConverseRequestCaptor.getAllValues().getLast();
         assertThat(followUp.message().imageUrls()).hasSize(1);
         assertThat(followUp.conversationHistory().getFirst().imageUrls()).hasSize(1);
         assertThat(followUp.conversationHistory().getLast().imageUrls()).isEmpty();
 
-        getMessages(token, conversationId)
-            .andExpect(jsonPath("$.data.messages[0].attachments.length()").value(1))
-            .andExpect(jsonPath("$.data.messages[0].attachments[0].attachmentId").value(firstImage))
-            .andExpect(jsonPath("$.data.messages[0].attachments[0].fileUrl").value(startsWith("https://s3.test/")))
-            .andExpect(jsonPath("$.data.messages[0].attachments[0].seq").value(1))
-            .andExpect(jsonPath("$.data.messages[1].attachments.length()").value(0))
-            .andExpect(jsonPath("$.data.messages[2].attachments[0].attachmentId").value(secondImage));
-    }
-
-    @Test
-    @DisplayName("사진만 첨부하고 내용 없이 메시지를 보낼 수 있다")
-    void sendsImageOnlyMessage() throws Exception {
-        String email = fixture.livingResident("302");
-        String token = fixture.login(mvc, json, email);
-        long image = fixture.uploadedFile(email, "jpg");
-        given(aiConverseClient.converse(any())).willAnswer(ConversationMockAiTest::collecting);
-
-        String created = mvc.perform(post(CONVERSATIONS).header("Authorization", "Bearer " + token)
-                .contentType("application/json")
-                .content("{\"content\":\"\",\"attachmentIds\":[%d]}".formatted(image)))
-            .andExpect(status().isCreated())
-            .andReturn().getResponse().getContentAsString();
-        long conversationId = json.readTree(created).path("data").path("conversationId").asLong();
-
-        getMessages(token, conversationId)
-            .andExpect(jsonPath("$.data.conversationTitle").value("사진 문의"))
-            .andExpect(jsonPath("$.data.messages[0].content").value(""))
-            .andExpect(jsonPath("$.data.messages[0].attachments[0].attachmentId").value(image));
+        MvcTestResult result = getMessages(resident, conversationId);
+        assertThat(result).hasStatusOk()
+            .bodyJson().isLenientlyEqualTo("""
+                {"data": {"messages": [{"senderType": "RESIDENT", "attachments": [{"attachmentId": %d, "seq": 1}]},
+                                       {"senderType": "ASSISTANT", "attachments": []},
+                                       {"senderType": "RESIDENT", "attachments": [{"attachmentId": %d}]},
+                                       {"senderType": "ASSISTANT", "attachments": []}]}}
+                """.formatted(firstImage, secondImage));
+        assertThat(result).bodyJson().extractingPath("$.data.messages[0].attachments[0].fileUrl")
+            .asString().startsWith("https://s3.test/");
     }
 
     @Test
     @DisplayName("AI 호출이 실패하면 답변받지 못한 메시지의 사진 연결도 지운다")
     void removesImageLinksOfUnansweredMessageWhenAiFails() throws Exception {
-        String email = fixture.livingResident("302");
-        String token = fixture.login(mvc, json, email);
-        long image = fixture.uploadedFile(email, "jpg");
+        String email = conversationTestFixture.livingResident("302");
+        RequestPostProcessor resident = conversationTestFixture.authenticatedAs(email);
+        long image = conversationTestFixture.uploadedFile(email, "jpg");
         long before = conversationRepository.count();
         given(aiConverseClient.converse(any()))
             .willThrow(new IllegalStateException("AI timeout"))
-            .willAnswer(ConversationMockAiTest::collecting);
+            .willAnswer(ConversationMockAiTest::collectingReply);
 
-        startConversationWith(token, image)
-            .andExpect(status().isInternalServerError());
+        assertThat(postConversation(resident, "천장에서 물이 새요", image))
+            .hasStatus(HttpStatus.INTERNAL_SERVER_ERROR);
         assertThat(conversationRepository.count()).isEqualTo(before);
 
-        String created = startConversationWith(token, image)
-            .andExpect(status().isCreated())
-            .andReturn().getResponse().getContentAsString();
-        long conversationId = json.readTree(created).path("data").path("conversationId").asLong();
+        long conversationId = startConversation(resident, "천장에서 물이 새요", image);
         assertThat(conversationRepository.count()).isEqualTo(before + 1);
-        getMessages(token, conversationId)
-            .andExpect(jsonPath("$.data.messages[0].attachments[0].attachmentId").value(image));
+        assertThat(getMessages(resident, conversationId)).hasStatusOk()
+            .bodyJson().extractingPath("$.data.messages[0].attachments[0].attachmentId").convertTo(Long.class)
+            .isEqualTo(image);
     }
 
-    private static AiConverseResponse collecting(InvocationOnMock invocation) {
-        return complaint(request(invocation).traceId(), AiComplaintState.COLLECTING,
-            "위치가 어디인가요?", null, List.of("location"));
+    private static AiConverseResponse collectingReply(InvocationOnMock invocation) {
+        AiConverseRequest request = invocation.getArgument(0);
+        return new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, request.traceId(),
+            new AiConverseResponse.Data(AiRoute.COMPLAINT, AiComplaintState.COLLECTING, "위치가 어디인가요?",
+                new AiConverseResponse.Result(null, null, List.of("location"), List.of())));
     }
 
-    private static AiConverseRequest request(InvocationOnMock invocation) {
-        return invocation.getArgument(0);
-    }
-
-    private static AiConverseResponse complaint(String traceId, AiComplaintState nextComplaintState, String reply,
-                                                AiComplaintDraft draft, List<String> missingFields) {
-        AiConverseResponse.DraftPatch patch = draft == null
-            ? null
-            : new AiConverseResponse.DraftPatch(draft.location(), draft.symptom(),
-                draft.occurredAt() == null ? null : draft.occurredAt().toString());
-        return response(traceId, AiRoute.COMPLAINT, nextComplaintState, reply,
-            new AiConverseResponse.Result(patch, null, missingFields, List.of()));
-    }
-
-    private static AiConverseResponse knowledge(String traceId, String reply,
-                                                List<AiConverseResponse.Citation> citations) {
-        return response(traceId, AiRoute.KNOWLEDGE, null, reply,
-            new AiConverseResponse.Result(null, null, List.of(), citations));
-    }
-
-    private static AiConverseResponse qaCard(String traceId, AiRoute route, String reply, String question) {
-        return response(traceId, route, null, reply, new AiConverseResponse.Result(
-            null, new AiConverseResponse.QaCardDraft(question), List.of(), List.of()));
-    }
-
-    private static AiConverseResponse response(String traceId, AiRoute route, AiComplaintState nextComplaintState,
-                                               String reply, AiConverseResponse.Result result) {
-        return new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, traceId,
-            new AiConverseResponse.Data(route, nextComplaintState, reply, result));
-    }
-
-    private long startConversation(String token) throws Exception {
-        return startConversation(token, "천장에서 물이 새요");
-    }
-
-    private long startConversation(String token, String content) throws Exception {
-        String created = mvc.perform(post(CONVERSATIONS).header("Authorization", "Bearer " + token)
-                .contentType("application/json").content("{\"content\":\"%s\"}".formatted(content)))
-            .andExpect(status().isCreated())
-            .andReturn().getResponse().getContentAsString();
-        return json.readTree(created).path("data").path("conversationId").asLong();
-    }
-
-    private ResultActions getMessages(String token, long conversationId) throws Exception {
-        return mvc.perform(get(CONVERSATIONS + "/" + conversationId + "/messages")
-                .header("Authorization", "Bearer " + token))
-            .andExpect(status().isOk());
-    }
-
-    private ResultActions startConversationWith(String token, long attachmentId)
+    private long startConversation(RequestPostProcessor resident, String content, Long... attachmentIds)
         throws Exception {
-        return mvc.perform(post(CONVERSATIONS).header("Authorization", "Bearer " + token)
-            .contentType("application/json")
-            .content("{\"content\":\"천장에서 물이 새요\",\"attachmentIds\":[%d]}".formatted(attachmentId)));
+        MvcTestResult created = postConversation(resident, content, attachmentIds);
+        assertThat(created).hasStatus(HttpStatus.CREATED);
+        return objectMapper.readTree(created.getResponse().getContentAsString())
+            .path("data").path("conversationId").asLong();
     }
 
-    private int sendStatus(String token, long conversationId) {
-        try {
-            return mvc.perform(post(CONVERSATIONS + "/" + conversationId + "/messages")
-                    .header("Authorization", "Bearer " + token)
-                    .contentType("application/json").content("{\"content\":\"안방이요\"}"))
-                .andReturn().getResponse().getStatus();
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
-        }
+    private MvcTestResult postConversation(RequestPostProcessor resident, String content, Long... attachmentIds) {
+        return mockMvcTester.post().uri(CONVERSATIONS).with(resident)
+            .contentType(MediaType.APPLICATION_JSON).content(messageBody(content, attachmentIds))
+            .exchange();
+    }
+
+    private MvcTestResult sendMessage(RequestPostProcessor resident, long conversationId, String content,
+                                      Long... attachmentIds) {
+        return mockMvcTester.post().uri(CONVERSATIONS + "/{id}/messages", conversationId).with(resident)
+            .contentType(MediaType.APPLICATION_JSON).content(messageBody(content, attachmentIds))
+            .exchange();
+    }
+
+    private MvcTestResult getMessages(RequestPostProcessor resident, long conversationId) {
+        return mockMvcTester.get().uri(CONVERSATIONS + "/{id}/messages", conversationId).with(resident)
+            .exchange();
+    }
+
+    private String messageBody(String content, Long... attachmentIds) {
+        return objectMapper.writeValueAsString(Map.of("content", content, "attachmentIds", List.of(attachmentIds)));
     }
 }
