@@ -14,6 +14,8 @@ import org.springframework.web.client.RestClientException;
 import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.global.exception.ApiException;
 import com.homes.zipsai.global.exception.InternalServerException;
+import com.homes.zipsai.global.logging.StructuredLogger;
+import org.slf4j.MDC;
 
 @Component
 @ConditionalOnProperty(name = "app.ai.client", havingValue = "http")
@@ -24,23 +26,28 @@ public class HttpAiIndexingClient implements AiIndexingClient {
     private final RestClient restClient;
     private final String indexingPath;
     private final String apiKey;
+    private final StructuredLogger structuredLogger;
 
     public HttpAiIndexingClient(RestClient.Builder builder,
                                 @Value("${app.ai.base-url}") String baseUrl,
                                 @Value("${app.ai.indexing-path:/api/v3/ai/indexing/jobs}") String indexingPath,
-                                @Value("${app.ai.api-key:}") String apiKey) {
+                                @Value("${app.ai.api-key:}") String apiKey, StructuredLogger structuredLogger) {
         this.restClient = builder.baseUrl(baseUrl).build();
         this.indexingPath = indexingPath;
         this.apiKey = apiKey;
+        this.structuredLogger = structuredLogger;
     }
 
     @Override
     public void index(AiIndexingRequest request) {
+        String traceId = MDC.get("traceId");
+        long started = System.nanoTime();
         try {
             restClient.post()
                     .uri(indexingPath)
                     .contentType(MediaType.APPLICATION_JSON)
                     .headers(headers -> {
+                        if (traceId != null) headers.set("X-Trace-Id", traceId);
                         if (!apiKey.isBlank()) {
                             headers.set("X-API-Key", apiKey);
                         }
@@ -51,6 +58,7 @@ public class HttpAiIndexingClient implements AiIndexingClient {
                         throw toApiException(response.getStatusCode());
                     })
                     .toBodilessEntity();
+            if (traceId != null) structuredLogger.stageDone(traceId, indexingPath, "ai_api", (System.nanoTime() - started) / 1_000_000, "success");
         } catch (RestClientException exception) {
             LOGGER.error("AI 문서 색인 요청에 실패했습니다. buildingId={}, docId={}",
                     request.buildingId(), request.docId(), exception);

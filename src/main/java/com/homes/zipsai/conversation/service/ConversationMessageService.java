@@ -6,6 +6,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.homes.zipsai.conversation.ai.AiConverseClient;
@@ -16,17 +18,30 @@ import com.homes.zipsai.conversation.dto.response.MessageSendResponse;
 import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.global.exception.InternalServerException;
 
-import lombok.RequiredArgsConstructor;
+import com.homes.zipsai.global.logging.StructuredLogger;
 
 @Service
-@RequiredArgsConstructor
 public class ConversationMessageService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ConversationMessageService.class);
 
     private final ConversationService conversationService;
     private final AiConverseClient aiConverseClient;
+    private final StructuredLogger structuredLogger;
     private final Set<Long> conversationsWaitingForAi = ConcurrentHashMap.newKeySet();
+
+    /** Compatibility constructor for service unit tests that do not exercise structured logging. */
+    public ConversationMessageService(ConversationService conversationService, AiConverseClient aiConverseClient) {
+        this(conversationService, aiConverseClient, null);
+    }
+
+    @Autowired
+    public ConversationMessageService(ConversationService conversationService, AiConverseClient aiConverseClient,
+                                      StructuredLogger structuredLogger) {
+        this.conversationService = conversationService;
+        this.aiConverseClient = aiConverseClient;
+        this.structuredLogger = structuredLogger;
+    }
 
     public ConversationCreateResponse createConversation(Long userId, String content, List<Long> attachmentIds) {
         PendingAiReply pendingReply = conversationService.saveFirstMessage(userId, content, attachmentIds);
@@ -40,13 +55,20 @@ public class ConversationMessageService {
             throw new ConflictException(ConflictException.Reason.CONVERSATION_BUSY);
         }
         try {
-            PendingAiReply pendingReply =
-                conversationService.saveNextMessage(userId, conversationId, content, attachmentIds);
+            long dbStarted = System.nanoTime();
+            PendingAiReply pendingReply = conversationService.saveNextMessage(userId, conversationId, content, attachmentIds);
+            logDbStage(dbStarted);
             MessageResponse assistantMessage = askAiAndSaveReply(pendingReply);
             return MessageSendResponse.of(conversationId, pendingReply.residentMessage(), assistantMessage);
         } finally {
             conversationsWaitingForAi.remove(conversationId);
         }
+    }
+
+    private void logDbStage(long started) {
+        String traceId = MDC.get("traceId");
+        if (traceId != null && structuredLogger != null) structuredLogger.stageDone(traceId, "conversation", "mysql",
+            (System.nanoTime() - started) / 1_000_000, "success");
     }
 
     private MessageResponse askAiAndSaveReply(PendingAiReply pendingReply) {

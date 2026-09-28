@@ -10,6 +10,7 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import com.homes.zipsai.global.logging.StructuredLogger;
 
 import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.global.exception.ApiException;
@@ -28,24 +29,33 @@ public class HttpAiConverseClient implements AiConverseClient {
     private final RestClient restClient;
     private final String conversePath;
     private final ObjectMapper objectMapper;
+    private final StructuredLogger structuredLogger;
 
     public HttpAiConverseClient(RestClient.Builder builder, @Value("${app.ai.base-url}") String baseUrl,
-                                @Value("${app.ai.converse-path}") String conversePath, ObjectMapper objectMapper) {
+                                @Value("${app.ai.converse-path}") String conversePath, ObjectMapper objectMapper,
+                                StructuredLogger structuredLogger) {
         this.restClient = builder.baseUrl(baseUrl).build();
         this.conversePath = conversePath;
         this.objectMapper = objectMapper;
+        this.structuredLogger = structuredLogger;
+    }
+
+    /** Compatibility constructor for focused client tests. */
+    public HttpAiConverseClient(RestClient.Builder builder, String baseUrl, String conversePath,
+                                ObjectMapper objectMapper) {
+        this(builder, baseUrl, conversePath, objectMapper, new StructuredLogger(objectMapper));
     }
 
     @Override
     public AiConverseResponse converse(AiConverseRequest request) {
         String traceId = request.traceId();
-        LOGGER.info("AI 요청. traceId={}, body={}", traceId, request);
+        long started = System.nanoTime();
         String body = exchange(request, traceId);
-        LOGGER.info("AI 응답 원문. traceId={}, body={}", traceId, body);
+        structuredLogger.stageDone(traceId, conversePath, "ai_api", (System.nanoTime() - started) / 1_000_000, "success");
         try {
             return objectMapper.readValue(body, AiConverseResponse.class);
         } catch (JacksonException e) {
-            LOGGER.error("AI 응답을 읽지 못했습니다. traceId={}, body={}", traceId, body, e);
+            LOGGER.error("AI 응답을 읽지 못했습니다. traceId={}", traceId, e);
             throw new AiUnavailableException();
         }
     }
@@ -55,6 +65,7 @@ public class HttpAiConverseClient implements AiConverseClient {
             return restClient.post()
                 .uri(conversePath)
                 .contentType(MediaType.APPLICATION_JSON)
+                .header("X-Trace-Id", traceId)
                 .body(request)
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, (httpRequest, response) -> {

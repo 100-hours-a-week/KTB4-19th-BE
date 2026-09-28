@@ -121,8 +121,8 @@ class HttpAiConverseClientTest {
     }
 
     @Test
-    @DisplayName("응답을 읽지 못하면 원문을 로그에 남긴다")
-    void logsRawBodyWhenResponseIsUnreadable() {
+    @DisplayName("AI 호출이 실패하면 응답 원문을 로그에 남기지 않는다")
+    void doesNotLogRawBodyWhenResponseIsUnreadable() {
         ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
             org.slf4j.LoggerFactory.getLogger(HttpAiConverseClient.class);
         ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
@@ -138,7 +138,7 @@ class HttpAiConverseClientTest {
                 .isInstanceOf(AiUnavailableException.class);
             assertThat(appender.list)
                 .anyMatch(event -> event.getFormattedMessage().contains("읽지 못했습니다")
-                    && event.getFormattedMessage().contains("12345"));
+                    && !event.getFormattedMessage().contains("12345"));
         } finally {
             logger.detachAppender(appender);
         }
