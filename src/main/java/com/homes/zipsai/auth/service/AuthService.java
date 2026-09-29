@@ -85,6 +85,9 @@ public class AuthService {
     }
 
     public Tokens login(String emailInput, String passwordInput) {
+        if (emailInput != null && !emailInput.equals(emailInput.trim())) {
+            throw UserInput.invalid("email", Reason.INVALID_EMAIL_FORMAT);
+        }
         String email = UserInput.email(emailInput);
         String password = UserInput.password(passwordInput);
         User user = userRepository.findByEmail(email).orElse(null);
