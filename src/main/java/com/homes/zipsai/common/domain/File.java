@@ -37,7 +37,6 @@ public class File extends BaseTimeEntity {
     @Column(name = "file_size", nullable = false)
     private int fileSize;
 
-    // jpg, png, pdf
     @Column(name = "file_type", nullable = false, length = 50)
     private String fileType;
 

@@ -14,7 +14,6 @@ import org.springframework.stereotype.Component;
 import com.homes.zipsai.global.exception.ApiException;
 import com.homes.zipsai.global.exception.UnauthorizedException;
 
-/** Converts verified JWT claims into the principal used by the application. */
 @Component
 public class AccessTokenAuthenticationConverter
         implements Converter<Jwt, AbstractAuthenticationToken> {

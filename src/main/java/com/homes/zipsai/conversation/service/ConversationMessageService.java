@@ -30,7 +30,6 @@ public class ConversationMessageService {
     private final StructuredLogger structuredLogger;
     private final Set<Long> conversationsWaitingForAi = ConcurrentHashMap.newKeySet();
 
-    /** Compatibility constructor for service unit tests that do not exercise structured logging. */
     public ConversationMessageService(ConversationService conversationService, AiConverseClient aiConverseClient) {
         this(conversationService, aiConverseClient, null);
     }
