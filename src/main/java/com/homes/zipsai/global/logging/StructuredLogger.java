@@ -79,10 +79,29 @@ public class StructuredLogger {
     }
 
     private void log(Map<String, Object> event) {
+        if (!isProdProfile()) {
+            return;
+        }
         try {
             LOGGER.info(objectMapper.writeValueAsString(event));
         } catch (JacksonException ignored) {
             LOGGER.info("structured_event_serialization_failed");
         }
+    }
+
+    private boolean isProdProfile() {
+        String profiles = System.getProperty("spring.profiles.active");
+        if (profiles == null || profiles.isBlank()) {
+            profiles = System.getenv("SPRING_PROFILES_ACTIVE");
+        }
+        if (profiles == null) {
+            return false;
+        }
+        for (String profile : profiles.split(",")) {
+            if ("prod".equals(profile.trim())) {
+                return true;
+            }
+        }
+        return false;
     }
 }
