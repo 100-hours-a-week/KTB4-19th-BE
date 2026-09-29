@@ -15,7 +15,7 @@ import tools.jackson.databind.PropertyNamingStrategies;
 import tools.jackson.databind.annotation.JsonNaming;
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-public record AiConverseResponse(String code, String traceId, Data data) {
+public record AiConverseResponse(String code, String turnId, Data data) {
 
     public static final String SUCCESS_CODE = "ai_response_success";
 

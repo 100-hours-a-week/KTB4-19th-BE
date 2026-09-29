@@ -9,7 +9,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-import org.slf4j.MDC;
 import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -181,8 +180,8 @@ public class ConversationService {
             messageType = MessageType.SUMMARY_CARD;
         }
         String reply = TextUtils.truncate(aiResponse.reply(), Message.CONTENT_MAX_LENGTH);
-        String traceId = pendingReply.aiRequest().traceId();
-        Message assistantMessage = saveMessage(conversation, reply, SenderType.ASSISTANT, messageType, traceId);
+        String turnId = pendingReply.aiRequest().turnId();
+        Message assistantMessage = saveMessage(conversation, reply, SenderType.ASSISTANT, messageType, turnId);
         return MessageResponse.of(assistantMessage, List.of(), summaryCardOf(conversation, List.of(assistantMessage)));
     }
 
@@ -307,21 +306,17 @@ public class ConversationService {
     }
 
     private Message saveResidentMessage(Conversation conversation, String content) {
-        String traceId = MDC.get("traceId");
-        if (traceId == null || traceId.isBlank()) {
-            traceId = UUID.randomUUID().toString();
-        }
-        return saveMessage(conversation, content, SenderType.RESIDENT, MessageType.TEXT, traceId);
+        return saveMessage(conversation, content, SenderType.RESIDENT, MessageType.TEXT, UUID.randomUUID().toString());
     }
 
     private Message saveMessage(Conversation conversation, String content, SenderType senderType,
-                                MessageType messageType, String traceId) {
+                                MessageType messageType, String turnId) {
         Message message = messageRepository.save(Message.builder()
             .conversation(conversation)
             .content(content)
             .senderType(senderType)
             .messageType(messageType)
-            .traceId(traceId)
+            .turnId(turnId)
             .build());
         conversation.updateLastMessageAt(message.getCreatedAt());
         return message;
