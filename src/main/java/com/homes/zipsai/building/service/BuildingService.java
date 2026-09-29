@@ -83,9 +83,12 @@ public class BuildingService {
     @Transactional(readOnly = true)
     public ManagerRoomSummaryResponse getRoomSummary(Long managerId) {
         Building building = ownedBuilding(managerId);
-        long livingCount = roomRepository.countByBuilding_IdAndStatusAndDeletedAtIsNull(building.getId(), RoomStatus.LIVING);
-        long invitedCount = roomRepository.countByBuilding_IdAndStatusAndDeletedAtIsNull(building.getId(), RoomStatus.INVITED);
-        long emptyCount = roomRepository.countByBuilding_IdAndStatusAndDeletedAtIsNull(building.getId(), RoomStatus.EMPTY);
+        long livingCount = roomRepository.countByBuilding_IdAndStatusAndDeletedAtIsNull(
+                building.getId(), RoomStatus.LIVING);
+        long invitedCount = roomRepository.countByBuilding_IdAndStatusAndDeletedAtIsNull(
+                building.getId(), RoomStatus.INVITED);
+        long emptyCount = roomRepository.countByBuilding_IdAndStatusAndDeletedAtIsNull(
+                building.getId(), RoomStatus.EMPTY);
         return new ManagerRoomSummaryResponse(
                 livingCount,
                 invitedCount,

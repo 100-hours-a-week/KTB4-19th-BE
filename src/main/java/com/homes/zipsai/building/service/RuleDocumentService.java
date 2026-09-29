@@ -61,7 +61,8 @@ public class RuleDocumentService {
     public List<RuleDocumentResponse> list(Long userId) {
         Building building = buildingRepository.findByManager_IdAndDeletedAtIsNull(userId)
                 .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.BUILDING));
-        return documentRepository.findAllByBuilding_IdAndValidTrueAndDeletedAtIsNullOrderByUpdatedAtDesc(building.getId())
+        return documentRepository.findAllByBuilding_IdAndValidTrueAndDeletedAtIsNullOrderByUpdatedAtDesc(
+                building.getId())
                 .stream().map(this::response).toList();
     }
 
