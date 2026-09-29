@@ -28,6 +28,11 @@ public class StructuredLogger {
     }
 
     public void stageDone(String traceId, String route, String stage, long durationMs, String outcome) {
+        stageDone(traceId, route, stage, durationMs, outcome, null);
+    }
+
+    public void stageDone(String traceId, String route, String stage, long durationMs,
+                          String outcome, String errorCode) {
         if ("mysql".equals(stage)) {
             MDC.put("dbMs", Long.toString(durationMs));
         }
@@ -38,7 +43,7 @@ public class StructuredLogger {
         fields.put("stage", stage);
         fields.put("duration_ms", durationMs);
         fields.put("outcome", normalizeOutcome(outcome));
-        fields.put("error_code", MDC.get(ERROR_CODE));
+        fields.put("error_code", "fail".equals(outcome) ? errorCode : null);
         log(event("stage_done", traceId, route, fields));
     }
 
@@ -78,7 +83,9 @@ public class StructuredLogger {
         Map<String, Object> event = new LinkedHashMap<>();
         event.put("timestamp", Instant.now().toString()); event.put("level", "INFO");
         event.put("service", "backend"); event.put("event", name);
-        event.put("trace_id", traceId); event.put("route", route); event.putAll(fields);
+        event.put("trace_id", traceId);
+        event.put("route", MDC.get("route") != null ? MDC.get("route") : route);
+        event.putAll(fields);
         return event;
     }
 

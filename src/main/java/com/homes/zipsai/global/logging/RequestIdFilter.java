@@ -9,12 +9,15 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 import org.slf4j.MDC;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import lombok.RequiredArgsConstructor;
 
 @Component
+@Order(Ordered.HIGHEST_PRECEDENCE)
 @RequiredArgsConstructor
 public class RequestIdFilter extends OncePerRequestFilter {
     private static final String TRACE_ID = "traceId";
@@ -26,6 +29,8 @@ public class RequestIdFilter extends OncePerRequestFilter {
         String traceId = UUID.randomUUID().toString();
         long started = System.nanoTime();
         MDC.put(TRACE_ID, traceId);
+        MDC.put("route", request.getRequestURI());
+        response.setHeader("X-Request-Id", traceId);
         MDC.remove("dbMs");
         MDC.remove("aiApiMs");
         MDC.remove(StructuredLogger.STATUS_CODE);
@@ -37,6 +42,7 @@ public class RequestIdFilter extends OncePerRequestFilter {
             structuredLogger.requestDone(traceId, request.getRequestURI(), request.getMethod(),
                 response.getStatus(), (System.nanoTime() - started) / 1_000_000, null);
             MDC.remove(TRACE_ID);
+            MDC.remove("route");
             MDC.remove("dbMs");
             MDC.remove("aiApiMs");
             MDC.remove(StructuredLogger.STATUS_CODE);
