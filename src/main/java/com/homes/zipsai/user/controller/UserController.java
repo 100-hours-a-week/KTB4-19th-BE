@@ -54,7 +54,6 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.data(service.onboardingStatus(principal)));
     }
 
-    // V3_P2: NONE에서 최초 한 번만 역할을 선택한다.
     @PatchMapping("/me")
     @Operation(summary = "내 프로필·역할 변경")
     public ResponseEntity<ApiResponse<UserPatchResponse>> patch(

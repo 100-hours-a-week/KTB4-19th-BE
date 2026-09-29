@@ -56,7 +56,6 @@ public class User extends BaseTimeEntity {
     @Column(name = "user_status", nullable = false, length = 10)
     private UserStatus status;
 
-    // 역할 변경 시 증가시켜 기존 access token을 무효화한다.
     @Column(name = "auth_version", nullable = false)
     private long authVersion;
 
