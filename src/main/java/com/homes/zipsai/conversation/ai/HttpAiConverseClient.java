@@ -10,12 +10,12 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
-import com.homes.zipsai.global.logging.StructuredLogger;
 
 import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.global.exception.ApiException;
 import com.homes.zipsai.global.exception.InternalServerException;
 import com.homes.zipsai.global.exception.TooManyRequestsException;
+import com.homes.zipsai.global.logging.StructuredLogger;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
@@ -50,7 +50,8 @@ public class HttpAiConverseClient implements AiConverseClient {
         String traceId = request.traceId();
         long started = System.nanoTime();
         String body = exchange(request, traceId);
-        structuredLogger.stageDone(traceId, conversePath, "ai_api", (System.nanoTime() - started) / 1_000_000, "success");
+        structuredLogger.stageDone(traceId, conversePath, "ai_api",
+            (System.nanoTime() - started) / 1_000_000, "success");
         try {
             return objectMapper.readValue(body, AiConverseResponse.class);
         } catch (JacksonException e) {

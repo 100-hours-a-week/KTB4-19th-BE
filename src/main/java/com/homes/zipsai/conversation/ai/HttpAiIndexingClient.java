@@ -2,8 +2,9 @@ package com.homes.zipsai.conversation.ai;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -15,7 +16,6 @@ import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.global.exception.ApiException;
 import com.homes.zipsai.global.exception.InternalServerException;
 import com.homes.zipsai.global.logging.StructuredLogger;
-import org.slf4j.MDC;
 
 @Component
 @ConditionalOnProperty(name = "app.ai.client", havingValue = "http")
@@ -47,7 +47,9 @@ public class HttpAiIndexingClient implements AiIndexingClient {
                     .uri(indexingPath)
                     .contentType(MediaType.APPLICATION_JSON)
                     .headers(headers -> {
-                        if (traceId != null) headers.set("X-Trace-Id", traceId);
+                        if (traceId != null) {
+                            headers.set("X-Trace-Id", traceId);
+                        }
                         if (!apiKey.isBlank()) {
                             headers.set("X-API-Key", apiKey);
                         }
@@ -58,7 +60,10 @@ public class HttpAiIndexingClient implements AiIndexingClient {
                         throw toApiException(response.getStatusCode());
                     })
                     .toBodilessEntity();
-            if (traceId != null) structuredLogger.stageDone(traceId, indexingPath, "ai_api", (System.nanoTime() - started) / 1_000_000, "success");
+            if (traceId != null) {
+                structuredLogger.stageDone(traceId, indexingPath, "ai_api",
+                    (System.nanoTime() - started) / 1_000_000, "success");
+            }
         } catch (RestClientException exception) {
             LOGGER.error("AI 문서 색인 요청에 실패했습니다. buildingId={}, docId={}",
                     request.buildingId(), request.docId(), exception);

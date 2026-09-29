@@ -17,7 +17,6 @@ import com.homes.zipsai.conversation.dto.response.MessageResponse;
 import com.homes.zipsai.conversation.dto.response.MessageSendResponse;
 import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.global.exception.InternalServerException;
-
 import com.homes.zipsai.global.logging.StructuredLogger;
 
 @Service
@@ -55,7 +54,8 @@ public class ConversationMessageService {
         }
         try {
             long dbStarted = System.nanoTime();
-            PendingAiReply pendingReply = conversationService.saveNextMessage(userId, conversationId, content, attachmentIds);
+            PendingAiReply pendingReply = conversationService.saveNextMessage(
+                userId, conversationId, content, attachmentIds);
             logDbStage(dbStarted);
             MessageResponse assistantMessage = askAiAndSaveReply(pendingReply);
             return MessageSendResponse.of(conversationId, pendingReply.residentMessage(), assistantMessage);
@@ -66,8 +66,10 @@ public class ConversationMessageService {
 
     private void logDbStage(long started) {
         String traceId = MDC.get("traceId");
-        if (traceId != null && structuredLogger != null) structuredLogger.stageDone(traceId, "conversation", "mysql",
-            (System.nanoTime() - started) / 1_000_000, "success");
+        if (traceId != null && structuredLogger != null) {
+            structuredLogger.stageDone(traceId, "conversation", "mysql",
+                (System.nanoTime() - started) / 1_000_000, "success");
+        }
     }
 
     private MessageResponse askAiAndSaveReply(PendingAiReply pendingReply) {
