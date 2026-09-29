@@ -59,9 +59,9 @@ public class UserController {
     public ResponseEntity<ApiResponse<UserPatchResponse>> patch(
             @AuthenticationPrincipal AuthPrincipal principal,
             @RequestBody UserPatchRequest userPatchRequest
-    ) {
+        ) {
         return ResponseEntity.ok(ApiResponse.data(service.patch(
-                principal, userPatchRequest.email(), userPatchRequest.userRole(), userPatchRequest.userName(),
+                principal.userId(), userPatchRequest.email(), userPatchRequest.userRole(), userPatchRequest.userName(),
                 userPatchRequest.phone(), userPatchRequest.agreements())));
     }
 }
