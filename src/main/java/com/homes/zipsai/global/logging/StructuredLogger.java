@@ -17,19 +17,27 @@ public class StructuredLogger {
     private static final Logger LOGGER = LoggerFactory.getLogger("structured-events");
     private final ObjectMapper objectMapper;
 
-    public StructuredLogger(ObjectMapper objectMapper) { this.objectMapper = objectMapper; }
+    public StructuredLogger(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+    }
 
     public void requestStarted(String traceId, String route, String method) {
         log(event("request_started", traceId, route, Map.of("method", method)));
     }
 
     public void stageDone(String traceId, String route, String stage, long durationMs, String outcome) {
-        if ("mysql".equals(stage)) MDC.put("dbMs", Long.toString(durationMs));
-        if ("ai_api".equals(stage)) MDC.put("aiApiMs", Long.toString(durationMs));
-        log(event("stage_done", traceId, route, Map.of("stage", stage, "duration_ms", durationMs, "outcome", outcome)));
+        if ("mysql".equals(stage)) {
+            MDC.put("dbMs", Long.toString(durationMs));
+        }
+        if ("ai_api".equals(stage)) {
+            MDC.put("aiApiMs", Long.toString(durationMs));
+        }
+        log(event("stage_done", traceId, route,
+            Map.of("stage", stage, "duration_ms", durationMs, "outcome", outcome)));
     }
 
-    public void requestDone(String traceId, String route, String method, int statusCode, long totalMs, String errorCode) {
+    public void requestDone(String traceId, String route, String method, int statusCode,
+                            long totalMs, String errorCode) {
         Map<String, Object> fields = new LinkedHashMap<>();
         fields.put("method", method); fields.put("status_code", statusCode);
         fields.put("outcome", statusCode >= 400 ? "error" : "success");
@@ -53,7 +61,10 @@ public class StructuredLogger {
     }
 
     private void log(Map<String, Object> event) {
-        try { LOGGER.info(objectMapper.writeValueAsString(event)); }
-        catch (JacksonException ignored) { LOGGER.info("structured_event_serialization_failed"); }
+        try {
+            LOGGER.info(objectMapper.writeValueAsString(event));
+        } catch (JacksonException ignored) {
+            LOGGER.info("structured_event_serialization_failed");
+        }
     }
 }

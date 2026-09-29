@@ -6,11 +6,11 @@ import jakarta.validation.Valid;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.homes.zipsai.building.dto.RuleDocumentCreateRequest;
@@ -36,7 +36,8 @@ public class RuleDocumentController {
     public ResponseEntity<ApiResponse<RuleDocumentResponse>> create(
             @AuthenticationPrincipal AuthPrincipal principal,
             @Valid @RequestBody RuleDocumentCreateRequest ruleDocumentCreateRequest) {
-        return ResponseEntity.status(201).body(ApiResponse.data(ruleDocumentService.create(principal.userId(), ruleDocumentCreateRequest)));
+        return ResponseEntity.status(201).body(ApiResponse.data(
+                ruleDocumentService.create(principal.userId(), ruleDocumentCreateRequest)));
     }
 
     @GetMapping
@@ -58,8 +59,8 @@ public class RuleDocumentController {
             @AuthenticationPrincipal AuthPrincipal principal,
             @org.springframework.web.bind.annotation.PathVariable long documentId,
             @Valid @RequestBody RuleDocumentUpdateRequest ruleDocumentUpdateRequest) {
-        return ApiResponse.data(ruleDocumentService.update(
-                principal.userId(), documentId, ruleDocumentUpdateRequest.title(), ruleDocumentUpdateRequest.attachmentId()));
+        return ApiResponse.data(ruleDocumentService.update(principal.userId(), documentId,
+                ruleDocumentUpdateRequest.title(), ruleDocumentUpdateRequest.attachmentId()));
     }
 
     @DeleteMapping("/{documentId}")

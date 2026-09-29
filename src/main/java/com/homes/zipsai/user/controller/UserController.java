@@ -12,15 +12,15 @@ import org.springframework.web.bind.annotation.RestController;
 import com.homes.zipsai.global.response.ApiResponse;
 import com.homes.zipsai.global.security.AuthPrincipal;
 import com.homes.zipsai.user.dto.EmailAvailabilityResponse;
+import com.homes.zipsai.user.dto.OnboardingStatusResponse;
 import com.homes.zipsai.user.dto.UserPatchRequest;
 import com.homes.zipsai.user.dto.UserPatchResponse;
 import com.homes.zipsai.user.dto.UserProfileResponse;
-import com.homes.zipsai.user.dto.OnboardingStatusResponse;
 import com.homes.zipsai.user.service.UserService;
 
-import lombok.RequiredArgsConstructor;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequestMapping("/api/v1/users")
@@ -54,7 +54,6 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.data(service.onboardingStatus(principal)));
     }
 
-    // V3_P2: NONE에서 최초 한 번만 역할을 선택한다.
     @PatchMapping("/me")
     @Operation(summary = "내 프로필·역할 변경")
     public ResponseEntity<ApiResponse<UserPatchResponse>> patch(

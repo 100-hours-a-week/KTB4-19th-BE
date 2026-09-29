@@ -29,9 +29,9 @@ import com.homes.zipsai.global.security.AuthProperties;
 import com.homes.zipsai.user.domain.UserRole;
 import com.homes.zipsai.user.dto.UserResponse;
 
-import lombok.RequiredArgsConstructor;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequiredArgsConstructor

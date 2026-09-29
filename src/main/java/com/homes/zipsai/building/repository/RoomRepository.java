@@ -21,7 +21,6 @@ public interface RoomRepository extends JpaRepository<Room, Long> {
 
     long countByBuilding_IdAndStatusAndDeletedAtIsNull(Long buildingId, RoomStatus status);
 
-    // 요청한 번호 중 건물에 이미 등록된 호실이 하나라도 있는지 확인합니다.
     boolean existsByBuilding_IdAndRoomNoIn(Long buildingId, Collection<String> roomNos);
 
     @EntityGraph(attributePaths = {"building", "resident"})

@@ -45,7 +45,6 @@ public class RoomConnectionService {
         }
 
         Room room = invitationCode.getRoom();
-        // 초대코드 연결과 입주민 역할 부여를 같은 트랜잭션에서 처리한다.
         if (resident.getRole() == UserRole.NONE) {
             resident.selectRole(UserRole.RESIDENT);
         }
