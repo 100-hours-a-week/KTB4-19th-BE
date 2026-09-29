@@ -165,10 +165,9 @@ public class UserService {
     }
 
     @Transactional
-    public UserPatchResponse patch(AuthPrincipal principal, String requestedEmail, UserRole requestedRole,
-                                   String requestedName, String requestedPhone,
-                                   List<AgreementRequest> agreementRequests) {
-        User user = userRepository.findLocked(principal.userId()).orElseThrow(UnauthorizedException::new);
+    public UserPatchResponse patch(Long userId, String requestedEmail, UserRole requestedRole, String requestedName,
+                                   String requestedPhone, List<AgreementRequest> agreementRequests) {
+        User user = userRepository.findLocked(userId).orElseThrow(UnauthorizedException::new);
         if (user.getStatus() != UserStatus.ACTIVE) {
             throw new UnauthorizedException();
         }
