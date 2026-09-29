@@ -6,6 +6,7 @@ import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.context.MessageSourceResolvable;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.ResponseEntity;
@@ -33,9 +34,12 @@ import com.homes.zipsai.global.response.ApiResponse;
 @RestControllerAdvice
 public class ApiExceptionHandler {
     private static final Logger LOGGER = LoggerFactory.getLogger(ApiExceptionHandler.class);
-
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<?> handle(ApiException exception) {
+        MDC.put("statusCode", Integer.toString(exception.status));
+        if (exception.code != null) {
+            MDC.put("errorCode", exception.code);
+        }
         return ResponseEntity.status(exception.status).body(ApiResponse.error(exception));
     }
 

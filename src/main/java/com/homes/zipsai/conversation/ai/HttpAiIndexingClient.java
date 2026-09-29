@@ -47,9 +47,6 @@ public class HttpAiIndexingClient implements AiIndexingClient {
                     .uri(indexingPath)
                     .contentType(MediaType.APPLICATION_JSON)
                     .headers(headers -> {
-                        if (traceId != null) {
-                            headers.set("X-Trace-Id", traceId);
-                        }
                         if (!apiKey.isBlank()) {
                             headers.set("X-API-Key", apiKey);
                         }
@@ -62,7 +59,7 @@ public class HttpAiIndexingClient implements AiIndexingClient {
                     .toBodilessEntity();
             if (traceId != null) {
                 structuredLogger.stageDone(traceId, indexingPath, "ai_api",
-                    (System.nanoTime() - started) / 1_000_000, "success");
+                    (System.nanoTime() - started) / 1_000_000, "ok");
             }
         } catch (RestClientException exception) {
             LOGGER.error("AI 문서 색인 요청에 실패했습니다. buildingId={}, docId={}",

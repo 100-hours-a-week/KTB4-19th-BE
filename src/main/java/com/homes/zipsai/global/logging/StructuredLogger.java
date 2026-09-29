@@ -14,6 +14,8 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 public class StructuredLogger {
+    public static final String ERROR_CODE = "errorCode";
+    public static final String STATUS_CODE = "statusCode";
     private static final Logger LOGGER = LoggerFactory.getLogger("structured-events");
     private final ObjectMapper objectMapper;
 
@@ -32,24 +34,44 @@ public class StructuredLogger {
         if ("ai_api".equals(stage)) {
             MDC.put("aiApiMs", Long.toString(durationMs));
         }
-        log(event("stage_done", traceId, route,
-            Map.of("stage", stage, "duration_ms", durationMs, "outcome", outcome)));
+        Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put("stage", stage);
+        fields.put("duration_ms", durationMs);
+        fields.put("outcome", normalizeOutcome(outcome));
+        fields.put("error_code", MDC.get(ERROR_CODE));
+        log(event("stage_done", traceId, route, fields));
+    }
+
+    public void markError(int statusCode, String errorCode) {
+        MDC.put(STATUS_CODE, Integer.toString(statusCode));
+        if (errorCode != null) {
+            MDC.put(ERROR_CODE, errorCode);
+        }
     }
 
     public void requestDone(String traceId, String route, String method, int statusCode,
                             long totalMs, String errorCode) {
         Map<String, Object> fields = new LinkedHashMap<>();
-        fields.put("method", method); fields.put("status_code", statusCode);
-        fields.put("outcome", statusCode >= 400 ? "error" : "success");
+        int finalStatusCode = statusCode >= 400 ? statusCode : numberOrDefault(MDC.get(STATUS_CODE), statusCode);
+        fields.put("method", method); fields.put("status_code", finalStatusCode);
+        fields.put("outcome", finalStatusCode >= 400 ? "fail" : "ok");
         fields.put("total_ms", totalMs);
         fields.put("db_ms", numberOrNull(MDC.get("dbMs")));
         fields.put("ai_api_ms", numberOrNull(MDC.get("aiApiMs")));
-        fields.put("error_code", errorCode);
+        fields.put("error_code", errorCode != null ? errorCode : MDC.get(ERROR_CODE));
         log(event("request_done", traceId, route, fields));
     }
 
     private Object numberOrNull(String value) {
         return value == null ? null : Long.valueOf(value);
+    }
+
+    private int numberOrDefault(String value, int defaultValue) {
+        return value == null ? defaultValue : Integer.parseInt(value);
+    }
+
+    private String normalizeOutcome(String outcome) {
+        return "success".equals(outcome) ? "ok" : "error".equals(outcome) ? "fail" : outcome;
     }
 
     private Map<String, Object> event(String name, String traceId, String route, Map<String, Object> fields) {
@@ -61,10 +83,29 @@ public class StructuredLogger {
     }
 
     private void log(Map<String, Object> event) {
+        if (!isProdProfile()) {
+            return;
+        }
         try {
             LOGGER.info(objectMapper.writeValueAsString(event));
         } catch (JacksonException ignored) {
             LOGGER.info("structured_event_serialization_failed");
         }
+    }
+
+    private boolean isProdProfile() {
+        String profiles = System.getProperty("spring.profiles.active");
+        if (profiles == null || profiles.isBlank()) {
+            profiles = System.getenv("SPRING_PROFILES_ACTIVE");
+        }
+        if (profiles == null) {
+            return false;
+        }
+        for (String profile : profiles.split(",")) {
+            if ("prod".equals(profile.trim())) {
+                return true;
+            }
+        }
+        return false;
     }
 }
