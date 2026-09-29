@@ -2,6 +2,7 @@ package com.homes.zipsai.conversation.ai;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
@@ -42,15 +43,16 @@ public class HttpAiConverseClient implements AiConverseClient {
 
     @Override
     public AiConverseResponse converse(AiConverseRequest request) {
-        String traceId = request.traceId();
+        String turnId = request.turnId();
+        String traceId = MDC.get("traceId");
         long started = System.nanoTime();
         String outcome = "ok";
         String errorCode = null;
         try {
-            String body = exchange(request, traceId);
+            String body = exchange(request, turnId);
             return objectMapper.readValue(body, AiConverseResponse.class);
         } catch (JacksonException e) {
-            LOGGER.error("AI 응답을 읽지 못했습니다. traceId={}", traceId);
+            LOGGER.error("AI 응답을 읽지 못했습니다. turnId={}", turnId);
             outcome = "fail";
             errorCode = "AI_UNAVAILABLE";
             throw new AiUnavailableException();
@@ -59,12 +61,14 @@ public class HttpAiConverseClient implements AiConverseClient {
             errorCode = e instanceof ApiException apiException ? apiException.code : "AI_UNAVAILABLE";
             throw e;
         } finally {
-            structuredLogger.stageDone(traceId, conversePath, "ai_api",
-                (System.nanoTime() - started) / 1_000_000, outcome, errorCode);
+            if (traceId != null) {
+                structuredLogger.stageDone(traceId, conversePath, "ai_api",
+                    (System.nanoTime() - started) / 1_000_000, outcome, errorCode);
+            }
         }
     }
 
-    private String exchange(AiConverseRequest request, String traceId) {
+    private String exchange(AiConverseRequest request, String turnId) {
         try {
             return restClient.post()
                 .uri(conversePath)
@@ -72,17 +76,17 @@ public class HttpAiConverseClient implements AiConverseClient {
                 .body(request)
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, (httpRequest, response) -> {
-                    throw toApiException(response.getStatusCode(), traceId);
+                    throw toApiException(response.getStatusCode(), turnId);
                 })
                 .body(String.class);
         } catch (RestClientException e) {
-            LOGGER.error("AI 서버를 호출하지 못했습니다. traceId={}", traceId);
+            LOGGER.error("AI 서버를 호출하지 못했습니다. turnId={}", turnId);
             throw new AiUnavailableException();
         }
     }
 
-    private ApiException toApiException(HttpStatusCode status, String traceId) {
-        LOGGER.error("AI 서버가 오류로 응답했습니다. traceId={}, status={}", traceId, status.value());
+    private ApiException toApiException(HttpStatusCode status, String turnId) {
+        LOGGER.error("AI 서버가 오류로 응답했습니다. turnId={}, status={}", turnId, status.value());
         if (status.isSameCodeAs(HttpStatus.TOO_MANY_REQUESTS)) {
             return new TooManyRequestsException();
         }

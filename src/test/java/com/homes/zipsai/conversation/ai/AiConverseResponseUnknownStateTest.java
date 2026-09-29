@@ -51,7 +51,7 @@ class AiConverseResponseUnknownStateTest {
         String body = """
             {
               "code": "ai_response_success",
-              "trace_id": "2606cdbc-d448-4ab3-8ef3-95d8cdb80f3d",
+              "turn_id": "2606cdbc-d448-4ab3-8ef3-95d8cdb80f3d",
               "data": {
                 "route": "complaint",
                 "next_complaint_state": "%s",

@@ -74,9 +74,9 @@ public class ConversationMessageService {
 
     private MessageResponse askAiAndSaveReply(PendingAiReply pendingReply) {
         try {
-            String traceId = pendingReply.aiRequest().traceId();
+            String turnId = pendingReply.aiRequest().turnId();
             AiConverseResponse aiResponse = aiConverseClient.converse(pendingReply.aiRequest());
-            verifyPairedWithRequest(traceId, aiResponse);
+            verifyPairedWithRequest(turnId, aiResponse);
             return conversationService.saveAiReply(pendingReply, aiResponse);
         } catch (RuntimeException e) {
             conversationService.discardUnansweredMessage(pendingReply);
@@ -84,12 +84,12 @@ public class ConversationMessageService {
         }
     }
 
-    private void verifyPairedWithRequest(String traceId, AiConverseResponse aiResponse) {
-        if (aiResponse.isSuccess() && traceId.equals(aiResponse.traceId())) {
+    private void verifyPairedWithRequest(String turnId, AiConverseResponse aiResponse) {
+        if (aiResponse.isSuccess() && turnId.equals(aiResponse.turnId())) {
             return;
         }
-        LOGGER.error("AI 응답이 요청과 짝이 맞지 않습니다. requestTraceId={}, responseTraceId={}, code={}",
-            traceId, aiResponse.traceId(), aiResponse.code());
+        LOGGER.error("AI 응답이 요청과 짝이 맞지 않습니다. requestTurnId={}, responseTurnId={}, code={}",
+            turnId, aiResponse.turnId(), aiResponse.code());
         throw new InternalServerException();
     }
 }

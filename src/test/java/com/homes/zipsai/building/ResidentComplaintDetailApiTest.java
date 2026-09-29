@@ -213,7 +213,7 @@ class ResidentComplaintDetailApiTest {
                 .content("천장에서 물이 새요")
                 .senderType(SenderType.RESIDENT)
                 .messageType(MessageType.IMAGE)
-                .traceId(UUID.randomUUID().toString())
+                .turnId(UUID.randomUUID().toString())
                 .build();
             entityManager.persist(message);
             entityManager.persist(MessageFileGroup.builder()

@@ -40,7 +40,7 @@ class ConversationMessageServiceTest {
 
     private static final long RESIDENT_ID = 1L;
     private static final long CONVERSATION_ID = 10L;
-    private static final String TRACE_ID = "trace-1";
+    private static final String TURN_ID = "turn-1";
 
     @Mock
     ConversationService conversationService;
@@ -59,7 +59,7 @@ class ConversationMessageServiceTest {
     @DisplayName("AI가 답하면 답변을 저장하고 대화 ID를 돌려준다")
     void savesReplyAndReturnsConversationId() {
         PendingAiReply pendingAiReply = pendingAiReply(true);
-        AiConverseResponse aiResponse = aiResponse(TRACE_ID);
+        AiConverseResponse aiResponse = aiResponse(TURN_ID);
         given(conversationService.saveFirstMessage(RESIDENT_ID, "천장에서 물이 새요", List.of()))
             .willReturn(pendingAiReply);
         given(aiConverseClient.converse(pendingAiReply.aiRequest())).willReturn(aiResponse);
@@ -88,8 +88,8 @@ class ConversationMessageServiceTest {
     }
 
     @Test
-    @DisplayName("요청과 다른 추적 ID로 온 AI 응답은 저장하지 않고 메시지를 지운다")
-    void rejectsReplyWithAnotherTraceId() {
+    @DisplayName("요청과 다른 turn ID로 온 AI 응답은 저장하지 않고 메시지를 지운다")
+    void rejectsReplyWithAnotherTurnId() {
         PendingAiReply pendingAiReply = pendingAiReply(true);
         given(conversationService.saveFirstMessage(RESIDENT_ID, "분리수거 요일이 언제인가요?", List.of()))
             .willReturn(pendingAiReply);
@@ -114,7 +114,7 @@ class ConversationMessageServiceTest {
         given(aiConverseClient.converse(pendingAiReply.aiRequest())).willAnswer(invocation -> {
             aiEntered.countDown();
             releaseAi.await(5, TimeUnit.SECONDS);
-            return aiResponse(TRACE_ID);
+            return aiResponse(TURN_ID);
         });
         CompletableFuture<?> firstSend = CompletableFuture.runAsync(() ->
             conversationMessageService.sendMessage(RESIDENT_ID, CONVERSATION_ID, "안방이요", List.of()));
@@ -133,7 +133,7 @@ class ConversationMessageServiceTest {
     @DisplayName("AI 호출이 실패해도 같은 대화에 다시 보낼 수 있다")
     void allowsNextMessageAfterAiFailure() {
         PendingAiReply pendingAiReply = pendingAiReply(false);
-        AiConverseResponse aiResponse = aiResponse(TRACE_ID);
+        AiConverseResponse aiResponse = aiResponse(TURN_ID);
         given(conversationService.saveNextMessage(RESIDENT_ID, CONVERSATION_ID, "안방이요", List.of()))
             .willReturn(pendingAiReply);
         given(aiConverseClient.converse(pendingAiReply.aiRequest()))
@@ -159,7 +159,7 @@ class ConversationMessageServiceTest {
         MessageResponse residentMessage =
             new MessageResponse(20L, SenderType.RESIDENT, MessageType.TEXT, "천장에서 물이 새요", List.of(), null, null);
         AiConverseRequest aiRequest =
-            new AiConverseRequest(null, null, null, null, TRACE_ID, null, null, null, List.of(), null);
+            new AiConverseRequest(null, null, null, null, TURN_ID, null, null, null, List.of(), null);
         return new PendingAiReply(conversation, residentMessage, newConversation, null, aiRequest);
     }
 
@@ -167,8 +167,8 @@ class ConversationMessageServiceTest {
         return new MessageResponse(21L, SenderType.ASSISTANT, MessageType.TEXT, "위치가 어디인가요?", List.of(), null, null);
     }
 
-    private static AiConverseResponse aiResponse(String traceId) {
-        return new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, traceId,
+    private static AiConverseResponse aiResponse(String turnId) {
+        return new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, turnId,
             new AiConverseResponse.Data(AiRoute.COMPLAINT, AiComplaintState.COLLECTING, "위치가 어디인가요?",
                 new AiConverseResponse.Result(null, null, List.of("location"), List.of())));
     }

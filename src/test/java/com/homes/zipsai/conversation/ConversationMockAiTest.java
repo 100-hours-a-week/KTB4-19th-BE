@@ -33,7 +33,9 @@ import com.homes.zipsai.conversation.ai.AiConverseClient;
 import com.homes.zipsai.conversation.ai.AiConverseRequest;
 import com.homes.zipsai.conversation.ai.AiConverseResponse;
 import com.homes.zipsai.conversation.ai.AiRoute;
+import com.homes.zipsai.conversation.domain.Message;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
+import com.homes.zipsai.conversation.repository.MessageRepository;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -56,6 +58,9 @@ class ConversationMockAiTest {
 
     @Autowired
     ConversationRepository conversationRepository;
+
+    @Autowired
+    MessageRepository messageRepository;
 
     @MockitoBean
     AiConverseClient aiConverseClient;
@@ -127,9 +132,30 @@ class ConversationMockAiTest {
             .isEqualTo(image);
     }
 
+    @Test
+    @DisplayName("HTTP 요청 trace_id와 AI turn_id를 분리해 메시지 쌍에 저장한다")
+    void separatesHttpRequestTraceIdFromAiTurnId() throws Exception {
+        String email = conversationTestFixture.livingResident("302");
+        RequestPostProcessor resident = conversationTestFixture.authenticatedAs(email);
+        given(aiConverseClient.converse(any())).willAnswer(ConversationMockAiTest::collectingReply);
+
+        MvcTestResult result = postConversation(resident, "천장에서 물이 새요");
+        assertThat(result).hasStatus(HttpStatus.CREATED);
+        String traceId = result.getResponse().getHeader("X-Request-Id");
+        long conversationId = objectMapper.readTree(result.getResponse().getContentAsString())
+            .path("data").path("conversationId").asLong();
+        ArgumentCaptor<AiConverseRequest> aiRequestCaptor = ArgumentCaptor.forClass(AiConverseRequest.class);
+        then(aiConverseClient).should().converse(aiRequestCaptor.capture());
+        AiConverseRequest aiRequest = aiRequestCaptor.getValue();
+        List<Message> messages = messageRepository.findAllByConversationId(conversationId);
+
+        assertThat(aiRequest.turnId()).isNotEqualTo(traceId);
+        assertThat(messages).extracting(Message::getTurnId).containsExactly(aiRequest.turnId(), aiRequest.turnId());
+    }
+
     private static AiConverseResponse collectingReply(InvocationOnMock invocation) {
         AiConverseRequest request = invocation.getArgument(0);
-        return new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, request.traceId(),
+        return new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, request.turnId(),
             new AiConverseResponse.Data(AiRoute.COMPLAINT, AiComplaintState.COLLECTING, "위치가 어디인가요?",
                 new AiConverseResponse.Result(null, null, List.of("location"), List.of())));
     }

@@ -47,16 +47,16 @@ public class Message extends BaseTimeEntity {
     @Column(name = "message_type", nullable = false, length = 20)
     private MessageType messageType;
 
-    @Column(name = "trace_id", length = 36)
-    private String traceId;
+    @Column(name = "turn_id", length = 36)
+    private String turnId;
 
     @Builder
     public Message(Conversation conversation, String content, SenderType senderType, MessageType messageType,
-                   String traceId) {
+                   String turnId) {
         this.conversation = conversation;
         this.content = content;
         this.senderType = senderType;
         this.messageType = messageType;
-        this.traceId = traceId;
+        this.turnId = turnId;
     }
 }

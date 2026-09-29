@@ -2,7 +2,11 @@ package com.homes.zipsai.conversation.ai;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -15,6 +19,7 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -32,17 +37,20 @@ class HttpAiConverseClientTest {
     private static final String BASE_URL = "http://ai.test";
     private static final String CONVERSE_PATH = "/api/v3/ai/converse";
     private static final String CONVERSE_URL = BASE_URL + CONVERSE_PATH;
-    private static final String TRACE_ID = "6f6d8b2e-0b0b-4a1e-9f2a-3f9d5c1a7e11";
+    private static final String TURN_ID = "6f6d8b2e-0b0b-4a1e-9f2a-3f9d5c1a7e11";
+    private static final String TRACE_ID = "request-trace-id";
 
     private MockRestServiceServer mockRestServiceServer;
     private HttpAiConverseClient httpAiConverseClient;
+    private StructuredLogger structuredLogger;
 
     @BeforeEach
     void setUp() {
         RestClient.Builder builder = RestClient.builder();
         mockRestServiceServer = MockRestServiceServer.bindTo(builder).build();
+        structuredLogger = mock(StructuredLogger.class);
         httpAiConverseClient = new HttpAiConverseClient(builder, BASE_URL, CONVERSE_PATH, new JsonMapper(),
-                mock(StructuredLogger.class));
+                structuredLogger);
     }
 
     @Test
@@ -54,7 +62,8 @@ class HttpAiConverseClientTest {
             .andExpect(jsonPath("$.room_no").value("302"))
             .andExpect(jsonPath("$.resident_id").value("7"))
             .andExpect(jsonPath("$.conversation_id").value("11"))
-            .andExpect(jsonPath("$.trace_id").value(TRACE_ID))
+            .andExpect(jsonPath("$.turn_id").value(TURN_ID))
+            .andExpect(jsonPath("$.trace_id").doesNotExist())
             .andExpect(jsonPath("$.current_route").value("complaint"))
             .andExpect(jsonPath("$.current_complaint_state").value("collecting"))
             .andExpect(jsonPath("$.message.message_id").value("21"))
@@ -72,6 +81,24 @@ class HttpAiConverseClientTest {
     }
 
     @Test
+    @DisplayName("AI 호출 단계 로그에는 AI turn_id 대신 HTTP 요청 trace_id를 기록한다")
+    void logsHttpRequestTraceIdSeparatelyFromTurnId() {
+        MDC.put("traceId", TRACE_ID);
+        mockRestServiceServer.expect(requestTo(CONVERSE_URL))
+            .andRespond(withSuccess(complaintReply(), MediaType.APPLICATION_JSON));
+
+        try {
+            httpAiConverseClient.converse(request());
+        } finally {
+            MDC.remove("traceId");
+        }
+
+        verify(structuredLogger).stageDone(eq(TRACE_ID), eq(CONVERSE_PATH), eq("ai_api"), anyLong(),
+            eq("ok"), isNull());
+        mockRestServiceServer.verify();
+    }
+
+    @Test
     @DisplayName("AI 서버의 민원 응답을 읽는다")
     void readsComplaintReply() {
         mockRestServiceServer.expect(requestTo(CONVERSE_URL))
@@ -80,7 +107,7 @@ class HttpAiConverseClientTest {
         AiConverseResponse response = httpAiConverseClient.converse(request());
 
         assertThat(response.isSuccess()).isTrue();
-        assertThat(response.traceId()).isEqualTo(TRACE_ID);
+        assertThat(response.turnId()).isEqualTo(TURN_ID);
         assertThat(response.route()).isEqualTo(AiRoute.COMPLAINT);
         assertThat(response.nextComplaintState()).isNull();
         assertThat(response.reply()).isEqualTo("아래 내용으로 민원을 접수할까요?");
@@ -97,7 +124,7 @@ class HttpAiConverseClientTest {
             .andRespond(withSuccess("""
                 {
                   "code": "ai_response_success",
-                  "trace_id": "%s",
+                  "turn_id": "%s",
                   "data": {
                     "route": "complaint",
                     "next_complaint_state": "collecting",
@@ -113,7 +140,7 @@ class HttpAiConverseClientTest {
                     }
                   }
                 }
-                """.formatted(TRACE_ID), MediaType.APPLICATION_JSON));
+                """.formatted(TURN_ID), MediaType.APPLICATION_JSON));
 
         AiConverseResponse response = httpAiConverseClient.converse(request());
 
@@ -154,7 +181,7 @@ class HttpAiConverseClientTest {
             .andRespond(withSuccess("""
                 {
                   "code": "ai_response_success",
-                  "trace_id": "%s",
+                  "turn_id": "%s",
                   "data": {
                     "route": "knowledge",
                     "next_complaint_state": null,
@@ -167,7 +194,7 @@ class HttpAiConverseClientTest {
                     }
                   }
                 }
-                """.formatted(TRACE_ID), MediaType.APPLICATION_JSON));
+                """.formatted(TURN_ID), MediaType.APPLICATION_JSON));
 
         AiConverseResponse response = httpAiConverseClient.converse(request());
 
@@ -197,7 +224,7 @@ class HttpAiConverseClientTest {
         return """
             {
               "code": "ai_response_success",
-              "trace_id": "%s",
+              "turn_id": "%s",
               "data": {
                 "route": "complaint",
                 "complaint_intent": "register",
@@ -218,12 +245,12 @@ class HttpAiConverseClientTest {
                 "meta": { "model": "gpt-5-nano", "timing_ms": 842 }
               }
             }
-            """.formatted(TRACE_ID);
+            """.formatted(TURN_ID);
     }
 
     private AiConverseRequest request() {
         return new AiConverseRequest(
-            1L, "302", "7", "11", TRACE_ID,
+            1L, "302", "7", "11", TURN_ID,
             AiRoute.COMPLAINT, AiComplaintState.COLLECTING,
             new AiConverseRequest.MessagePayload("21", "안방 천장 가운데요", List.of()),
             List.of(new AiConverseRequest.HistoryMessage("19", AiTurnRole.USER, "천장에서 물이 새요", List.of())),

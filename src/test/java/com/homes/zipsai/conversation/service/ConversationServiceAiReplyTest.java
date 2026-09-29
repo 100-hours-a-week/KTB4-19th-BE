@@ -41,7 +41,7 @@ class ConversationServiceAiReplyTest {
 
     private static final long CONVERSATION_ID = 10L;
     private static final long RESIDENT_MESSAGE_ID = 20L;
-    private static final String TRACE_ID = "trace-1";
+    private static final String TURN_ID = "turn-1";
     private static final List<AiConverseResponse.Citation> CITATIONS = List.of(
         new AiConverseResponse.Citation("building_document", "building-guide-12", "생활 안내", null, null));
 
@@ -79,13 +79,13 @@ class ConversationServiceAiReplyTest {
     }
 
     @Test
-    @DisplayName("AI 답변은 입주민 메시지와 같은 추적 ID로 저장된다")
-    void savesReplyWithResidentMessageTraceId() {
+    @DisplayName("AI 답변은 입주민 메시지와 같은 turn ID로 저장된다")
+    void savesReplyWithResidentMessageTurnId() {
         givenReplySaved();
 
         conversationService.saveAiReply(pendingAiReply(true, null), knowledge("화요일과 금요일입니다.", CITATIONS));
 
-        assertThat(savedMessage().getTraceId()).isEqualTo(TRACE_ID);
+        assertThat(savedMessage().getTurnId()).isEqualTo(TURN_ID);
     }
 
     @Test
@@ -165,12 +165,12 @@ class ConversationServiceAiReplyTest {
         MessageResponse residentMessage = new MessageResponse(RESIDENT_MESSAGE_ID, SenderType.RESIDENT,
             MessageType.TEXT, "분리수거 요일이 언제인가요?", List.of(), null, null);
         AiConverseRequest aiRequest =
-            new AiConverseRequest(null, null, null, null, TRACE_ID, null, null, null, List.of(), null);
+            new AiConverseRequest(null, null, null, null, TURN_ID, null, null, null, List.of(), null);
         return new PendingAiReply(conversation, residentMessage, newConversation, previousLastMessageAt, aiRequest);
     }
 
     private static AiConverseResponse knowledge(String reply, List<AiConverseResponse.Citation> citations) {
-        return new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, TRACE_ID,
+        return new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, TURN_ID,
             new AiConverseResponse.Data(AiRoute.KNOWLEDGE, null, reply,
                 new AiConverseResponse.Result(null, null, List.of(), citations)));
     }
