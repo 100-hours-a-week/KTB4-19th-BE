@@ -1,7 +1,9 @@
 package com.homes.zipsai.conversation.domain;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -35,6 +37,8 @@ import lombok.NoArgsConstructor;
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Conversation extends BaseTimeEntity {
+
+    public static final Duration IDLE_TIME_TO_CLOSE = Duration.ofMinutes(5);
 
     private static final int LOCATION_MAX_LENGTH = 50;
     private static final int SYMPTOM_MAX_LENGTH = 100;
@@ -93,11 +97,23 @@ public class Conversation extends BaseTimeEntity {
         }
     }
 
-    public void verifyCanSendMessage() {
+    public void verifyCanSendMessage(LocalDateTime now) {
         verifyActive();
         if (isReadyToConfirmComplaint()) {
             throw new ConflictException(ConflictException.Reason.CONVERSATION_AWAITING_CONFIRMATION);
         }
+        if (isClosedAt(now)) {
+            throw new ConflictException(ConflictException.Reason.CONVERSATION_CLOSED);
+        }
+    }
+
+    public ConversationStatus statusAt(LocalDateTime now) {
+        return isClosedAt(now) ? ConversationStatus.CLOSED : status;
+    }
+
+    public OffsetDateTime closesAt() {
+        LocalDateTime closingTime = closingTime();
+        return closingTime == null ? null : closingTime.atZone(ZoneId.systemDefault()).toOffsetDateTime();
     }
 
     public void verifyCanCreateComplaint() {
@@ -158,6 +174,18 @@ public class Conversation extends BaseTimeEntity {
 
     private boolean isActive() {
         return status == ConversationStatus.ACTIVE;
+    }
+
+    private boolean isClosedAt(LocalDateTime now) {
+        LocalDateTime closingTime = closingTime();
+        return closingTime != null && !now.isBefore(closingTime);
+    }
+
+    private LocalDateTime closingTime() {
+        if (!isActive() || isReadyToConfirmComplaint() || lastMessageAt == null) {
+            return null;
+        }
+        return lastMessageAt.plus(IDLE_TIME_TO_CLOSE);
     }
 
     private void storeDraft(AiComplaintDraft draft) {

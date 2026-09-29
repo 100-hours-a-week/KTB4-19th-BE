@@ -7,19 +7,20 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.homes.zipsai.conversation.ai.AiConverseClient;
 import com.homes.zipsai.conversation.ai.AiConverseResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationCreateResponse;
-import com.homes.zipsai.conversation.dto.response.MessageResponse;
 import com.homes.zipsai.conversation.dto.response.MessageSendResponse;
 import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.global.exception.InternalServerException;
 import com.homes.zipsai.global.logging.StructuredLogger;
 
+import lombok.RequiredArgsConstructor;
+
 @Service
+@RequiredArgsConstructor
 public class ConversationMessageService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ConversationMessageService.class);
@@ -29,22 +30,10 @@ public class ConversationMessageService {
     private final StructuredLogger structuredLogger;
     private final Set<Long> conversationsWaitingForAi = ConcurrentHashMap.newKeySet();
 
-    public ConversationMessageService(ConversationService conversationService, AiConverseClient aiConverseClient) {
-        this(conversationService, aiConverseClient, null);
-    }
-
-    @Autowired
-    public ConversationMessageService(ConversationService conversationService, AiConverseClient aiConverseClient,
-                                      StructuredLogger structuredLogger) {
-        this.conversationService = conversationService;
-        this.aiConverseClient = aiConverseClient;
-        this.structuredLogger = structuredLogger;
-    }
-
     public ConversationCreateResponse createConversation(Long userId, String content, List<Long> attachmentIds) {
         PendingAiReply pendingReply = conversationService.saveFirstMessage(userId, content, attachmentIds);
-        askAiAndSaveReply(pendingReply);
-        return new ConversationCreateResponse(pendingReply.conversation().getId());
+        MessageSendResponse sent = askAiAndSaveReply(pendingReply);
+        return new ConversationCreateResponse(sent.conversationId());
     }
 
     public MessageSendResponse sendMessage(Long userId, Long conversationId, String content,
@@ -57,8 +46,7 @@ public class ConversationMessageService {
             PendingAiReply pendingReply = conversationService.saveNextMessage(
                 userId, conversationId, content, attachmentIds);
             logDbStage(dbStarted);
-            MessageResponse assistantMessage = askAiAndSaveReply(pendingReply);
-            return MessageSendResponse.of(conversationId, pendingReply.residentMessage(), assistantMessage);
+            return askAiAndSaveReply(pendingReply);
         } finally {
             conversationsWaitingForAi.remove(conversationId);
         }
@@ -66,13 +54,13 @@ public class ConversationMessageService {
 
     private void logDbStage(long started) {
         String traceId = MDC.get("traceId");
-        if (traceId != null && structuredLogger != null) {
+        if (traceId != null) {
             structuredLogger.stageDone(traceId, "conversation", "mysql",
                 (System.nanoTime() - started) / 1_000_000, "ok");
         }
     }
 
-    private MessageResponse askAiAndSaveReply(PendingAiReply pendingReply) {
+    private MessageSendResponse askAiAndSaveReply(PendingAiReply pendingReply) {
         try {
             String turnId = pendingReply.aiRequest().turnId();
             AiConverseResponse aiResponse = aiConverseClient.converse(pendingReply.aiRequest());

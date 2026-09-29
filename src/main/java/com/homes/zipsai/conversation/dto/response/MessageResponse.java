@@ -25,10 +25,7 @@ public record MessageResponse(
 
     public static MessageResponse of(Message message, List<AttachmentResponse> attachments,
                                      SummaryCardResponse summaryCard) {
-        SummaryCardResponse shownSummaryCard = message.getMessageType() == MessageType.SUMMARY_CARD
-            ? summaryCard
-            : null;
         return new MessageResponse(message.getId(), message.getSenderType(), message.getMessageType(),
-            message.getContent(), attachments, shownSummaryCard, message.getCreatedAt());
+            message.getContent(), attachments, message.isSummaryCard() ? summaryCard : null, message.getCreatedAt());
     }
 }

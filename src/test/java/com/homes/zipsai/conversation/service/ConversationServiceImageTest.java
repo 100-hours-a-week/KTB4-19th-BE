@@ -182,7 +182,7 @@ class ConversationServiceImageTest {
     @DisplayName("삭제된 파일은 첨부할 수 없다")
     void rejectsDeletedFile() {
         File deleted = uploaded(4L, resident, "jpg");
-        ReflectionTestUtils.setField(deleted, "deletedAt", LocalDateTime.now());
+        ReflectionTestUtils.setField(deleted, "deletedAt", LocalDateTime.of(2026, 9, 22, 12, 0));
         givenFiles(deleted);
 
         assertThatThrownBy(() -> conversationService.saveFirstMessage(RESIDENT_ID, "천장에서 물이 새요", List.of(4L)))

@@ -1,6 +1,7 @@
 package com.homes.zipsai.conversation.dto.response;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 import com.homes.zipsai.conversation.domain.MessageType;
@@ -14,13 +15,14 @@ public record MessageSendResponse(
     String content,
     List<AttachmentResponse> attachments,
     LocalDateTime createdAt,
-    MessageResponse assistantMessage
+    MessageResponse assistantMessage,
+    OffsetDateTime closesAt
 ) {
 
     public static MessageSendResponse of(Long conversationId, MessageResponse message,
-                                         MessageResponse assistantMessage) {
+                                         MessageResponse assistantMessage, OffsetDateTime closesAt) {
         return new MessageSendResponse(message.messageId(), conversationId, message.senderType(),
             message.messageType(), message.content(), message.attachments(), message.createdAt(),
-            assistantMessage);
+            assistantMessage, closesAt);
     }
 }

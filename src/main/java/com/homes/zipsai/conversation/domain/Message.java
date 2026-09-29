@@ -59,4 +59,8 @@ public class Message extends BaseTimeEntity {
         this.messageType = messageType;
         this.turnId = turnId;
     }
+
+    public boolean isSummaryCard() {
+        return messageType == MessageType.SUMMARY_CARD;
+    }
 }

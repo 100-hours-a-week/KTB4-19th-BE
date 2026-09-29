@@ -34,6 +34,7 @@ import com.homes.zipsai.conversation.dto.response.MessageResponse;
 import com.homes.zipsai.conversation.dto.response.MessageSendResponse;
 import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.global.exception.InternalServerException;
+import com.homes.zipsai.global.logging.StructuredLogger;
 
 @ExtendWith(MockitoExtension.class)
 class ConversationMessageServiceTest {
@@ -48,11 +49,15 @@ class ConversationMessageServiceTest {
     @Mock
     AiConverseClient aiConverseClient;
 
+    @Mock
+    StructuredLogger structuredLogger;
+
     ConversationMessageService conversationMessageService;
 
     @BeforeEach
     void setUp() {
-        conversationMessageService = new ConversationMessageService(conversationService, aiConverseClient);
+        conversationMessageService = new ConversationMessageService(conversationService, aiConverseClient,
+            structuredLogger);
     }
 
     @Test
@@ -63,12 +68,14 @@ class ConversationMessageServiceTest {
         given(conversationService.saveFirstMessage(RESIDENT_ID, "천장에서 물이 새요", List.of()))
             .willReturn(pendingAiReply);
         given(aiConverseClient.converse(pendingAiReply.aiRequest())).willReturn(aiResponse);
+        MessageSendResponse sent =
+            MessageSendResponse.of(CONVERSATION_ID, pendingAiReply.residentMessage(), assistantMessage(), null);
+        given(conversationService.saveAiReply(pendingAiReply, aiResponse)).willReturn(sent);
 
         ConversationCreateResponse response =
             conversationMessageService.createConversation(RESIDENT_ID, "천장에서 물이 새요", List.of());
 
         assertThat(response.conversationId()).isEqualTo(CONVERSATION_ID);
-        then(conversationService).should().saveAiReply(pendingAiReply, aiResponse);
         then(conversationService).should(never()).discardUnansweredMessage(any());
     }
 
@@ -139,7 +146,9 @@ class ConversationMessageServiceTest {
         given(aiConverseClient.converse(pendingAiReply.aiRequest()))
             .willThrow(new IllegalStateException("AI timeout"))
             .willReturn(aiResponse);
-        given(conversationService.saveAiReply(pendingAiReply, aiResponse)).willReturn(assistantMessage());
+        MessageSendResponse sent =
+            MessageSendResponse.of(CONVERSATION_ID, pendingAiReply.residentMessage(), assistantMessage(), null);
+        given(conversationService.saveAiReply(pendingAiReply, aiResponse)).willReturn(sent);
         assertThatThrownBy(() ->
             conversationMessageService.sendMessage(RESIDENT_ID, CONVERSATION_ID, "안방이요", List.of()))
             .isInstanceOf(IllegalStateException.class);

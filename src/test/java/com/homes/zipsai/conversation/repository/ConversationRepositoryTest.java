@@ -11,8 +11,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.data.domain.Limit;
+import org.springframework.test.util.ReflectionTestUtils;
 
+import com.homes.zipsai.conversation.ai.AiComplaintDraft;
+import com.homes.zipsai.conversation.ai.AiComplaintState;
 import com.homes.zipsai.conversation.domain.Conversation;
+import com.homes.zipsai.conversation.domain.ConversationStatus;
 import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.repository.UserRepository;
@@ -96,6 +100,52 @@ class ConversationRepositoryTest {
             resident.getId(), null, cursor.getLastMessageAt(), cursor.getId(), Limit.of(20));
 
         assertThat(conversations).containsExactly(older);
+    }
+
+    @Test
+    @DisplayName("마지막 메시지 후 5분이 지난 진행 중 대화를 종료한다")
+    void closesActiveConversationIdleForFiveMinutes() {
+        Conversation conversation = saveConversation(resident, "분리수거 요일", NOON);
+
+        conversationRepository.closeIdleConversations(NOON, NOON.plusMinutes(5));
+
+        assertThat(statusOf(conversation)).isEqualTo(ConversationStatus.CLOSED);
+    }
+
+    @Test
+    @DisplayName("마지막 메시지 후 5분이 지나지 않은 대화는 종료하지 않는다")
+    void keepsRecentConversationActive() {
+        Conversation conversation = saveConversation(resident, "분리수거 요일", NOON.plusSeconds(1));
+
+        conversationRepository.closeIdleConversations(NOON, NOON.plusMinutes(5));
+
+        assertThat(statusOf(conversation)).isEqualTo(ConversationStatus.ACTIVE);
+    }
+
+    @Test
+    @DisplayName("접수 확인을 기다리는 대화는 5분이 지나도 종료하지 않는다")
+    void keepsConversationAwaitingConfirmationActive() {
+        Conversation conversation = saveConversation(resident, "천장 누수", NOON);
+        ReflectionTestUtils.setField(conversation, "complaintState", AiComplaintState.READY_TO_CONFIRM);
+
+        conversationRepository.closeIdleConversations(NOON, NOON.plusMinutes(5));
+
+        assertThat(statusOf(conversation)).isEqualTo(ConversationStatus.ACTIVE);
+    }
+
+    @Test
+    @DisplayName("민원을 접수한 대화는 5분이 지나도 민원 생성 완료 상태로 둔다")
+    void keepsComplaintCreatedConversation() {
+        Conversation conversation = saveConversation(resident, "천장 누수", NOON);
+        conversation.markComplaintCreated("천장 누수", new AiComplaintDraft("안방", "천장 누수", null));
+
+        conversationRepository.closeIdleConversations(NOON, NOON.plusMinutes(5));
+
+        assertThat(statusOf(conversation)).isEqualTo(ConversationStatus.COMPLAINT_CREATED);
+    }
+
+    private ConversationStatus statusOf(Conversation conversation) {
+        return conversationRepository.findById(conversation.getId()).orElseThrow().getStatus();
     }
 
     private Conversation saveConversation(User user, String title, LocalDateTime lastMessageAt) {

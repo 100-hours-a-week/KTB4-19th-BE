@@ -36,6 +36,7 @@ import com.homes.zipsai.conversation.dto.response.ConversationListItemResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationListResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationMessagesResponse;
 import com.homes.zipsai.conversation.dto.response.MessageResponse;
+import com.homes.zipsai.conversation.dto.response.MessageSendResponse;
 import com.homes.zipsai.conversation.dto.response.SummaryCardResponse;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
@@ -81,8 +82,9 @@ public class ConversationService {
         List<Conversation> conversations = hasNext ? found.subList(0, size) : found;
         String nextCursor = hasNext ? ConversationCursor.from(conversations.getLast()).encode() : null;
 
+        LocalDateTime now = LocalDateTime.now();
         List<ConversationListItemResponse> items = conversations.stream()
-            .map(conversation -> ConversationListItemResponse.from(conversation))
+            .map(conversation -> ConversationListItemResponse.of(conversation, now))
             .toList();
         return new ConversationListResponse(hasNext, nextCursor, items);
     }
@@ -130,7 +132,8 @@ public class ConversationService {
                 summaryCard))
             .toList();
 
-        return ConversationMessagesResponse.of(conversation, complaintId, messages, hasNext, nextCursor);
+        return ConversationMessagesResponse.of(conversation, complaintId, messages, hasNext, nextCursor,
+            LocalDateTime.now());
     }
 
     @Transactional
@@ -156,7 +159,7 @@ public class ConversationService {
     public PendingAiReply saveNextMessage(Long userId, Long conversationId, String content,
                                           List<Long> attachmentIds) {
         Conversation conversation = getOwnedConversation(userId, conversationId);
-        conversation.verifyCanSendMessage();
+        conversation.verifyCanSendMessage(LocalDateTime.now());
         Room room = residentRoomService.getLivingRoom(userId);
         List<File> images = getAttachableImages(userId, attachmentIds);
         List<HistoryMessage> history = getHistory(conversationId);
@@ -172,7 +175,7 @@ public class ConversationService {
     }
 
     @Transactional
-    public MessageResponse saveAiReply(PendingAiReply pendingReply, AiConverseResponse aiResponse) {
+    public MessageSendResponse saveAiReply(PendingAiReply pendingReply, AiConverseResponse aiResponse) {
         Conversation conversation = conversationRepository.getReferenceById(pendingReply.conversation().getId());
         conversation.applyAiResponse(aiResponse);
         MessageType messageType = MessageType.TEXT;
@@ -182,7 +185,15 @@ public class ConversationService {
         String reply = TextUtils.truncate(aiResponse.reply(), Message.CONTENT_MAX_LENGTH);
         String turnId = pendingReply.aiRequest().turnId();
         Message assistantMessage = saveMessage(conversation, reply, SenderType.ASSISTANT, messageType, turnId);
-        return MessageResponse.of(assistantMessage, List.of(), summaryCardOf(conversation, List.of(assistantMessage)));
+        MessageResponse assistantReply =
+            MessageResponse.of(assistantMessage, List.of(), summaryCardOf(conversation, List.of(assistantMessage)));
+        return MessageSendResponse.of(conversation.getId(), pendingReply.residentMessage(), assistantReply,
+            conversation.closesAt());
+    }
+
+    @Transactional
+    public void closeIdleConversations(LocalDateTime now) {
+        conversationRepository.closeIdleConversations(now.minus(Conversation.IDLE_TIME_TO_CLOSE), now);
     }
 
     @Transactional
@@ -275,7 +286,7 @@ public class ConversationService {
 
     private SummaryCardResponse summaryCardOf(Conversation conversation, List<Message> messages) {
         boolean hasSummaryCard = messages.stream()
-            .anyMatch(message -> message.getMessageType() == MessageType.SUMMARY_CARD);
+            .anyMatch(message -> message.isSummaryCard());
         if (!hasSummaryCard) {
             return null;
         }
