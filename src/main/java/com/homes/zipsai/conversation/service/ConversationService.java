@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import org.slf4j.MDC;
 import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -306,7 +307,10 @@ public class ConversationService {
     }
 
     private Message saveResidentMessage(Conversation conversation, String content) {
-        String traceId = UUID.randomUUID().toString();
+        String traceId = MDC.get("traceId");
+        if (traceId == null || traceId.isBlank()) {
+            traceId = UUID.randomUUID().toString();
+        }
         return saveMessage(conversation, content, SenderType.RESIDENT, MessageType.TEXT, traceId);
     }
 
