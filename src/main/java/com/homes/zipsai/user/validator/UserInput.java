@@ -68,7 +68,7 @@ public final class UserInput {
             throw missing("email");
         }
         String normalized = value.trim().toLowerCase(Locale.ROOT);
-        if (normalized.length() > 254 || !EMAIL.matcher(normalized).matches()) {
+        if (normalized.length() > 200 || !EMAIL.matcher(normalized).matches()) {
             throw invalid("email", Reason.INVALID_EMAIL_FORMAT);
         }
         return normalized;
