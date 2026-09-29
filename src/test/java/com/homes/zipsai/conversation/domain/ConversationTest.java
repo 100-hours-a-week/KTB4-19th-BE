@@ -3,6 +3,7 @@ package com.homes.zipsai.conversation.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.junit.jupiter.api.DisplayName;
@@ -15,6 +16,8 @@ import com.homes.zipsai.conversation.ai.AiRoute;
 import com.homes.zipsai.global.exception.ConflictException;
 
 class ConversationTest {
+
+    private static final LocalDateTime NOON = LocalDateTime.of(2026, 9, 29, 12, 0);
 
     @Test
     @DisplayName("근거 없는 질의의 질문 카드는 초안을 질문으로 바꾸고 접수 확인을 기다린다")
@@ -47,7 +50,7 @@ class ConversationTest {
         Conversation conversation = conversation();
         conversation.applyAiResponse(complaint("안방", "천장 누수", List.of()));
 
-        assertThatThrownBy(conversation::verifyCanSendMessage)
+        assertThatThrownBy(() -> conversation.verifyCanSendMessage(NOON))
             .isInstanceOf(ConflictException.class)
             .hasFieldOrPropertyWithValue("code", "CONVERSATION_AWAITING_CONFIRMATION");
     }
@@ -93,9 +96,62 @@ class ConversationTest {
         Conversation conversation = conversation();
         conversation.markComplaintCreated("천장 누수", new AiComplaintDraft("안방", "천장 누수", null));
 
-        assertThatThrownBy(conversation::verifyCanSendMessage)
+        assertThatThrownBy(() -> conversation.verifyCanSendMessage(NOON))
             .isInstanceOf(ConflictException.class)
             .hasFieldOrPropertyWithValue("code", "CONVERSATION_CLOSED");
+    }
+
+    @Test
+    @DisplayName("마지막 메시지 후 5분이 지나기 전에는 진행 중이다")
+    void staysActiveBeforeIdleTimeToClose() {
+        Conversation conversation = conversationLastMessagedAt(NOON);
+
+        assertThat(conversation.statusAt(NOON.plusMinutes(5).minusSeconds(1))).isEqualTo(ConversationStatus.ACTIVE);
+    }
+
+    @Test
+    @DisplayName("마지막 메시지 후 5분이 지나면 대화가 종료된다")
+    void closesAfterIdleTimeToClose() {
+        Conversation conversation = conversationLastMessagedAt(NOON);
+
+        assertThat(conversation.closesAt().toLocalDateTime()).isEqualTo(NOON.plusMinutes(5));
+        assertThat(conversation.statusAt(NOON.plusMinutes(5))).isEqualTo(ConversationStatus.CLOSED);
+    }
+
+    @Test
+    @DisplayName("종료된 대화에는 메시지를 보낼 수 없다")
+    void rejectsMessageAfterIdleTimeToClose() {
+        Conversation conversation = conversationLastMessagedAt(NOON);
+
+        assertThatThrownBy(() -> conversation.verifyCanSendMessage(NOON.plusMinutes(5)))
+            .isInstanceOf(ConflictException.class)
+            .hasFieldOrPropertyWithValue("code", "CONVERSATION_CLOSED");
+    }
+
+    @Test
+    @DisplayName("접수 확인을 기다리는 대화는 5분이 지나도 종료되지 않는다")
+    void keepsConversationAwaitingConfirmationOpen() {
+        Conversation conversation = conversationLastMessagedAt(NOON);
+        conversation.applyAiResponse(complaint("안방", "천장 누수", List.of()));
+
+        assertThat(conversation.closesAt()).isNull();
+        assertThat(conversation.statusAt(NOON.plusHours(1))).isEqualTo(ConversationStatus.ACTIVE);
+    }
+
+    @Test
+    @DisplayName("민원을 접수한 대화는 5분이 지나도 민원 생성 완료 상태다")
+    void keepsComplaintCreatedStatusAfterIdleTime() {
+        Conversation conversation = conversationLastMessagedAt(NOON);
+        conversation.markComplaintCreated("천장 누수", new AiComplaintDraft("안방", "천장 누수", null));
+
+        assertThat(conversation.closesAt()).isNull();
+        assertThat(conversation.statusAt(NOON.plusHours(1))).isEqualTo(ConversationStatus.COMPLAINT_CREATED);
+    }
+
+    private static Conversation conversationLastMessagedAt(LocalDateTime lastMessageAt) {
+        Conversation conversation = conversation();
+        conversation.updateLastMessageAt(lastMessageAt);
+        return conversation;
     }
 
     private static Conversation conversation() {

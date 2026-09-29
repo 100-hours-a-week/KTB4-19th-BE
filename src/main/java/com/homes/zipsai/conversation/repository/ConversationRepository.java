@@ -6,6 +6,7 @@ import java.util.Optional;
 
 import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -34,6 +35,18 @@ public interface ConversationRepository extends JpaRepository<Conversation, Long
     List<Conversation> findLatestByUserIdBefore(@Param("userId") Long userId, @Param("keyword") String keyword,
                                                 @Param("cursorAt") LocalDateTime cursorAt,
                                                 @Param("cursorId") Long cursorId, Limit limit);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+        update Conversation c
+        set c.status = com.homes.zipsai.conversation.domain.ConversationStatus.CLOSED, c.updatedAt = :now
+        where c.status = com.homes.zipsai.conversation.domain.ConversationStatus.ACTIVE
+            and (c.complaintState is null
+                or c.complaintState <> com.homes.zipsai.conversation.ai.AiComplaintState.READY_TO_CONFIRM)
+            and c.lastMessageAt <= :lastMessagedBefore
+        """)
+    int closeIdleConversations(@Param("lastMessagedBefore") LocalDateTime lastMessagedBefore,
+                               @Param("now") LocalDateTime now);
 
     @Query("select c from Complaint c where c.conversation.id = :conversationId and c.deletedAt is null")
     Optional<Complaint> findComplaintByConversationId(@Param("conversationId") Long conversationId);

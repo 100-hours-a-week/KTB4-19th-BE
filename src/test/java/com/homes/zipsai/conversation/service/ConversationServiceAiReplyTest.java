@@ -32,6 +32,7 @@ import com.homes.zipsai.conversation.domain.Message;
 import com.homes.zipsai.conversation.domain.MessageType;
 import com.homes.zipsai.conversation.domain.SenderType;
 import com.homes.zipsai.conversation.dto.response.MessageResponse;
+import com.homes.zipsai.conversation.dto.response.MessageSendResponse;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
@@ -42,6 +43,7 @@ class ConversationServiceAiReplyTest {
     private static final long CONVERSATION_ID = 10L;
     private static final long RESIDENT_MESSAGE_ID = 20L;
     private static final String TURN_ID = "turn-1";
+    private static final LocalDateTime REPLIED_AT = LocalDateTime.of(2026, 9, 29, 12, 0);
     private static final List<AiConverseResponse.Citation> CITATIONS = List.of(
         new AiConverseResponse.Citation("building_document", "building-guide-12", "생활 안내", null, null));
 
@@ -103,11 +105,11 @@ class ConversationServiceAiReplyTest {
     void savesTextReplyWhenKnowledgeHasCitations() {
         givenReplySaved();
 
-        MessageResponse reply =
+        MessageSendResponse sent =
             conversationService.saveAiReply(pendingAiReply(true, null), knowledge("화요일과 금요일입니다.", CITATIONS));
 
-        assertThat(reply.messageType()).isEqualTo(MessageType.TEXT);
-        assertThat(reply.summaryCard()).isNull();
+        assertThat(sent.assistantMessage().messageType()).isEqualTo(MessageType.TEXT);
+        assertThat(sent.assistantMessage().summaryCard()).isNull();
     }
 
     @Test
@@ -115,11 +117,33 @@ class ConversationServiceAiReplyTest {
     void savesSummaryCardWhenKnowledgeHasNoCitation() {
         givenReplySaved();
 
-        MessageResponse reply =
+        MessageSendResponse sent =
             conversationService.saveAiReply(pendingAiReply(true, null), knowledge("답변드리기 어렵습니다.", List.of()));
 
-        assertThat(reply.messageType()).isEqualTo(MessageType.SUMMARY_CARD);
-        assertThat(reply.summaryCard()).isNotNull();
+        assertThat(sent.assistantMessage().messageType()).isEqualTo(MessageType.SUMMARY_CARD);
+        assertThat(sent.assistantMessage().summaryCard()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("AI 답변을 저장하면 답변 시각 5분 뒤를 종료 시각으로 돌려준다")
+    void returnsClosingTimeFiveMinutesAfterReply() {
+        givenReplySaved();
+
+        MessageSendResponse sent =
+            conversationService.saveAiReply(pendingAiReply(true, null), knowledge("화요일과 금요일입니다.", CITATIONS));
+
+        assertThat(sent.closesAt().toLocalDateTime()).isEqualTo(REPLIED_AT.plusMinutes(5));
+    }
+
+    @Test
+    @DisplayName("요약 카드로 답하면 종료 시각이 없다")
+    void returnsNoClosingTimeForSummaryCard() {
+        givenReplySaved();
+
+        MessageSendResponse sent =
+            conversationService.saveAiReply(pendingAiReply(true, null), knowledge("답변드리기 어렵습니다.", List.of()));
+
+        assertThat(sent.closesAt()).isNull();
     }
 
     @Test
@@ -151,6 +175,7 @@ class ConversationServiceAiReplyTest {
         given(messageRepository.save(any(Message.class))).willAnswer(invocation -> {
             Message message = invocation.getArgument(0);
             ReflectionTestUtils.setField(message, "id", 21L);
+            ReflectionTestUtils.setField(message, "createdAt", REPLIED_AT);
             return message;
         });
     }
