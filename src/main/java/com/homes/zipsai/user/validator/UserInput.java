@@ -22,6 +22,7 @@ public final class UserInput {
                     + "@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
                     + "(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$"
     );
+    private static final Pattern USER_NAME = Pattern.compile("^[\\p{L}]+(?:[ '-][\\p{L}]+)*$");
 
     private UserInput() {
     }
@@ -67,7 +68,7 @@ public final class UserInput {
             throw missing("email");
         }
         String normalized = value.trim().toLowerCase(Locale.ROOT);
-        if (normalized.length() > 254 || !EMAIL.matcher(normalized).matches()) {
+        if (normalized.length() > 200 || !EMAIL.matcher(normalized).matches()) {
             throw invalid("email", Reason.INVALID_EMAIL_FORMAT);
         }
         return normalized;
@@ -90,6 +91,9 @@ public final class UserInput {
         value = value.trim();
         if (value.isEmpty() || value.length() > 7) {
             throw invalid("userName", Reason.INVALID_USER_NAME_LENGTH);
+        }
+        if (!USER_NAME.matcher(value).matches()) {
+            throw invalid("userName", Reason.INVALID_USER_NAME_FORMAT);
         }
         return value;
     }
