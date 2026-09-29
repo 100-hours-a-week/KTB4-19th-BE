@@ -159,7 +159,6 @@ class BuildingRegistrationApiTests {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("ROOM_ALREADY_EXISTS"));
 
-        // 102이 앞선 중복 요청에서 일부 저장되지 않았으므로 단독 생성은 성공해야 합니다.
         mvc.perform(withIp(roomRequest(token, "102"), ip))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.createdCount").value(1));
