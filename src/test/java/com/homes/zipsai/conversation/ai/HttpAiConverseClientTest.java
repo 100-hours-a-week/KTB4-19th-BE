@@ -2,6 +2,7 @@ package com.homes.zipsai.conversation.ai;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -22,6 +23,7 @@ import org.springframework.web.client.RestClient;
 
 import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.global.exception.TooManyRequestsException;
+import com.homes.zipsai.global.logging.StructuredLogger;
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -39,7 +41,8 @@ class HttpAiConverseClientTest {
     void setUp() {
         RestClient.Builder builder = RestClient.builder();
         mockRestServiceServer = MockRestServiceServer.bindTo(builder).build();
-        httpAiConverseClient = new HttpAiConverseClient(builder, BASE_URL, CONVERSE_PATH, new JsonMapper());
+        httpAiConverseClient = new HttpAiConverseClient(builder, BASE_URL, CONVERSE_PATH, new JsonMapper(),
+                mock(StructuredLogger.class));
     }
 
     @Test

@@ -40,11 +40,6 @@ public class HttpAiConverseClient implements AiConverseClient {
         this.structuredLogger = structuredLogger;
     }
 
-    public HttpAiConverseClient(RestClient.Builder builder, String baseUrl, String conversePath,
-                                ObjectMapper objectMapper) {
-        this(builder, baseUrl, conversePath, objectMapper, new StructuredLogger(objectMapper));
-    }
-
     @Override
     public AiConverseResponse converse(AiConverseRequest request) {
         String traceId = request.traceId();
