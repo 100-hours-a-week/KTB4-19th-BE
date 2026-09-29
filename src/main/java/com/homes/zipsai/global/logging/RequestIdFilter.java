@@ -32,6 +32,8 @@ public class RequestIdFilter extends OncePerRequestFilter {
         MDC.put(TRACE_ID, traceId);
         MDC.remove("dbMs");
         MDC.remove("aiApiMs");
+        MDC.remove(StructuredLogger.STATUS_CODE);
+        MDC.remove(StructuredLogger.ERROR_CODE);
         response.setHeader(HEADER, traceId);
         structuredLogger.requestStarted(traceId, request.getRequestURI(), request.getMethod());
         try {
@@ -42,6 +44,8 @@ public class RequestIdFilter extends OncePerRequestFilter {
             MDC.remove(TRACE_ID);
             MDC.remove("dbMs");
             MDC.remove("aiApiMs");
+            MDC.remove(StructuredLogger.STATUS_CODE);
+            MDC.remove(StructuredLogger.ERROR_CODE);
         }
     }
 }
