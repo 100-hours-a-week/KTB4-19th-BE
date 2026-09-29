@@ -32,8 +32,7 @@ public class StubAiConverseClient implements AiConverseClient {
         return switch (decideRoute(request, text)) {
             case COMPLAINT -> collectComplaint(request, traceId, text);
             case KNOWLEDGE -> answerKnowledge(traceId, text);
-            case CLARIFY -> qaCard(traceId, AiRoute.CLARIFY,
-                "말씀하신 내용을 이해하지 못했어요. 관리인이 확인할 수 있도록 질문을 남겨 두었습니다.", text);
+            case CLARIFY -> askAgain(traceId);
         };
     }
 
@@ -49,7 +48,7 @@ public class StubAiConverseClient implements AiConverseClient {
 
     private AiConverseResponse answerKnowledge(String traceId, String text) {
         if (UNANSWERABLE_PATTERN.matcher(text).find()) {
-            return qaCard(traceId, AiRoute.KNOWLEDGE,
+            return qaCard(traceId,
                 "건물 문서에서 근거를 찾지 못해 답변드리기 어렵습니다. 질문을 관리인에게 전달해 두었습니다.", text);
         }
         return response(traceId, AiRoute.KNOWLEDGE, null,
@@ -76,8 +75,13 @@ public class StubAiConverseClient implements AiConverseClient {
             new AiConverseResponse.Result(patch, null, missingFields, List.of()));
     }
 
-    private AiConverseResponse qaCard(String traceId, AiRoute route, String reply, String question) {
-        return response(traceId, route, null, reply, new AiConverseResponse.Result(
+    private AiConverseResponse askAgain(String traceId) {
+        return response(traceId, AiRoute.CLARIFY, null, "말씀하신 내용을 이해하지 못했어요. 조금 더 자세히 알려 주시겠어요?",
+            new AiConverseResponse.Result(null, null, List.of(), List.of()));
+    }
+
+    private AiConverseResponse qaCard(String traceId, String reply, String question) {
+        return response(traceId, AiRoute.KNOWLEDGE, null, reply, new AiConverseResponse.Result(
             null, new AiConverseResponse.QaCardDraft(question), List.of(), List.of()));
     }
 
