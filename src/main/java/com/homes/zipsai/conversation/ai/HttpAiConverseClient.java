@@ -2,6 +2,7 @@ package com.homes.zipsai.conversation.ai;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
@@ -31,6 +32,7 @@ public class HttpAiConverseClient implements AiConverseClient {
     private final ObjectMapper objectMapper;
     private final StructuredLogger structuredLogger;
 
+    @Autowired
     public HttpAiConverseClient(RestClient.Builder builder, @Value("${app.ai.base-url}") String baseUrl,
                                 @Value("${app.ai.converse-path}") String conversePath, ObjectMapper objectMapper,
                                 StructuredLogger structuredLogger) {
