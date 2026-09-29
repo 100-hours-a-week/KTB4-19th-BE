@@ -11,6 +11,7 @@ public class ValidationFailedException extends UnprocessableEntityException {
         INVALID_EMAIL_FORMAT("이메일 형식이 올바르지 않습니다."),
         INVALID_PASSWORD_FORMAT("비밀번호 형식이 올바르지 않습니다."),
         INVALID_USER_NAME_LENGTH("이름은 1~7자여야 합니다."),
+        INVALID_USER_NAME_FORMAT("이름에는 이모지나 특수문자를 사용할 수 없습니다."),
         INVALID_PHONE_FORMAT("연락처 형식이 올바르지 않습니다."),
         INVALID_ID("1 이상의 정수여야 합니다."),
         INVALID_INVITATION_CODE("6자리 영문 대문자·숫자 조합이어야 합니다."),
