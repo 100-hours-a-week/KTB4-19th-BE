@@ -68,7 +68,7 @@ public class ConversationMessageService {
         String traceId = MDC.get("traceId");
         if (traceId != null && structuredLogger != null) {
             structuredLogger.stageDone(traceId, "conversation", "mysql",
-                (System.nanoTime() - started) / 1_000_000, "success");
+                (System.nanoTime() - started) / 1_000_000, "ok");
         }
     }
 

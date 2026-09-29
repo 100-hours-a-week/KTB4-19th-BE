@@ -51,7 +51,7 @@ public class HttpAiConverseClient implements AiConverseClient {
         long started = System.nanoTime();
         String body = exchange(request, traceId);
         structuredLogger.stageDone(traceId, conversePath, "ai_api",
-            (System.nanoTime() - started) / 1_000_000, "success");
+            (System.nanoTime() - started) / 1_000_000, "ok");
         try {
             return objectMapper.readValue(body, AiConverseResponse.class);
         } catch (JacksonException e) {
@@ -65,7 +65,6 @@ public class HttpAiConverseClient implements AiConverseClient {
             return restClient.post()
                 .uri(conversePath)
                 .contentType(MediaType.APPLICATION_JSON)
-                .header("X-Trace-Id", traceId)
                 .body(request)
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, (httpRequest, response) -> {

@@ -37,7 +37,7 @@ public class StructuredLogger {
         Map<String, Object> fields = new LinkedHashMap<>();
         fields.put("stage", stage);
         fields.put("duration_ms", durationMs);
-        fields.put("outcome", outcome);
+        fields.put("outcome", normalizeOutcome(outcome));
         fields.put("error_code", MDC.get(ERROR_CODE));
         log(event("stage_done", traceId, route, fields));
     }
@@ -54,7 +54,7 @@ public class StructuredLogger {
         Map<String, Object> fields = new LinkedHashMap<>();
         int finalStatusCode = statusCode >= 400 ? statusCode : numberOrDefault(MDC.get(STATUS_CODE), statusCode);
         fields.put("method", method); fields.put("status_code", finalStatusCode);
-        fields.put("outcome", finalStatusCode >= 400 ? "error" : "success");
+        fields.put("outcome", finalStatusCode >= 400 ? "fail" : "ok");
         fields.put("total_ms", totalMs);
         fields.put("db_ms", numberOrNull(MDC.get("dbMs")));
         fields.put("ai_api_ms", numberOrNull(MDC.get("aiApiMs")));
@@ -68,6 +68,10 @@ public class StructuredLogger {
 
     private int numberOrDefault(String value, int defaultValue) {
         return value == null ? defaultValue : Integer.parseInt(value);
+    }
+
+    private String normalizeOutcome(String outcome) {
+        return "success".equals(outcome) ? "ok" : "error".equals(outcome) ? "fail" : outcome;
     }
 
     private Map<String, Object> event(String name, String traceId, String route, Map<String, Object> fields) {

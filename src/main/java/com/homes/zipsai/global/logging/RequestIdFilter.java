@@ -18,23 +18,18 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class RequestIdFilter extends OncePerRequestFilter {
     private static final String TRACE_ID = "traceId";
-    private static final String HEADER = "X-Trace-Id";
     private final StructuredLogger structuredLogger;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
             FilterChain filterChain) throws ServletException, IOException {
-        String traceId = request.getHeader(HEADER);
-        if (traceId == null || traceId.isBlank()) {
-            traceId = UUID.randomUUID().toString();
-        }
+        String traceId = UUID.randomUUID().toString();
         long started = System.nanoTime();
         MDC.put(TRACE_ID, traceId);
         MDC.remove("dbMs");
         MDC.remove("aiApiMs");
         MDC.remove(StructuredLogger.STATUS_CODE);
         MDC.remove(StructuredLogger.ERROR_CODE);
-        response.setHeader(HEADER, traceId);
         structuredLogger.requestStarted(traceId, request.getRequestURI(), request.getMethod());
         try {
             filterChain.doFilter(request, response);
