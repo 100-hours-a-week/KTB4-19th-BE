@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -29,6 +31,7 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import com.homes.zipsai.global.logging.ServerErrorLog;
 import com.homes.zipsai.global.response.ApiResponse;
 
 @RestControllerAdvice
@@ -49,9 +52,10 @@ public class ApiExceptionHandler {
     }
 
     @ExceptionHandler(HandlerMethodValidationException.class)
-    public ResponseEntity<?> methodValidation(HandlerMethodValidationException exception) {
+    public ResponseEntity<?> methodValidation(HandlerMethodValidationException exception,
+                                              HttpServletRequest request) {
         if (exception.isForReturnValue()) {
-            return unexpected(exception);
+            return unexpected(exception, request);
         }
         List<Map<String, String>> queryViolations = new ArrayList<>();
         List<Map<String, String>> pathViolations = new ArrayList<>();
@@ -136,8 +140,9 @@ public class ApiExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<?> unexpected(Exception exception) {
+    public ResponseEntity<?> unexpected(Exception exception, HttpServletRequest request) {
         LOGGER.error("Unhandled API failure: {}", exception.getClass().getName(), exception);
+        ServerErrorLog.of(request, exception).print();
         return handle(new InternalServerException());
     }
 
