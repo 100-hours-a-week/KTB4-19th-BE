@@ -53,7 +53,12 @@ public class HttpAiConverseClient implements AiConverseClient {
                 objectMapper.writeValueAsString(request));
             String body = exchange(request, turnId);
             LOGGER.info("AI 응답 원문. traceId={}, turnId={}, body={}", traceId, turnId, body);
-            return read(body, turnId);
+            return objectMapper.readValue(body, AiConverseResponse.class);
+        } catch (JacksonException e) {
+            LOGGER.error("AI 응답을 읽지 못했습니다. turnId={}", turnId);
+            outcome = "fail";
+            errorCode = "AI_UNAVAILABLE";
+            throw new AiUnavailableException();
         } catch (RuntimeException e) {
             outcome = "fail";
             errorCode = e instanceof ApiException apiException ? apiException.code : "AI_UNAVAILABLE";
@@ -63,15 +68,6 @@ public class HttpAiConverseClient implements AiConverseClient {
                 structuredLogger.stageDone(traceId, conversePath, "ai_api",
                     (System.nanoTime() - started) / 1_000_000, outcome, errorCode);
             }
-        }
-    }
-
-    private AiConverseResponse read(String body, String turnId) {
-        try {
-            return objectMapper.readValue(body, AiConverseResponse.class);
-        } catch (JacksonException e) {
-            LOGGER.error("AI 응답을 읽지 못했습니다. turnId={}, body={}", turnId, body);
-            throw new AiUnavailableException();
         }
     }
 
