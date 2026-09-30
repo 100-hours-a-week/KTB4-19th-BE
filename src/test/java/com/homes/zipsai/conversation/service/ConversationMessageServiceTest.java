@@ -34,7 +34,6 @@ import com.homes.zipsai.conversation.dto.response.MessageResponse;
 import com.homes.zipsai.conversation.dto.response.MessageSendResponse;
 import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.global.exception.InternalServerException;
-import com.homes.zipsai.global.logging.StructuredLogger;
 
 @ExtendWith(MockitoExtension.class)
 class ConversationMessageServiceTest {
@@ -49,15 +48,11 @@ class ConversationMessageServiceTest {
     @Mock
     AiConverseClient aiConverseClient;
 
-    @Mock
-    StructuredLogger structuredLogger;
-
     ConversationMessageService conversationMessageService;
 
     @BeforeEach
     void setUp() {
-        conversationMessageService = new ConversationMessageService(conversationService, aiConverseClient,
-            structuredLogger);
+        conversationMessageService = new ConversationMessageService(conversationService, aiConverseClient);
     }
 
     @Test
