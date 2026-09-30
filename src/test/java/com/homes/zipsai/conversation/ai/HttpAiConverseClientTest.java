@@ -151,8 +151,8 @@ class HttpAiConverseClientTest {
     }
 
     @Test
-    @DisplayName("AI 호출이 실패하면 응답 원문을 로그에 남기지 않는다")
-    void doesNotLogRawBodyWhenResponseIsUnreadable() {
+    @DisplayName("응답을 읽지 못하면 원문을 로그에 남긴다")
+    void logsRawBodyWhenResponseIsUnreadable() {
         ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
             org.slf4j.LoggerFactory.getLogger(HttpAiConverseClient.class);
         ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
@@ -168,9 +168,39 @@ class HttpAiConverseClientTest {
                 .isInstanceOf(AiUnavailableException.class);
             assertThat(appender.list)
                 .anyMatch(event -> event.getFormattedMessage().contains("읽지 못했습니다")
-                    && !event.getFormattedMessage().contains("12345"));
+                    && event.getFormattedMessage().contains("12345"));
         } finally {
             logger.detachAppender(appender);
+        }
+    }
+
+    @Test
+    @DisplayName("AI 요청과 응답 원문을 로그에 남긴다")
+    void logsRawRequestAndResponseBodies() {
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+            org.slf4j.LoggerFactory.getLogger(HttpAiConverseClient.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+            new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        MDC.put("traceId", TRACE_ID);
+        mockRestServiceServer.expect(requestTo(CONVERSE_URL))
+            .andRespond(withSuccess(complaintReply(), MediaType.APPLICATION_JSON));
+
+        try {
+            httpAiConverseClient.converse(request());
+
+            assertThat(appender.list)
+                .anyMatch(event -> event.getFormattedMessage()
+                    .startsWith("AI 요청 원문. traceId=" + TRACE_ID + ", turnId=" + TURN_ID)
+                    && event.getFormattedMessage().contains("\"text\":\"안방 천장 가운데요\""));
+            assertThat(appender.list)
+                .anyMatch(event -> event.getFormattedMessage()
+                    .startsWith("AI 응답 원문. traceId=" + TRACE_ID + ", turnId=" + TURN_ID)
+                    && event.getFormattedMessage().contains("아래 내용으로 민원을 접수할까요?"));
+        } finally {
+            logger.detachAppender(appender);
+            MDC.remove("traceId");
         }
     }
 
