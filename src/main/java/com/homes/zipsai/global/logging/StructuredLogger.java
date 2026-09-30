@@ -47,18 +47,12 @@ public class StructuredLogger {
         log(event("stage_done", traceId, route, fields));
     }
 
-    public void markError(int statusCode, String errorCode) {
-        MDC.put(STATUS_CODE, Integer.toString(statusCode));
-        if (errorCode != null) {
-            MDC.put(ERROR_CODE, errorCode);
-        }
-    }
-
     public void requestDone(String traceId, String route, String method, int statusCode,
                             long totalMs, String errorCode) {
         Map<String, Object> fields = new LinkedHashMap<>();
         int finalStatusCode = statusCode >= 400 ? statusCode : numberOrDefault(MDC.get(STATUS_CODE), statusCode);
-        fields.put("method", method); fields.put("status_code", finalStatusCode);
+        fields.put("method", method);
+        fields.put("status_code", finalStatusCode);
         fields.put("outcome", finalStatusCode >= 400 ? "fail" : "ok");
         fields.put("total_ms", totalMs);
         fields.put("db_ms", numberOrNull(MDC.get("dbMs")));
@@ -81,8 +75,10 @@ public class StructuredLogger {
 
     private Map<String, Object> event(String name, String traceId, String route, Map<String, Object> fields) {
         Map<String, Object> event = new LinkedHashMap<>();
-        event.put("timestamp", Instant.now().toString()); event.put("level", "INFO");
-        event.put("service", "backend"); event.put("event", name);
+        event.put("timestamp", Instant.now().toString());
+        event.put("level", "INFO");
+        event.put("service", "backend");
+        event.put("event", name);
         event.put("trace_id", traceId);
         event.put("route", MDC.get("route") != null ? MDC.get("route") : route);
         event.putAll(fields);
@@ -90,29 +86,10 @@ public class StructuredLogger {
     }
 
     private void log(Map<String, Object> event) {
-        if (!isProdProfile()) {
-            return;
-        }
         try {
             LOGGER.info(objectMapper.writeValueAsString(event));
         } catch (JacksonException ignored) {
             LOGGER.info("structured_event_serialization_failed");
         }
-    }
-
-    private boolean isProdProfile() {
-        String profiles = System.getProperty("spring.profiles.active");
-        if (profiles == null || profiles.isBlank()) {
-            profiles = System.getenv("SPRING_PROFILES_ACTIVE");
-        }
-        if (profiles == null) {
-            return false;
-        }
-        for (String profile : profiles.split(",")) {
-            if ("prod".equals(profile.trim())) {
-                return true;
-            }
-        }
-        return false;
     }
 }
