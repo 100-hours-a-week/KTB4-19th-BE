@@ -137,7 +137,7 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<?> unexpected(Exception exception) {
-        LOGGER.error("Unhandled API failure: {}", exception.getClass().getName());
+        LOGGER.error("Unhandled API failure: {}", exception.getClass().getName(), exception);
         return handle(new InternalServerException());
     }
 
