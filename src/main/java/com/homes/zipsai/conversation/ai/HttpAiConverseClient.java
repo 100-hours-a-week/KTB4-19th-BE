@@ -49,7 +49,10 @@ public class HttpAiConverseClient implements AiConverseClient {
         String outcome = "ok";
         String errorCode = null;
         try {
+            LOGGER.info("AI 요청 원문. traceId={}, turnId={}, body={}", traceId, turnId,
+                objectMapper.writeValueAsString(request));
             String body = exchange(request, turnId);
+            LOGGER.info("AI 응답 원문. traceId={}, turnId={}, body={}", traceId, turnId, body);
             return objectMapper.readValue(body, AiConverseResponse.class);
         } catch (JacksonException e) {
             LOGGER.error("AI 응답을 읽지 못했습니다. turnId={}", turnId);
