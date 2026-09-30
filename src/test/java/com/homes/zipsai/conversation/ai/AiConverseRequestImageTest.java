@@ -31,7 +31,7 @@ class AiConverseRequestImageTest {
     @DisplayName("지금 보낸 메시지의 사진은 message에 담긴다")
     void putsCurrentMessageImagesInMessage() {
         AiConverseRequest request = AiConverseRequest.of(room, conversation, currentMessage,
-            List.of("https://s3.test/current.jpg"), List.of());
+            List.of("https://s3.test/current.jpg"), List.of(), "trace");
 
         assertThat(request.message().imageUrls()).containsExactly("https://s3.test/current.jpg");
     }
@@ -43,7 +43,7 @@ class AiConverseRequestImageTest {
             AiConverseRequest.HistoryMessage.of(firstMessage, List.of("https://s3.test/first.jpg")),
             AiConverseRequest.HistoryMessage.of(reply, List.of()));
 
-        AiConverseRequest request = AiConverseRequest.of(room, conversation, currentMessage, List.of(), history);
+        AiConverseRequest request = AiConverseRequest.of(room, conversation, currentMessage, List.of(), history, "trace");
 
         assertThat(request.conversationHistory().getFirst().imageUrls())
             .containsExactly("https://s3.test/first.jpg");
@@ -60,7 +60,7 @@ class AiConverseRequestImageTest {
             AiConverseRequest.HistoryMessage.of(reply, List.of()));
 
         AiConverseRequest request = AiConverseRequest.of(room, conversation, currentMessage,
-            List.of("https://s3.test/current.jpg"), history);
+            List.of("https://s3.test/current.jpg"), history, "trace");
 
         assertThat(request.complaintDraft().imageUrls())
             .containsExactly("https://s3.test/first.jpg", "https://s3.test/current.jpg");
@@ -70,7 +70,7 @@ class AiConverseRequestImageTest {
     @DisplayName("민원 초안이 없으면 사진이 있어도 초안은 보내지 않는다")
     void omitsComplaintDraftWithoutDraft() {
         AiConverseRequest request = AiConverseRequest.of(room, conversation, currentMessage,
-            List.of("https://s3.test/current.jpg"), List.of());
+            List.of("https://s3.test/current.jpg"), List.of(), "trace");
 
         assertThat(request.complaintDraft()).isNull();
     }

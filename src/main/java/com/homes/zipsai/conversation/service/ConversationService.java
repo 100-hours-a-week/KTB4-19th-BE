@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+import org.slf4j.MDC;
 import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -150,7 +151,7 @@ public class ConversationService {
         List<AttachmentResponse> attachments = attachImages(residentMessage, images);
 
         AiConverseRequest aiRequest = AiConverseRequest.of(room, conversation, residentMessage,
-            fileUrls(attachments), List.of());
+            fileUrls(attachments), List.of(), MDC.get("traceId"));
         return new PendingAiReply(conversation, MessageResponse.of(residentMessage, attachments), true, null,
             aiRequest);
     }
@@ -169,7 +170,7 @@ public class ConversationService {
         List<AttachmentResponse> attachments = attachImages(residentMessage, images);
 
         AiConverseRequest aiRequest = AiConverseRequest.of(room, conversation, residentMessage,
-            fileUrls(attachments), history);
+            fileUrls(attachments), history, MDC.get("traceId"));
         return new PendingAiReply(conversation, MessageResponse.of(residentMessage, attachments), false,
             previousLastMessageAt, aiRequest);
     }
