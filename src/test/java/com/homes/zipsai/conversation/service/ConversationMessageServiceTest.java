@@ -168,7 +168,7 @@ class ConversationMessageServiceTest {
         MessageResponse residentMessage =
             new MessageResponse(20L, SenderType.RESIDENT, MessageType.TEXT, "천장에서 물이 새요", List.of(), null, null);
         AiConverseRequest aiRequest =
-            new AiConverseRequest(null, null, null, null, TURN_ID, null, null, null, List.of(), null);
+            new AiConverseRequest(null, null, null, null, TURN_ID, null, null, null, null, List.of(), null);
         return new PendingAiReply(conversation, residentMessage, newConversation, null, aiRequest);
     }
 

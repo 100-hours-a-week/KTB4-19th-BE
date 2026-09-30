@@ -19,6 +19,7 @@ public record AiConverseRequest(
     String residentId,
     String conversationId,
     String turnId,
+    String traceId,
     AiRoute currentRoute,
     AiComplaintState currentComplaintState,
     MessagePayload message,
@@ -27,7 +28,7 @@ public record AiConverseRequest(
 ) {
 
     public static AiConverseRequest of(Room room, Conversation conversation, Message residentMessage,
-                                       List<String> imageUrls, List<HistoryMessage> history) {
+                                       List<String> imageUrls, List<HistoryMessage> history, String traceId) {
         List<String> draftImageUrls = new ArrayList<>();
         for (HistoryMessage message : history) {
             draftImageUrls.addAll(message.imageUrls());
@@ -40,6 +41,7 @@ public record AiConverseRequest(
             String.valueOf(room.getResident().getId()),
             String.valueOf(conversation.getId()),
             residentMessage.getTurnId(),
+            traceId,
             conversation.getCurrentRoute(),
             conversation.getComplaintState(),
             new MessagePayload(String.valueOf(residentMessage.getId()), residentMessage.getContent(), imageUrls),

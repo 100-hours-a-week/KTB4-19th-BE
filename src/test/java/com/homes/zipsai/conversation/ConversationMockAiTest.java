@@ -133,7 +133,7 @@ class ConversationMockAiTest {
     }
 
     @Test
-    @DisplayName("HTTP 요청 trace_id와 AI turn_id를 분리해 메시지 쌍에 저장한다")
+    @DisplayName("AI 요청에 HTTP 요청 trace_id를 담고 AI turn_id는 따로 메시지 쌍에 저장한다")
     void separatesHttpRequestTraceIdFromAiTurnId() throws Exception {
         String email = conversationTestFixture.livingResident("302");
         RequestPostProcessor resident = conversationTestFixture.authenticatedAs(email);
@@ -149,6 +149,7 @@ class ConversationMockAiTest {
         AiConverseRequest aiRequest = aiRequestCaptor.getValue();
         List<Message> messages = messageRepository.findAllByConversationId(conversationId);
 
+        assertThat(aiRequest.traceId()).isEqualTo(traceId);
         assertThat(aiRequest.turnId()).isNotEqualTo(traceId);
         assertThat(messages).extracting(Message::getTurnId).containsExactly(aiRequest.turnId(), aiRequest.turnId());
     }

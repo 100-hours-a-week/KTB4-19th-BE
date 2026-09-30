@@ -8,6 +8,7 @@ import tools.jackson.databind.annotation.JsonNaming;
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record AiIndexingRequest(
         long buildingId,
+        String traceId,
         String docId,
         String title,
         String fileKey,

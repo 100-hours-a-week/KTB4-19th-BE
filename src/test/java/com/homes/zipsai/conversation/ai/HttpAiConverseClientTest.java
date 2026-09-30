@@ -63,7 +63,7 @@ class HttpAiConverseClientTest {
             .andExpect(jsonPath("$.resident_id").value("7"))
             .andExpect(jsonPath("$.conversation_id").value("11"))
             .andExpect(jsonPath("$.turn_id").value(TURN_ID))
-            .andExpect(jsonPath("$.trace_id").doesNotExist())
+            .andExpect(jsonPath("$.trace_id").value(TRACE_ID))
             .andExpect(jsonPath("$.current_route").value("complaint"))
             .andExpect(jsonPath("$.current_complaint_state").value("collecting"))
             .andExpect(jsonPath("$.message.message_id").value("21"))
@@ -250,7 +250,7 @@ class HttpAiConverseClientTest {
 
     private AiConverseRequest request() {
         return new AiConverseRequest(
-            1L, "302", "7", "11", TURN_ID,
+            1L, "302", "7", "11", TURN_ID, TRACE_ID,
             AiRoute.COMPLAINT, AiComplaintState.COLLECTING,
             new AiConverseRequest.MessagePayload("21", "안방 천장 가운데요", List.of()),
             List.of(new AiConverseRequest.HistoryMessage("19", AiTurnRole.USER, "천장에서 물이 새요", List.of())),

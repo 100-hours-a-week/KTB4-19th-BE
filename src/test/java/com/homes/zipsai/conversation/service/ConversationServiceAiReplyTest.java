@@ -190,7 +190,7 @@ class ConversationServiceAiReplyTest {
         MessageResponse residentMessage = new MessageResponse(RESIDENT_MESSAGE_ID, SenderType.RESIDENT,
             MessageType.TEXT, "분리수거 요일이 언제인가요?", List.of(), null, null);
         AiConverseRequest aiRequest =
-            new AiConverseRequest(null, null, null, null, TURN_ID, null, null, null, List.of(), null);
+            new AiConverseRequest(null, null, null, null, TURN_ID, null, null, null, null, List.of(), null);
         return new PendingAiReply(conversation, residentMessage, newConversation, previousLastMessageAt, aiRequest);
     }
 
