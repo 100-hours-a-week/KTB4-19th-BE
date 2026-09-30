@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -129,8 +130,8 @@ public class RuleDocumentService {
                 return;
             }
             client.index(new AiIndexingRequest(
-                    building.getId(), String.valueOf(document.getId()), document.getTitle(), fileKey,
-                    validDocumentIds));
+                    building.getId(), MDC.get("traceId"), String.valueOf(document.getId()), document.getTitle(),
+                    fileKey, validDocumentIds));
         } catch (RuntimeException exception) {
             LOGGER.warn("문서 저장 후 AI 색인 요청에 실패했습니다. documentId={}", document.getId(), exception);
         }
@@ -143,7 +144,7 @@ public class RuleDocumentService {
                     .stream().map(item -> String.valueOf(item.getId())).toList();
             AiIndexingClient client = aiIndexingClient.getIfAvailable();
             if (client != null) {
-                client.cleanup(building.getId(), validDocumentIds);
+                client.cleanup(building.getId(), MDC.get("traceId"), validDocumentIds);
             }
         } catch (RuntimeException exception) {
             LOGGER.warn("문서 삭제 후 AI 색인 정리 요청에 실패했습니다. buildingId={}", building.getId(), exception);
