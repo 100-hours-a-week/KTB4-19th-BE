@@ -88,7 +88,11 @@ public class RuleDocumentService {
         if (!document.isValid() || !document.getBuilding().getId().equals(building.getId())) {
             throw new ForbiddenException();
         }
-        document.updateTitle(title.trim());
+        String trimmedTitle = title.trim();
+        if (!trimmedTitle.equals(document.getTitle())) {
+            document.updateTitle(trimmedTitle);
+        }
+        // 색인은 파일 내용을 임베딩하므로 파일이 실제로 바뀐 경우에만 다시 요청한다.
         if (attachmentId != null && !attachmentId.equals(document.getAttachment().getId())) {
             File replacement = fileRepository.findById(attachmentId)
                     .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.ATTACHMENT));
@@ -99,8 +103,8 @@ public class RuleDocumentService {
                 throw new ConflictException(ConflictException.Reason.UPLOAD_NOT_COMPLETED);
             }
             document.replaceAttachment(replacement);
+            index(document, building);
         }
-        index(document, building);
         return response(document);
     }
 
