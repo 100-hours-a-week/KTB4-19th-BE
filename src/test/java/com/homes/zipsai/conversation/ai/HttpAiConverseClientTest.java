@@ -2,11 +2,6 @@ package com.homes.zipsai.conversation.ai;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -28,7 +23,6 @@ import org.springframework.web.client.RestClient;
 
 import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.global.exception.TooManyRequestsException;
-import com.homes.zipsai.global.logging.StructuredLogger;
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -42,15 +36,12 @@ class HttpAiConverseClientTest {
 
     private MockRestServiceServer mockRestServiceServer;
     private HttpAiConverseClient httpAiConverseClient;
-    private StructuredLogger structuredLogger;
 
     @BeforeEach
     void setUp() {
         RestClient.Builder builder = RestClient.builder();
         mockRestServiceServer = MockRestServiceServer.bindTo(builder).build();
-        structuredLogger = mock(StructuredLogger.class);
-        httpAiConverseClient = new HttpAiConverseClient(builder, BASE_URL, CONVERSE_PATH, new JsonMapper(),
-                structuredLogger);
+        httpAiConverseClient = new HttpAiConverseClient(builder, BASE_URL, CONVERSE_PATH, new JsonMapper());
     }
 
     @Test
@@ -77,24 +68,6 @@ class HttpAiConverseClientTest {
 
         httpAiConverseClient.converse(request());
 
-        mockRestServiceServer.verify();
-    }
-
-    @Test
-    @DisplayName("AI 호출 단계 로그에는 AI turn_id 대신 HTTP 요청 trace_id를 기록한다")
-    void logsHttpRequestTraceIdSeparatelyFromTurnId() {
-        MDC.put("traceId", TRACE_ID);
-        mockRestServiceServer.expect(requestTo(CONVERSE_URL))
-            .andRespond(withSuccess(complaintReply(), MediaType.APPLICATION_JSON));
-
-        try {
-            httpAiConverseClient.converse(request());
-        } finally {
-            MDC.remove("traceId");
-        }
-
-        verify(structuredLogger).stageDone(eq(TRACE_ID), eq(CONVERSE_PATH), eq("ai_api"), anyLong(),
-            eq("ok"), isNull());
         mockRestServiceServer.verify();
     }
 
