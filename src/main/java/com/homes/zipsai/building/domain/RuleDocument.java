@@ -61,11 +61,11 @@ public class RuleDocument extends BaseTimeEntity {
 
     public void updateTitle(String title) {
         this.title = title;
-        this.version++;
     }
 
     public void replaceAttachment(File attachment) {
         this.attachment = attachment;
+        this.version++;
     }
 
     public void delete() {
