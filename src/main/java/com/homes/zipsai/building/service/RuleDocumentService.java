@@ -92,7 +92,7 @@ public class RuleDocumentService {
         if (!trimmedTitle.equals(document.getTitle())) {
             document.updateTitle(trimmedTitle);
         }
-        // 색인은 파일 내용을 임베딩하므로 파일이 실제로 바뀐 경우에만 다시 요청한다.
+
         if (attachmentId != null && !attachmentId.equals(document.getAttachment().getId())) {
             File replacement = fileRepository.findById(attachmentId)
                     .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.ATTACHMENT));
