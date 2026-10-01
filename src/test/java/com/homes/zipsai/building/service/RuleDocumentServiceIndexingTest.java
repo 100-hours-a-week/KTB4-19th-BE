@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.doThrow;
 
 import java.util.List;
 import java.util.Optional;
@@ -31,6 +32,7 @@ import com.homes.zipsai.common.repository.FileRepository;
 import com.homes.zipsai.common.service.S3StorageService;
 import com.homes.zipsai.conversation.ai.AiIndexingClient;
 import com.homes.zipsai.conversation.ai.AiIndexingRequest;
+import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.user.domain.User;
 
 @ExtendWith(MockitoExtension.class)
@@ -120,6 +122,27 @@ class RuleDocumentServiceIndexingTest {
     }
 
     @Test
+    @DisplayName("AI 색인에 실패해도 문서 파일 교체 결과를 반환한다")
+    void returnsUpdatedDocumentWhenIndexingFails() {
+        given(documentRepository.findById(DOCUMENT_ID)).willReturn(Optional.of(savedDocument()));
+        File replacement = new File("documents/rule-v2.pdf", 100, "application/pdf", "rule-v2.pdf");
+        ReflectionTestUtils.setField(replacement, "id", 2000L);
+        replacement.assignOwner(building.getManager());
+        replacement.markUploaded(100, "application/pdf");
+        given(fileRepository.findById(2000L)).willReturn(Optional.of(replacement));
+        givenDownloadUrl();
+        doThrow(new AiUnavailableException()).when(aiIndexingClient).index(any(AiIndexingRequest.class));
+
+        var response = ruleDocumentService.update(MANAGER_ID, DOCUMENT_ID, "관리규약 개정", 2000L);
+
+        assertThat(response.documentId()).isEqualTo(DOCUMENT_ID);
+        assertThat(response.title()).isEqualTo("관리규약 개정");
+        assertThat(response.attachmentId()).isEqualTo(2000L);
+        assertThat(response.version()).isEqualTo(2);
+        assertThat(sentRequest().fileKey()).isEqualTo("s3://test-bucket/documents/rule-v2.pdf");
+    }
+
+    @Test
     @DisplayName("문서를 삭제하면 AI 색인 정리 요청에 HTTP 요청 trace_id를 담는다")
     void sendsTraceIdWhenDocumentDeleted() {
         given(documentRepository.findById(DOCUMENT_ID)).willReturn(Optional.of(savedDocument()));
@@ -129,6 +152,20 @@ class RuleDocumentServiceIndexingTest {
         ruleDocumentService.delete(MANAGER_ID, DOCUMENT_ID);
 
         then(aiIndexingClient).should().cleanup(BUILDING_ID, TRACE_ID, List.of());
+    }
+
+    @Test
+    @DisplayName("AI 색인 정리에 실패해도 문서 삭제를 유지한다")
+    void keepsDocumentDeletedWhenIndexingCleanupFails() {
+        RuleDocument document = savedDocument();
+        given(documentRepository.findById(DOCUMENT_ID)).willReturn(Optional.of(document));
+        given(documentRepository.findAllByBuilding_IdAndValidTrueAndDeletedAtIsNullOrderByUpdatedAtDesc(BUILDING_ID))
+            .willReturn(List.of());
+        doThrow(new AiUnavailableException()).when(aiIndexingClient).cleanup(BUILDING_ID, TRACE_ID, List.of());
+
+        ruleDocumentService.delete(MANAGER_ID, DOCUMENT_ID);
+
+        assertThat(document.isValid()).isFalse();
     }
 
     private RuleDocument savedDocument() {

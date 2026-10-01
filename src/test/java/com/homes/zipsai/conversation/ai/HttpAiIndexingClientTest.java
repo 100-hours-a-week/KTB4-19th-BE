@@ -1,6 +1,5 @@
 package com.homes.zipsai.conversation.ai;
 
-import static org.mockito.Mockito.mock;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -16,8 +15,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
-import com.homes.zipsai.global.logging.StructuredLogger;
-
 class HttpAiIndexingClientTest {
 
     private static final String BASE_URL = "http://ai.test";
@@ -31,8 +28,7 @@ class HttpAiIndexingClientTest {
     void setUp() {
         RestClient.Builder builder = RestClient.builder();
         mockRestServiceServer = MockRestServiceServer.bindTo(builder).build();
-        httpAiIndexingClient = new HttpAiIndexingClient(builder, BASE_URL, INDEXING_PATH, "",
-            mock(StructuredLogger.class));
+        httpAiIndexingClient = new HttpAiIndexingClient(builder, BASE_URL, INDEXING_PATH, "");
     }
 
     @Test

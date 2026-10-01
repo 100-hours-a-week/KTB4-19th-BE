@@ -16,7 +16,6 @@ import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.global.exception.ApiException;
 import com.homes.zipsai.global.exception.InternalServerException;
 import com.homes.zipsai.global.exception.TooManyRequestsException;
-import com.homes.zipsai.global.logging.StructuredLogger;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
@@ -30,24 +29,18 @@ public class HttpAiConverseClient implements AiConverseClient {
     private final RestClient restClient;
     private final String conversePath;
     private final ObjectMapper objectMapper;
-    private final StructuredLogger structuredLogger;
 
     public HttpAiConverseClient(RestClient.Builder builder, @Value("${app.ai.base-url}") String baseUrl,
-                                @Value("${app.ai.converse-path}") String conversePath, ObjectMapper objectMapper,
-                                StructuredLogger structuredLogger) {
+                                @Value("${app.ai.converse-path}") String conversePath, ObjectMapper objectMapper) {
         this.restClient = builder.baseUrl(baseUrl).build();
         this.conversePath = conversePath;
         this.objectMapper = objectMapper;
-        this.structuredLogger = structuredLogger;
     }
 
     @Override
     public AiConverseResponse converse(AiConverseRequest request) {
         String turnId = request.turnId();
         String traceId = MDC.get("traceId");
-        long started = System.nanoTime();
-        String outcome = "ok";
-        String errorCode = null;
         try {
             LOGGER.info("AI 요청 원문. traceId={}, turnId={}, body={}", traceId, turnId,
                 objectMapper.writeValueAsString(request));
@@ -56,18 +49,7 @@ public class HttpAiConverseClient implements AiConverseClient {
             return objectMapper.readValue(body, AiConverseResponse.class);
         } catch (JacksonException e) {
             LOGGER.error("AI 응답을 읽지 못했습니다. turnId={}", turnId);
-            outcome = "fail";
-            errorCode = "AI_UNAVAILABLE";
             throw new AiUnavailableException();
-        } catch (RuntimeException e) {
-            outcome = "fail";
-            errorCode = e instanceof ApiException apiException ? apiException.code : "AI_UNAVAILABLE";
-            throw e;
-        } finally {
-            if (traceId != null) {
-                structuredLogger.stageDone(traceId, conversePath, "ai_api",
-                    (System.nanoTime() - started) / 1_000_000, outcome, errorCode);
-            }
         }
     }
 
