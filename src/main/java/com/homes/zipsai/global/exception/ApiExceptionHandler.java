@@ -31,6 +31,7 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import com.giffing.bucket4j.spring.boot.starter.context.RateLimitException;
 import com.homes.zipsai.global.logging.ServerErrorLog;
 import com.homes.zipsai.global.response.ApiResponse;
 
@@ -132,6 +133,11 @@ public class ApiExceptionHandler {
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<?> unauthorized() {
         return handle(new UnauthorizedException());
+    }
+
+    @ExceptionHandler(RateLimitException.class)
+    public ResponseEntity<?> tooManyRequests() {
+        return handle(new TooManyRequestsException());
     }
 
     @ExceptionHandler(NoResourceFoundException.class)

@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -359,6 +360,44 @@ class InvitationCodeApiTests {
         assertThat(roomStatus(roomId)).isEqualTo("INVITED");
     }
 
+    @Test
+    @DisplayName("같은 입주민은 초대코드를 10번까지만 확인할 수 있다")
+    void rejectsEleventhInvitationCodeValidationOfSameResident() throws Exception {
+        Account resident = account("RESIDENT");
+        for (int attempt = 0; attempt < 10; attempt++) {
+            validate(resident.token(), "ZZZZZZ").andExpect(status().isNotFound());
+        }
+
+        validate(resident.token(), "ZZZZZZ")
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.error.code").value("TOO_MANY_REQUESTS"));
+    }
+
+    @Test
+    @DisplayName("같은 사용자는 세대 연결을 10번까지만 시도할 수 있다")
+    void rejectsEleventhRoomConnectionOfSameUser() throws Exception {
+        Account resident = account("RESIDENT");
+        for (int attempt = 0; attempt < 10; attempt++) {
+            connect(resident.token(), "ZZZZZZ").andExpect(status().isNotFound());
+        }
+
+        connect(resident.token(), "ZZZZZZ")
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.error.code").value("TOO_MANY_REQUESTS"));
+    }
+
+    @Test
+    @DisplayName("다른 입주민의 시도 횟수는 영향을 주지 않는다")
+    void limitsInvitationCodeAttemptsPerResident() throws Exception {
+        Account blockedResident = account("RESIDENT");
+        Account otherResident = account("RESIDENT");
+        for (int attempt = 0; attempt < 11; attempt++) {
+            validate(blockedResident.token(), "ZZZZZZ");
+        }
+
+        validate(otherResident.token(), "ZZZZZZ").andExpect(status().isNotFound());
+    }
+
     private ResultActions issue(String token, Long roomId) throws Exception {
         return mvc.perform(post(
                         "/api/v1/managers/me/rooms/{roomId}/invitation-codes",
@@ -379,6 +418,11 @@ class InvitationCodeApiTests {
                         "/api/v1/managers/me/rooms/{roomId}/resident",
                         roomId
                 ).header("Authorization", "Bearer " + token));
+    }
+
+    private ResultActions validate(String token, String code) throws Exception {
+        return mvc.perform(get("/api/v1/residents/me/invitation-codes/{code}", code)
+                .header("Authorization", "Bearer " + token));
     }
 
     private ResultActions connect(String token, String code) throws Exception {
