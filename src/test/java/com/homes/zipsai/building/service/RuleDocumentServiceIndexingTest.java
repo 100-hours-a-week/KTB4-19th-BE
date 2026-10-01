@@ -104,12 +104,17 @@ class RuleDocumentServiceIndexingTest {
     }
 
     @Test
-    @DisplayName("문서를 수정하면 AI 색인 요청에 HTTP 요청 trace_id를 담는다")
+    @DisplayName("문서 파일을 교체하면 AI 색인 요청에 HTTP 요청 trace_id를 담는다")
     void sendsTraceIdWhenDocumentUpdated() {
         given(documentRepository.findById(DOCUMENT_ID)).willReturn(Optional.of(savedDocument()));
+        File replacement = new File("documents/rule-v2.pdf", 100, "application/pdf", "rule-v2.pdf");
+        ReflectionTestUtils.setField(replacement, "id", 2000L);
+        replacement.assignOwner(building.getManager());
+        replacement.markUploaded(100, "application/pdf");
+        given(fileRepository.findById(2000L)).willReturn(Optional.of(replacement));
         givenDownloadUrl();
 
-        ruleDocumentService.update(MANAGER_ID, DOCUMENT_ID, "관리규약 개정", null);
+        ruleDocumentService.update(MANAGER_ID, DOCUMENT_ID, "관리규약", 2000L);
 
         assertThat(sentRequest().traceId()).isEqualTo(TRACE_ID);
     }
