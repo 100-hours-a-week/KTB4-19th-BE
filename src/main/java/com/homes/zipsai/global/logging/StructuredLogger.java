@@ -27,17 +27,10 @@ public class StructuredLogger {
         log(event("request_started", traceId, route, Map.of("method", method)));
     }
 
-    public void stageDone(String traceId, String route, String stage, long durationMs, String outcome) {
-        stageDone(traceId, route, stage, durationMs, outcome, null);
-    }
-
     public void stageDone(String traceId, String route, String stage, long durationMs,
                           String outcome, String errorCode) {
         if ("mysql".equals(stage)) {
             MDC.put("dbMs", Long.toString(durationMs));
-        }
-        if ("ai_api".equals(stage)) {
-            MDC.put("aiApiMs", Long.toString(durationMs));
         }
         Map<String, Object> fields = new LinkedHashMap<>();
         fields.put("stage", stage);
