@@ -21,6 +21,7 @@ repositories {
 ext {
 	awsSdkVersion = '2.31.68'
 	sentryVersion = '8.58.0'
+	pdfboxVersion = '3.0.5'
 }
 
 dependencies {
@@ -44,6 +45,7 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-aspectj'
 	implementation 'com.giffing.bucket4j.spring.boot.starter:bucket4j-spring-boot-starter:0.14.0'
 	implementation 'com.github.ben-manes.caffeine:jcache'
+	implementation "org.apache.pdfbox:pdfbox:${pdfboxVersion}"
 	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'
 	testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'

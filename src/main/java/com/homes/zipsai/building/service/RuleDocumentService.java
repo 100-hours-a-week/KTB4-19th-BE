@@ -19,12 +19,14 @@ import com.homes.zipsai.common.config.StorageProperties;
 import com.homes.zipsai.common.domain.File;
 import com.homes.zipsai.common.domain.FileStatus;
 import com.homes.zipsai.common.repository.FileRepository;
+import com.homes.zipsai.common.service.PdfInspector;
 import com.homes.zipsai.common.service.S3StorageService;
 import com.homes.zipsai.conversation.ai.AiIndexingClient;
 import com.homes.zipsai.conversation.ai.AiIndexingRequest;
 import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.global.exception.ForbiddenException;
 import com.homes.zipsai.global.exception.NotFoundException;
+import com.homes.zipsai.global.exception.ValidationFailedException;
 
 import lombok.RequiredArgsConstructor;
 
@@ -52,6 +54,7 @@ public class RuleDocumentService {
         if (file.getStatus() != FileStatus.UPLOADED) {
             throw new ConflictException(ConflictException.Reason.UPLOAD_NOT_COMPLETED);
         }
+        rejectEncryptedPdf(file);
         RuleDocument saved = documentRepository.save(new RuleDocument(
                 building, file, request.title(), "", 1));
         index(saved, building);
@@ -102,6 +105,7 @@ public class RuleDocumentService {
             if (replacement.getStatus() != FileStatus.UPLOADED) {
                 throw new ConflictException(ConflictException.Reason.UPLOAD_NOT_COMPLETED);
             }
+            rejectEncryptedPdf(replacement);
             document.replaceAttachment(replacement);
             index(document, building);
         }
@@ -119,6 +123,16 @@ public class RuleDocumentService {
         }
         document.delete();
         indexCleanup(building);
+    }
+
+    private void rejectEncryptedPdf(File file) {
+        String fileType = file.getFileType();
+        if (!"pdf".equals(fileType) && !"application/pdf".equals(fileType)) {
+            return;
+        }
+        if (PdfInspector.isEncrypted(s3StorageService.read(file.getFileKey()))) {
+            throw new ValidationFailedException("attachmentId", ValidationFailedException.Reason.ENCRYPTED_PDF);
+        }
     }
 
     private void index(RuleDocument document, Building building) {
