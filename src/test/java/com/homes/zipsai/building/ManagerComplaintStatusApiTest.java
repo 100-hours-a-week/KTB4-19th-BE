@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.util.List;
 import java.util.UUID;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -38,6 +39,7 @@ import com.homes.zipsai.user.repository.UserRepository;
 
 @SpringBootTest(classes = ZipsaiBackendApplication.class)
 @AutoConfigureMockMvc
+@DisplayName("관리자 민원 상태 변경 API")
 class ManagerComplaintStatusApiTest {
 
     private static final String COMPLAINTS = "/api/v1/managers/me/complaints/";
@@ -61,6 +63,7 @@ class ManagerComplaintStatusApiTest {
     ComplaintRepository complaintRepository;
 
     @Test
+    @DisplayName("민원 상태를 처리 중으로 변경하고 저장한다")
     void changesComplaintStatusToInProgress() throws Exception {
         ManagerBuilding owner = managerBuilding();
         Complaint complaint = complaint(owner.building(), owner.room(), "천장 누수");
@@ -81,6 +84,7 @@ class ManagerComplaintStatusApiTest {
     }
 
     @Test
+    @DisplayName("민원 완료 시 완료 시각을 기록하고 저장한다")
     void recordsResolvedAtWhenStatusBecomesDone() throws Exception {
         ManagerBuilding owner = managerBuilding();
         Complaint complaint = complaint(owner.building(), owner.room(), "엘리베이터 고장");
@@ -102,6 +106,7 @@ class ManagerComplaintStatusApiTest {
     }
 
     @Test
+    @DisplayName("허용되지 않은 민원 상태는 검증 오류를 반환한다")
     void rejectsUnsupportedStatus() throws Exception {
         ManagerBuilding owner = managerBuilding();
         Complaint complaint = complaint(owner.building(), owner.room(), "누수");
@@ -113,9 +118,13 @@ class ManagerComplaintStatusApiTest {
             .andExpect(status().isUnprocessableContent())
             .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
             .andExpect(jsonPath("$.error.details.violations[0].field").value("statusCode"));
+        Complaint unchanged = complaintRepository.findById(complaint.getId()).orElseThrow();
+        assertThat(unchanged.getStatus()).isEqualTo(ComplaintStatus.PENDING);
+        assertThat(unchanged.getResolvedAt()).isNull();
     }
 
     @Test
+    @DisplayName("필수 상태값 누락은 오류를 반환한다")
     void rejectsMissingStatus() throws Exception {
         ManagerBuilding owner = managerBuilding();
         Complaint complaint = complaint(owner.building(), owner.room(), "누수");
@@ -127,9 +136,17 @@ class ManagerComplaintStatusApiTest {
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error.code").value("MISSING_REQUIRED_FIELD"))
             .andExpect(jsonPath("$.error.details.violations[0].field").value("statusCode"));
+        mvc.perform(patch(COMPLAINTS + complaint.getId())
+                .with(manager(owner.manager().getId()))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"statusCode\":\"  \"}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.error.code").value("MISSING_REQUIRED_FIELD"))
+            .andExpect(jsonPath("$.error.details.violations[0].field").value("statusCode"));
     }
 
     @Test
+    @DisplayName("다른 관리자의 건물 민원 상태 변경을 거부한다")
     void rejectsComplaintFromAnotherManagersBuilding() throws Exception {
         ManagerBuilding owner = managerBuilding();
         ManagerBuilding other = managerBuilding();
@@ -141,9 +158,12 @@ class ManagerComplaintStatusApiTest {
                 .content("{\"statusCode\":\"DONE\"}"))
             .andExpect(status().isForbidden())
             .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+        assertThat(complaintRepository.findById(complaint.getId()).orElseThrow().getStatus())
+            .isEqualTo(ComplaintStatus.PENDING);
     }
 
     @Test
+    @DisplayName("존재하지 않는 민원 상태 변경은 404를 반환한다")
     void returnsComplaintNotFoundWhenComplaintDoesNotExist() throws Exception {
         ManagerBuilding owner = managerBuilding();
 
@@ -156,6 +176,7 @@ class ManagerComplaintStatusApiTest {
     }
 
     @Test
+    @DisplayName("0 이하 민원 ID는 검증 오류를 반환한다")
     void rejectsNonPositiveComplaintId() throws Exception {
         ManagerBuilding owner = managerBuilding();
 
@@ -166,14 +187,32 @@ class ManagerComplaintStatusApiTest {
             .andExpect(status().isUnprocessableContent())
             .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
             .andExpect(jsonPath("$.error.details.violations[0].field").value("complaintId"));
+        mvc.perform(patch(COMPLAINTS + -1)
+                .with(manager(owner.manager().getId()))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"statusCode\":\"DONE\"}"))
+            .andExpect(status().isUnprocessableContent())
+            .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
+            .andExpect(jsonPath("$.error.details.violations[0].field").value("complaintId"));
     }
 
     @Test
+    @DisplayName("민원 상태 변경은 인증을 요구한다")
     void rejectsUnauthenticatedRequest() throws Exception {
         mvc.perform(patch(COMPLAINTS + 1)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"statusCode\":\"DONE\"}"))
+            .content("{\"statusCode\":\"DONE\"}"))
             .andExpect(status().isUnauthorized());
+
+        User resident = user(UserRole.RESIDENT);
+        mvc.perform(patch(COMPLAINTS + 1)
+                .with(authentication(new UsernamePasswordAuthenticationToken(
+                    new AuthPrincipal(resident.getId(), "test-session"), null,
+                    List.of(new SimpleGrantedAuthority("ROLE_RESIDENT")))))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"statusCode\":\"DONE\"}"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
     }
 
     private ManagerBuilding managerBuilding() {

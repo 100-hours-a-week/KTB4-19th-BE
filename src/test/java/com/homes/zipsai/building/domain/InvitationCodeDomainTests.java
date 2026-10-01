@@ -6,11 +6,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.time.LocalDateTime;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.user.domain.User;
 
+@DisplayName("초대코드·호실 상태 도메인")
 class InvitationCodeDomainTests {
     private LocalDateTime issuedAt;
     private User manager;
@@ -26,6 +28,7 @@ class InvitationCodeDomainTests {
     }
 
     @Test
+    @DisplayName("만료 시각을 포함해 코드를 만료 판정하고 초대 호실 상태는 유지한다")
     void expiresAtIsInclusiveAndKeepsInvitedRoomStatus() {
         room.invite();
         InvitationCode code = new InvitationCode(room, "ABC234", issuedAt.plusHours(3));
@@ -41,6 +44,7 @@ class InvitationCodeDomainTests {
     }
 
     @Test
+    @DisplayName("만료된 코드와 사용된 코드는 만료 판정으로 상태가 바뀌지 않는다")
     void expiryKeepsTerminalCodeStatesUnchanged() {
         InvitationCode expired = code("ABC234");
 
@@ -61,6 +65,7 @@ class InvitationCodeDomainTests {
     }
 
     @Test
+    @DisplayName("빈 호실은 초대 후 입주 상태가 되고 입주 중 재초대는 거부한다")
     void roomTransitionsFromEmptyThroughInviteToLivingAndCannotBeReinvited() {
         room.invite();
         assertThat(room.getStatus()).isEqualTo(RoomStatus.INVITED);
@@ -75,6 +80,7 @@ class InvitationCodeDomainTests {
     }
 
     @Test
+    @DisplayName("초대를 취소하면 호실은 공실로 돌아간다")
     void cancellationReturnsInvitedRoomToEmpty() {
         room.invite();
         room.cancelInvitation();
@@ -84,6 +90,7 @@ class InvitationCodeDomainTests {
     }
 
     @Test
+    @DisplayName("퇴거 처리 시 호실은 공실이 되고 입주민 연결을 해제한다")
     void movingOutReturnsLivingRoomToEmptyAndClearsResident() {
         room.invite();
         room.moveIn(resident);
@@ -95,6 +102,7 @@ class InvitationCodeDomainTests {
     }
 
     @Test
+    @DisplayName("허용되지 않은 취소와 연결은 API 계약의 충돌 사유를 반환한다")
     void invalidCancellationAndConnectionUseApiContractConflicts() {
         assertConflict(room::cancelInvitation, ConflictException.Reason.INVITATION_CANCEL_NOT_ALLOWED);
         assertConflict(() -> room.moveIn(resident), ConflictException.Reason.ROOM_CONNECTION_CONFLICT);
@@ -110,6 +118,7 @@ class InvitationCodeDomainTests {
     }
 
     @Test
+    @DisplayName("사용·만료 코드 재사용은 API 계약의 충돌 사유를 반환한다")
     void codeUseConflictsMatchUsedAndExpiredApiResponses() {
         InvitationCode used = code("ABC234");
         used.use();

@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -33,10 +34,18 @@ import com.homes.zipsai.building.repository.BuildingRepository;
 import com.homes.zipsai.building.repository.ComplaintDetailRepository;
 import com.homes.zipsai.building.repository.ComplaintRepository;
 import com.homes.zipsai.building.repository.RoomRepository;
+import com.homes.zipsai.common.domain.File;
+import com.homes.zipsai.common.repository.FileRepository;
 import com.homes.zipsai.common.service.S3StorageService;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
+import com.homes.zipsai.conversation.domain.Message;
+import com.homes.zipsai.conversation.domain.MessageFileGroup;
+import com.homes.zipsai.conversation.domain.MessageType;
+import com.homes.zipsai.conversation.domain.SenderType;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
+import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
+import com.homes.zipsai.conversation.repository.MessageRepository;
 import com.homes.zipsai.global.security.AuthPrincipal;
 import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.domain.UserRole;
@@ -44,6 +53,7 @@ import com.homes.zipsai.user.repository.UserRepository;
 
 @SpringBootTest(classes = ZipsaiBackendApplication.class)
 @AutoConfigureMockMvc
+@DisplayName("관리자 민원 상세 API")
 class ManagerComplaintDetailApiTest {
 
     @MockitoBean
@@ -78,7 +88,17 @@ class ManagerComplaintDetailApiTest {
     @Autowired
     ComplaintDetailRepository complaintDetailRepository;
 
+    @Autowired
+    FileRepository fileRepository;
+
+    @Autowired
+    MessageRepository messageRepository;
+
+    @Autowired
+    MessageFileGroupRepository messageFileGroupRepository;
+
     @Test
+    @DisplayName("관리자는 담당 건물 민원 상세와 첨부 정보를 조회한다")
     void returnsComplaintDetailForTheAuthenticatedManagersBuilding() throws Exception {
         ManagerBuilding owner = managerBuilding();
         Complaint complaint = complaint(owner.building(), owner.room(), "천장 누수", 9);
@@ -106,6 +126,42 @@ class ManagerComplaintDetailApiTest {
     }
 
     @Test
+    @DisplayName("관리자 민원 상세는 대화 이미지 첨부와 다운로드 URL을 반환한다")
+    void returnsImageAttachmentsAndDownloadUrls() throws Exception {
+        ManagerBuilding owner = managerBuilding();
+        Complaint complaint = complaint(owner.building(), owner.room(), "천장 누수", 9);
+        detail(complaint);
+        File attachment = fileRepository.save(File.builder()
+            .fileKey("manager-leak.jpg")
+            .fileSize(245760)
+            .fileType("jpg")
+            .originalName("manager-leak.jpg")
+            .build());
+        Message message = messageRepository.save(Message.builder()
+            .conversation(complaint.getConversation())
+            .content("물이 떨어져요")
+            .senderType(SenderType.RESIDENT)
+            .messageType(MessageType.IMAGE)
+            .traceId(UUID.randomUUID().toString())
+            .build());
+        messageFileGroupRepository.save(MessageFileGroup.builder()
+            .message(message)
+            .attachment(attachment)
+            .fileGroupSeq(1)
+            .build());
+
+        mvc.perform(get(COMPLAINTS + complaint.getId()).with(manager(owner.manager().getId())))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.attachmentCount").value(1))
+            .andExpect(jsonPath("$.data.attachments.length()").value(1))
+            .andExpect(jsonPath("$.data.attachments[0].attachmentId").value(attachment.getId()))
+            .andExpect(jsonPath("$.data.attachments[0].fileUrl").value("https://s3.test/manager-leak.jpg"))
+            .andExpect(jsonPath("$.data.attachments[0].originalName").value("manager-leak.jpg"))
+            .andExpect(jsonPath("$.data.attachments[0].seq").value(1));
+    }
+
+    @Test
+    @DisplayName("다른 관리자의 건물 민원 상세 조회를 거부한다")
     void rejectsComplaintFromAnotherManagersBuilding() throws Exception {
         ManagerBuilding owner = managerBuilding();
         ManagerBuilding other = managerBuilding();
@@ -118,6 +174,7 @@ class ManagerComplaintDetailApiTest {
     }
 
     @Test
+    @DisplayName("존재하지 않는 민원 상세 조회는 404를 반환한다")
     void returnsComplaintNotFoundWhenComplaintDoesNotExist() throws Exception {
         ManagerBuilding owner = managerBuilding();
 
@@ -127,6 +184,7 @@ class ManagerComplaintDetailApiTest {
     }
 
     @Test
+    @DisplayName("0 이하 민원 ID는 검증 오류를 반환한다")
     void rejectsNonPositiveComplaintId() throws Exception {
         ManagerBuilding owner = managerBuilding();
 
@@ -134,12 +192,24 @@ class ManagerComplaintDetailApiTest {
             .andExpect(status().isUnprocessableContent())
             .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
             .andExpect(jsonPath("$.error.details.violations[0].field").value("complaintId"));
+        mvc.perform(get(COMPLAINTS + -1).with(manager(owner.manager().getId())))
+            .andExpect(status().isUnprocessableContent())
+            .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
+            .andExpect(jsonPath("$.error.details.violations[0].field").value("complaintId"));
     }
 
     @Test
+    @DisplayName("민원 상세 조회는 인증을 요구한다")
     void rejectsUnauthenticatedRequest() throws Exception {
         mvc.perform(get(COMPLAINTS + 1))
             .andExpect(status().isUnauthorized());
+
+        User resident = user(UserRole.RESIDENT);
+        mvc.perform(get(COMPLAINTS + 1).with(authentication(new UsernamePasswordAuthenticationToken(
+                new AuthPrincipal(resident.getId(), "test-session"), null,
+                List.of(new SimpleGrantedAuthority("ROLE_RESIDENT"))))))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
     }
 
     private ManagerBuilding managerBuilding() {

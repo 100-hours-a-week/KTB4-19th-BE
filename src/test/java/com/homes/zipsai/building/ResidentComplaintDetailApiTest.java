@@ -17,6 +17,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -54,6 +55,7 @@ import com.homes.zipsai.user.repository.UserRepository;
 
 @SpringBootTest(classes = ZipsaiBackendApplication.class)
 @AutoConfigureMockMvc
+@DisplayName("입주민 민원 상세 API")
 class ResidentComplaintDetailApiTest {
 
     @MockitoBean
@@ -92,6 +94,7 @@ class ResidentComplaintDetailApiTest {
     EntityManager entityManager;
 
     @Test
+    @DisplayName("입주민은 본인 민원 상세와 첨부 정보를 조회한다")
     @Transactional
     void returnsOwnedComplaintDetailWithRepresentativeAttachment() throws Exception {
         ResidentRoom residentRoom = residentRoom("203호");
@@ -140,6 +143,7 @@ class ResidentComplaintDetailApiTest {
     }
 
     @Test
+    @DisplayName("완료 민원의 완료 시각을 조회한다")
     void returnsResolvedAtForDoneComplaint() throws Exception {
         ResidentRoom residentRoom = residentRoom("204호");
         Complaint complaint = complaint(residentRoom, "엘리베이터 고장", ComplaintStatus.DONE, null);
@@ -154,6 +158,7 @@ class ResidentComplaintDetailApiTest {
     }
 
     @Test
+    @DisplayName("다른 입주민·미존재 민원·잘못된 ID 접근을 거부한다")
     void rejectsOtherResidentsUnknownComplaintAndInvalidIds() throws Exception {
         ResidentRoom owner = residentRoom("203호");
         Complaint complaint = complaint(owner, "천장 누수", ComplaintStatus.PENDING, null);
@@ -170,12 +175,17 @@ class ResidentComplaintDetailApiTest {
             .andExpect(status().isUnprocessableContent())
             .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
             .andExpect(jsonPath("$.error.details.violations[0].field").value("complaintId"));
+        mvc.perform(get(COMPLAINTS + "-1").with(resident(owner.resident().getId())))
+            .andExpect(status().isUnprocessableContent())
+            .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
+            .andExpect(jsonPath("$.error.details.violations[0].field").value("complaintId"));
         mvc.perform(get(COMPLAINTS + "not-a-number").with(resident(owner.resident().getId())))
             .andExpect(status().isUnprocessableContent())
             .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
     }
 
     @Test
+    @DisplayName("무인증·관리자·미연결·퇴거 입주민의 상세 접근을 거부한다")
     void rejectsUnauthenticatedWrongRoleUnconnectedResidentAndResidentAfterMoveOut() throws Exception {
         mvc.perform(get(COMPLAINTS + 1))
             .andExpect(status().isUnauthorized());
