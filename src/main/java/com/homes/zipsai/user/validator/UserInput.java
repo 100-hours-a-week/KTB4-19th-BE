@@ -92,7 +92,8 @@ public final class UserInput {
         if (value.isEmpty() || value.length() > 7) {
             throw invalid("userName", Reason.INVALID_USER_NAME_LENGTH);
         }
-        if (!USER_NAME.matcher(value).matches()) {
+
+        if (!USER_NAME.matcher(value).matches() || value.codePoints().anyMatch(Character::isEmoji)) {
             throw invalid("userName", Reason.INVALID_USER_NAME_FORMAT);
         }
         return value;
