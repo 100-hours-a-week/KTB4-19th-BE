@@ -29,6 +29,7 @@ import com.homes.zipsai.building.repository.RuleDocumentRepository;
 import com.homes.zipsai.common.config.StorageProperties;
 import com.homes.zipsai.common.domain.File;
 import com.homes.zipsai.common.repository.FileRepository;
+import com.homes.zipsai.common.service.PdfFixtures;
 import com.homes.zipsai.common.service.S3StorageService;
 import com.homes.zipsai.conversation.ai.AiIndexingClient;
 import com.homes.zipsai.conversation.ai.AiIndexingRequest;
@@ -98,6 +99,7 @@ class RuleDocumentServiceIndexingTest {
             ReflectionTestUtils.setField(saved, "id", DOCUMENT_ID);
             return saved;
         });
+        given(s3StorageService.read("documents/rule.pdf")).willReturn(PdfFixtures.plainPdf());
         givenDownloadUrl();
 
         ruleDocumentService.create(MANAGER_ID, new RuleDocumentCreateRequest(1000L, "관리규약"));
@@ -114,6 +116,7 @@ class RuleDocumentServiceIndexingTest {
         replacement.assignOwner(building.getManager());
         replacement.markUploaded(100, "application/pdf");
         given(fileRepository.findById(2000L)).willReturn(Optional.of(replacement));
+        given(s3StorageService.read("documents/rule-v2.pdf")).willReturn(PdfFixtures.plainPdf());
         givenDownloadUrl();
 
         ruleDocumentService.update(MANAGER_ID, DOCUMENT_ID, "관리규약", 2000L);
@@ -130,6 +133,7 @@ class RuleDocumentServiceIndexingTest {
         replacement.assignOwner(building.getManager());
         replacement.markUploaded(100, "application/pdf");
         given(fileRepository.findById(2000L)).willReturn(Optional.of(replacement));
+        given(s3StorageService.read("documents/rule-v2.pdf")).willReturn(PdfFixtures.plainPdf());
         givenDownloadUrl();
         doThrow(new AiUnavailableException()).when(aiIndexingClient).index(any(AiIndexingRequest.class));
 

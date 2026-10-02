@@ -26,6 +26,7 @@ import com.homes.zipsai.building.repository.RuleDocumentRepository;
 import com.homes.zipsai.common.config.StorageProperties;
 import com.homes.zipsai.common.domain.File;
 import com.homes.zipsai.common.repository.FileRepository;
+import com.homes.zipsai.common.service.PdfFixtures;
 import com.homes.zipsai.common.service.S3StorageService;
 import com.homes.zipsai.conversation.ai.AiIndexingClient;
 import com.homes.zipsai.conversation.ai.AiIndexingRequest;
@@ -138,6 +139,7 @@ class RuleDocumentServiceUpdateTest {
     private void givenReplacementAndIndexingClient() {
         given(fileRepository.findById(REPLACEMENT_ID))
             .willReturn(Optional.of(uploadedFile(REPLACEMENT_ID, "documents/rule-v2.pdf")));
+        given(s3StorageService.read("documents/rule-v2.pdf")).willReturn(PdfFixtures.plainPdf());
         given(aiIndexingClientProvider.getIfAvailable()).willReturn(aiIndexingClient);
     }
 

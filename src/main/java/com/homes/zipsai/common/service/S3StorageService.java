@@ -60,6 +60,11 @@ public class S3StorageService {
         }
     }
 
+    public byte[] read(String key) {
+        return client.getObjectAsBytes(GetObjectRequest.builder()
+                .bucket(storageProperties.uploadBucket()).key(key).build()).asByteArray();
+    }
+
     public void delete(String key) {
         client.deleteObject(DeleteObjectRequest.builder()
                 .bucket(storageProperties.uploadBucket()).key(key).build());
