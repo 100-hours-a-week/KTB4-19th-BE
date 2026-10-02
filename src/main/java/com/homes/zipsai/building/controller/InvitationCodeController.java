@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.giffing.bucket4j.spring.boot.starter.context.RateLimiting;
 import com.homes.zipsai.building.dto.InvitationCodeResponse;
 import com.homes.zipsai.building.dto.InvitationCodeValidationResponse;
 import com.homes.zipsai.building.dto.RoomConnectionRequest;
@@ -62,8 +63,12 @@ public class InvitationCodeController {
             description = "입주민이 초대코드를 확인하고 연결될 건물·호실 정보를 조회한다. "
                     + "검증만 수행하며 코드는 사용 처리하지 않는다."
     )
+    @RateLimiting(name = "invitation-code", cacheKey = "#principal.userId()")
     @GetMapping("/residents/me/invitation-codes/{code}")
-    public ResponseEntity<ApiResponse<InvitationCodeValidationResponse>> validate(@PathVariable String code) {
+    public ResponseEntity<ApiResponse<InvitationCodeValidationResponse>> validate(
+            @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal,
+            @PathVariable String code
+    ) {
         return ResponseEntity.ok(ApiResponse.data(invitationCodeService.validateInvitationCode(code)));
     }
 
@@ -71,6 +76,7 @@ public class InvitationCodeController {
             summary = "세대 연결 확정",
             description = "입주민이 유효한 초대코드를 사용해 세대와 연결한다."
     )
+    @RateLimiting(name = "invitation-code", cacheKey = "#principal.userId()")
     @PutMapping("/residents/me/room")
     public ResponseEntity<ApiResponse<RoomConnectionResponse>> connect(
             @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal,
