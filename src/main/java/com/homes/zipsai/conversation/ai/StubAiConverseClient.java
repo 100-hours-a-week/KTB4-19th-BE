@@ -1,10 +1,13 @@
 package com.homes.zipsai.conversation.ai;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Pattern;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -25,11 +28,24 @@ public class StubAiConverseClient implements AiConverseClient {
     private static final List<AiConverseResponse.Citation> STUB_CITATIONS = List.of(
         new AiConverseResponse.Citation("building_document", "building-guide-12", "생활 안내", null, null));
 
+    private final LogNormalDelay complaintDelay;
+    private final LogNormalDelay knowledgeDelay;
+
+    public StubAiConverseClient(@Value("${app.ai.stub.complaint-delay:0s}") Duration complaintMedian,
+                                @Value("${app.ai.stub.complaint-delay-sigma:0}") double complaintSigma,
+                                @Value("${app.ai.stub.knowledge-delay:0s}") Duration knowledgeMedian,
+                                @Value("${app.ai.stub.knowledge-delay-sigma:0}") double knowledgeSigma) {
+        this.complaintDelay = new LogNormalDelay(complaintMedian, complaintSigma);
+        this.knowledgeDelay = new LogNormalDelay(knowledgeMedian, knowledgeSigma);
+    }
+
     @Override
     public AiConverseResponse converse(AiConverseRequest request) {
         String turnId = request.turnId();
         String text = request.message().text() == null ? "" : request.message().text().strip();
-        return switch (decideRoute(request, text)) {
+        AiRoute route = decideRoute(request, text);
+        waitLikeAiServer(route);
+        return switch (route) {
             case COMPLAINT -> collectComplaint(request, turnId, text);
             case KNOWLEDGE -> answerKnowledge(turnId, text);
             case CLARIFY -> askAgain(turnId);
@@ -44,6 +60,19 @@ public class StubAiConverseClient implements AiConverseClient {
             return AiRoute.CLARIFY;
         }
         return KNOWLEDGE_PATTERN.matcher(text).find() ? AiRoute.KNOWLEDGE : AiRoute.COMPLAINT;
+    }
+
+    private void waitLikeAiServer(AiRoute route) {
+        Duration delay = switch (route) {
+            case COMPLAINT -> complaintDelay.next();
+            case KNOWLEDGE -> knowledgeDelay.next();
+            case CLARIFY -> Duration.ZERO;
+        };
+        try {
+            Thread.sleep(delay);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private AiConverseResponse answerKnowledge(String turnId, String text) {
@@ -110,5 +139,13 @@ public class StubAiConverseClient implements AiConverseClient {
             missingFields.add(LOCATION_FIELD);
         }
         return missingFields;
+    }
+
+    record LogNormalDelay(Duration median, double sigma) {
+
+        Duration next() {
+            double factor = Math.exp(sigma * ThreadLocalRandom.current().nextGaussian());
+            return Duration.ofMillis(Math.round(median.toMillis() * factor));
+        }
     }
 }
