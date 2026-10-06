@@ -1,0 +1,9 @@
+services:
+  lgtm:
+    image: grafana/otel-lgtm:0.35.0
+    ports:
+      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:4318:4318"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin

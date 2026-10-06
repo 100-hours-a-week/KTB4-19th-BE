@@ -46,6 +46,10 @@ dependencies {
 	implementation 'com.giffing.bucket4j.spring.boot.starter:bucket4j-spring-boot-starter:0.14.0'
 	implementation 'com.github.ben-manes.caffeine:jcache'
 	implementation "org.apache.pdfbox:pdfbox:${pdfboxVersion}"
+	if (project.hasProperty('loadtest')) {
+		developmentOnly 'org.springframework.boot:spring-boot-starter-opentelemetry'
+		developmentOnly 'net.ttddyy.observation:datasource-micrometer-spring-boot:2.3.0'
+	}
 	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'
 	testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
