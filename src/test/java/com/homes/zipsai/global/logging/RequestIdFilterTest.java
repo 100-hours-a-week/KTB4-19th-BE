@@ -11,12 +11,16 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.sql.SQLTimeoutException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import javax.sql.DataSource;
@@ -51,7 +55,79 @@ class RequestIdFilterTest {
             isNull());
         verify(structuredLogger).requestDone(eq(traceId), eq("/api/v1/status"), eq("GET"), anyInt(), anyLong(),
             isNull());
+        verify(structuredLogger, never()).stageDone(anyString(), anyString(), eq("mysql_connection_acquire"),
+            anyLong(), anyString(), isNull());
         assertThat(MDC.get("dbMs")).isNull();
+    }
+
+    @Test
+    @DisplayName("두 연결 획득 호출을 각각 요청 상관정보와 함께 기록한다")
+    void logsEachConnectionAcquisitionWithRequestContext() throws Exception {
+        StructuredLogger structuredLogger = mock(StructuredLogger.class);
+        List<String> methods = new ArrayList<>();
+        doAnswer(invocation -> {
+            methods.add(MDC.get("method"));
+            return null;
+        }).when(structuredLogger).stageDone(anyString(), anyString(), anyString(), anyLong(), anyString(), isNull());
+        DataSource rawDataSource = mock(DataSource.class);
+        given(rawDataSource.getConnection()).willReturn(mock(Connection.class));
+        given(rawDataSource.getConnection("db-user", "secret")).willReturn(mock(Connection.class));
+        JdbcTimingDataSource dataSource = new JdbcTimingDataSource(rawDataSource);
+        RequestIdFilter filter = new RequestIdFilter(structuredLogger);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/test");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, (req, res) -> {
+            try {
+                try (Connection connection = dataSource.getConnection()) {
+                    assertThat(connection).isNotNull();
+                }
+                try (Connection connection = dataSource.getConnection("db-user", "secret")) {
+                    assertThat(connection).isNotNull();
+                }
+            } catch (SQLException exception) {
+                throw new AssertionError(exception);
+            }
+        });
+
+        String traceId = response.getHeader("X-Request-Id");
+        ArgumentCaptor<String> traceIds = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> routes = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> stages = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Long> durations = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<String> outcomes = ArgumentCaptor.forClass(String.class);
+        verify(structuredLogger, times(3)).stageDone(traceIds.capture(), routes.capture(), stages.capture(),
+            durations.capture(), outcomes.capture(), isNull());
+
+        assertThat(traceIds.getAllValues()).containsExactly(traceId, traceId, traceId);
+        assertThat(routes.getAllValues()).containsOnly("/api/v1/test");
+        assertThat(stages.getAllValues()).containsExactly("mysql_connection_acquire", "mysql_connection_acquire",
+            "mysql");
+        assertThat(durations.getAllValues()).allMatch(duration -> duration >= 0);
+        assertThat(outcomes.getAllValues()).containsExactly("ok", "ok", "ok");
+        assertThat(methods).containsExactly("POST", "POST", "POST");
+    }
+
+    @Test
+    @DisplayName("연결 timeout을 획득 실패로 기록하고 원본 예외를 유지한다")
+    void logsConnectionAcquisitionTimeoutWithoutReplacingOriginalException() throws Exception {
+        StructuredLogger structuredLogger = mock(StructuredLogger.class);
+        DataSource rawDataSource = mock(DataSource.class);
+        SQLTimeoutException timeout = new SQLTimeoutException("connection timeout", "HYT00");
+        given(rawDataSource.getConnection("db-user", "secret")).willThrow(timeout);
+        JdbcTimingDataSource dataSource = new JdbcTimingDataSource(rawDataSource);
+        RequestIdFilter filter = new RequestIdFilter(structuredLogger);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/test");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, (req, res) ->
+            assertThatThrownBy(() -> dataSource.getConnection("db-user", "secret")).isSameAs(timeout));
+
+        String traceId = response.getHeader("X-Request-Id");
+        verify(structuredLogger).stageDone(eq(traceId), eq("/api/v1/test"), eq("mysql_connection_acquire"),
+            anyLong(), eq("fail"), isNull());
+        verify(structuredLogger).stageDone(eq(traceId), eq("/api/v1/test"), eq("mysql"), eq(0L), eq("fail"),
+            isNull());
     }
 
     @Test
@@ -71,7 +147,8 @@ class RequestIdFilterTest {
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         filter.doFilter(request, response, (req, res) -> {
-            try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            try (Connection connection = dataSource.getConnection();
+                 Statement statement = connection.createStatement()) {
                 assertThatThrownBy(() -> statement.execute("broken SQL")).isSameAs(databaseFailure);
             } catch (SQLException exception) {
                 throw new AssertionError(exception);
@@ -105,7 +182,8 @@ class RequestIdFilterTest {
         ServletException requestFailure = new ServletException("later request failure");
 
         assertThatThrownBy(() -> filter.doFilter(request, response, (req, res) -> {
-            try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+            try (Connection connection = dataSource.getConnection();
+                 Statement statement = connection.createStatement()) {
                 assertThat(statement.execute("SELECT 1")).isFalse();
             } catch (SQLException exception) {
                 throw new AssertionError(exception);
@@ -186,10 +264,12 @@ class RequestIdFilterTest {
             assertThat(UUID.fromString(traceId).toString()).isEqualTo(traceId);
             assertThat(response.getHeader("X-Request-Id")).isEqualTo(traceId);
             assertThat(MDC.get("route")).isEqualTo("/api/v1/conversations");
+            assertThat(MDC.get("method")).isEqualTo("POST");
             response.setStatus(401);
         });
         assertThat(response.getStatus()).isEqualTo(401);
         assertThat(MDC.get("traceId")).isNull();
         assertThat(MDC.get("route")).isNull();
+        assertThat(MDC.get("method")).isNull();
     }
 }

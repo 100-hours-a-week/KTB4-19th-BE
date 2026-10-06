@@ -21,30 +21,45 @@ final class JdbcTimingDataSource extends DelegatingDataSource {
 
     @Override
     public Connection getConnection() throws SQLException {
+        long started = System.nanoTime();
+        Connection connection;
         try {
-            return wrapConnection(super.getConnection());
-        } catch (SQLException | RuntimeException exception) {
+            connection = super.getConnection();
+        } catch (SQLException | RuntimeException | Error exception) {
+            JdbcTimingContext.recordConnectionAcquisition(System.nanoTime() - started, true);
             JdbcTimingContext.recordFailure();
             throw exception;
         }
+        JdbcTimingContext.recordConnectionAcquisition(System.nanoTime() - started, false);
+        return wrapConnection(connection);
     }
 
     @Override
     public Connection getConnection(String username, String password) throws SQLException {
+        long started = System.nanoTime();
+        Connection connection;
         try {
-            return wrapConnection(super.getConnection(username, password));
-        } catch (SQLException | RuntimeException exception) {
+            connection = super.getConnection(username, password);
+        } catch (SQLException | RuntimeException | Error exception) {
+            JdbcTimingContext.recordConnectionAcquisition(System.nanoTime() - started, true);
             JdbcTimingContext.recordFailure();
             throw exception;
         }
+        JdbcTimingContext.recordConnectionAcquisition(System.nanoTime() - started, false);
+        return wrapConnection(connection);
     }
 
     private Connection wrapConnection(Connection target) {
-        ConnectionHandler handler = new ConnectionHandler(target);
-        Connection proxy = (Connection) Proxy.newProxyInstance(Connection.class.getClassLoader(),
-            new Class<?>[] {Connection.class}, handler);
-        handler.proxy = proxy;
-        return proxy;
+        try {
+            ConnectionHandler handler = new ConnectionHandler(target);
+            Connection proxy = (Connection) Proxy.newProxyInstance(Connection.class.getClassLoader(),
+                new Class<?>[] {Connection.class}, handler);
+            handler.proxy = proxy;
+            return proxy;
+        } catch (RuntimeException | Error exception) {
+            JdbcTimingContext.recordFailure();
+            throw exception;
+        }
     }
 
     private static Object invokeTarget(Object target, Method method, Object[] arguments) throws Throwable {
@@ -73,6 +88,10 @@ final class JdbcTimingDataSource extends DelegatingDataSource {
 
     private static boolean isTransactionBoundary(Method method) {
         return "commit".equals(method.getName()) || "rollback".equals(method.getName());
+    }
+
+    private static boolean isPhysicalTransactionBoundary(Method method, Object[] arguments) {
+        return isTransactionBoundary(method) && (arguments == null || arguments.length == 0);
     }
 
     private static boolean isSqlExecution(Method method) {
@@ -107,8 +126,12 @@ final class JdbcTimingDataSource extends DelegatingDataSource {
             failed = true;
             throw exception;
         } finally {
+            long ended = System.nanoTime();
             try {
-                JdbcTimingContext.record(System.nanoTime() - started, failed);
+                if (isPhysicalTransactionBoundary(method, arguments)) {
+                    JdbcTimingContext.recordTransactionBoundary(ended, method.getName(), failed);
+                }
+                JdbcTimingContext.record(ended - started, failed);
             } catch (RuntimeException ignored) {
 
             }

@@ -2,10 +2,19 @@ package com.homes.zipsai.global.logging;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Proxy;
 import java.sql.CallableStatement;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -19,6 +28,9 @@ import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.MockedStatic;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 class JdbcTimingDataSourceTest {
@@ -37,7 +49,7 @@ class JdbcTimingDataSourceTest {
             statement.execute("CREATE TABLE timing_test (id INT PRIMARY KEY)");
         }
         JdbcTimingDataSource dataSource = new JdbcTimingDataSource(rawDataSource);
-        JdbcTimingContext.begin();
+        JdbcTimingContext.begin(mock(StructuredLogger.class), "trace-123", "/api/v1/test");
 
         try (Connection connection = dataSource.getConnection()) {
             connection.setAutoCommit(false);
@@ -126,7 +138,7 @@ class JdbcTimingDataSourceTest {
         willThrow(commitFailure).given(rawConnection).commit();
         willThrow(rollbackFailure).given(rawConnection).rollback();
         JdbcTimingDataSource dataSource = new JdbcTimingDataSource(rawDataSource);
-        JdbcTimingContext.begin();
+        JdbcTimingContext.begin(mock(StructuredLogger.class), "trace-123", "/api/v1/test");
 
         try (Connection connection = dataSource.getConnection()) {
             Statement statement = connection.createStatement();
@@ -163,7 +175,7 @@ class JdbcTimingDataSourceTest {
         given(rawDataSource.getConnection()).willThrow(failure);
         given(rawDataSource.getConnection("test-user", "test-password")).willThrow(failure);
         JdbcTimingDataSource dataSource = new JdbcTimingDataSource(rawDataSource);
-        JdbcTimingContext.begin();
+        JdbcTimingContext.begin(mock(StructuredLogger.class), "trace-123", "/api/v1/test");
 
         assertThatThrownBy(dataSource::getConnection).isSameAs(failure);
         assertThatThrownBy(() -> dataSource.getConnection("test-user", "test-password")).isSameAs(failure);
@@ -184,7 +196,7 @@ class JdbcTimingDataSourceTest {
         given(rawConnection.prepareStatement("broken prepare")).willThrow(failure);
         given(rawConnection.prepareCall("broken call")).willThrow(failure);
         JdbcTimingDataSource dataSource = new JdbcTimingDataSource(rawDataSource);
-        JdbcTimingContext.begin();
+        JdbcTimingContext.begin(mock(StructuredLogger.class), "trace-123", "/api/v1/test");
 
         try (Connection connection = dataSource.getConnection()) {
             assertThatThrownBy(connection::createStatement).isSameAs(failure);
@@ -197,6 +209,40 @@ class JdbcTimingDataSourceTest {
         assertThat(measurement.outcome()).isEqualTo("fail");
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("연결 래핑 실패는 획득 성공을 유지하고 원본 예외와 요청 DB 실패를 기록한다")
+    void marksWrappingFailureWithoutMisreportingAcquisition(boolean withCredentials) throws Exception {
+        DataSource rawDataSource = mock(DataSource.class);
+        Connection rawConnection = mock(Connection.class);
+        StructuredLogger structuredLogger = mock(StructuredLogger.class);
+        RuntimeException failure = new IllegalArgumentException("connection proxy failed");
+        given(rawDataSource.getConnection()).willReturn(rawConnection);
+        given(rawDataSource.getConnection("test-user", "test-password")).willReturn(rawConnection);
+        JdbcTimingDataSource dataSource = new JdbcTimingDataSource(rawDataSource);
+        JdbcTimingContext.begin(structuredLogger, "trace-123", "/api/v1/test");
+
+        try (MockedStatic<Proxy> proxy = mockStatic(Proxy.class)) {
+            proxy.when(() -> Proxy.newProxyInstance(eq(Connection.class.getClassLoader()), any(Class[].class),
+                any(InvocationHandler.class))).thenThrow(failure);
+
+            assertThatThrownBy(() -> {
+                if (withCredentials) {
+                    dataSource.getConnection("test-user", "test-password");
+                } else {
+                    dataSource.getConnection();
+                }
+            }).isSameAs(failure);
+        }
+
+        JdbcTimingContext.Measurement measurement = JdbcTimingContext.finish();
+        assertThat(measurement.durationNanos()).isZero();
+        assertThat(measurement.outcome()).isEqualTo("fail");
+        verify(structuredLogger).stageDone(eq("trace-123"), eq("/api/v1/test"), eq("mysql_connection_acquire"),
+            anyLong(), eq("ok"), isNull());
+        verifyNoMoreInteractions(structuredLogger);
+    }
+
     @Test
     @DisplayName("문맥이 없을 때 연결 실패를 다음 요청으로 전달하지 않는다")
     void doesNotLeakContextFreeConnectionFailureIntoNextRequest() throws Exception {
@@ -205,7 +251,7 @@ class JdbcTimingDataSourceTest {
         JdbcTimingDataSource dataSource = new JdbcTimingDataSource(rawDataSource);
 
         assertThatThrownBy(dataSource::getConnection).isInstanceOf(SQLException.class);
-        JdbcTimingContext.begin();
+        JdbcTimingContext.begin(mock(StructuredLogger.class), "trace-123", "/api/v1/test");
 
         JdbcTimingContext.Measurement measurement = JdbcTimingContext.finish();
         assertThat(measurement.durationNanos()).isZero();
@@ -215,7 +261,7 @@ class JdbcTimingDataSourceTest {
     @Test
     @DisplayName("나노초를 먼저 합산한 뒤 밀리초로 변환한다")
     void convertsAccumulatedNanosecondsToMillis() {
-        JdbcTimingContext.begin();
+        JdbcTimingContext.begin(mock(StructuredLogger.class), "trace-123", "/api/v1/test");
         JdbcTimingContext.record(1_500_000, false);
         JdbcTimingContext.record(1_500_000, false);
 
@@ -228,11 +274,11 @@ class JdbcTimingDataSourceTest {
     @Test
     @DisplayName("서로 다른 스레드의 DB 시간과 실패 상태를 격리한다")
     void isolatesMeasurementsAcrossThreads() throws InterruptedException {
-        JdbcTimingContext.begin();
+        JdbcTimingContext.begin(mock(StructuredLogger.class), "trace-123", "/api/v1/test");
         JdbcTimingContext.record(11, false);
         AtomicReference<JdbcTimingContext.Measurement> otherThread = new AtomicReference<>();
         Thread thread = new Thread(() -> {
-            JdbcTimingContext.begin();
+            JdbcTimingContext.begin(mock(StructuredLogger.class), "trace-other", "/api/v1/test");
             JdbcTimingContext.record(37, true);
             otherThread.set(JdbcTimingContext.finish());
         });

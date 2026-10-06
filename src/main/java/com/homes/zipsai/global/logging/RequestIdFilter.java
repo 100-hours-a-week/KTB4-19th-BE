@@ -28,10 +28,11 @@ public class RequestIdFilter extends OncePerRequestFilter {
             FilterChain filterChain) throws ServletException, IOException {
         String traceId = UUID.randomUUID().toString();
         long started = System.nanoTime();
-        JdbcTimingContext.begin();
+        JdbcTimingContext.begin(structuredLogger, traceId, request.getRequestURI());
         try {
             MDC.put(TRACE_ID, traceId);
             MDC.put("route", request.getRequestURI());
+            MDC.put("method", request.getMethod());
             response.setHeader("X-Request-Id", traceId);
             MDC.remove("dbMs");
             MDC.remove("aiApiMs");
@@ -53,6 +54,7 @@ public class RequestIdFilter extends OncePerRequestFilter {
                 JdbcTimingContext.clear();
                 MDC.remove(TRACE_ID);
                 MDC.remove("route");
+                MDC.remove("method");
                 MDC.remove("dbMs");
                 MDC.remove("aiApiMs");
                 MDC.remove(StructuredLogger.STATUS_CODE);
