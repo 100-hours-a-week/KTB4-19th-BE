@@ -1,0 +1,813 @@
+{
+  "uid": "zipsai-load-test",
+  "title": "Zipsai Load Test",
+  "schemaVersion": 41,
+  "refresh": "5s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "API별 RPS",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum by (method, uri) (rate(http_server_requests_milliseconds_count{uri!~\"/api/actuator.*\"}[30s]))",
+          "legendFormat": "{{method}} {{uri}}",
+          "interval": "5s"
+        }
+      ],
+      "id": 1,
+      "interval": "5s",
+      "maxDataPoints": 2000
+    },
+    {
+      "type": "timeseries",
+      "title": "API별 p95 응답 시간",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, method, uri) (rate(http_server_requests_milliseconds_bucket{uri!~\"/api/actuator.*\"}[30s])))",
+          "legendFormat": "{{method}} {{uri}}",
+          "interval": "5s"
+        }
+      ],
+      "id": 2,
+      "interval": "5s",
+      "maxDataPoints": 2000
+    },
+    {
+      "type": "timeseries",
+      "title": "5xx 오류율",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(rate(http_server_requests_milliseconds_count{uri!~\"/api/actuator.*\", status=~\"5..\"}[30s])) / sum(rate(http_server_requests_milliseconds_count{uri!~\"/api/actuator.*\"}[30s]))",
+          "legendFormat": "5xx",
+          "interval": "5s"
+        }
+      ],
+      "id": 3,
+      "interval": "5s",
+      "maxDataPoints": 2000
+    },
+    {
+      "type": "timeseries",
+      "title": "Tomcat 스레드",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "tomcat_threads_busy",
+          "legendFormat": "busy",
+          "interval": "5s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "B",
+          "expr": "tomcat_threads_current",
+          "legendFormat": "current",
+          "interval": "5s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "C",
+          "expr": "tomcat_threads_config_max",
+          "legendFormat": "max",
+          "interval": "5s"
+        }
+      ],
+      "id": 4,
+      "interval": "5s",
+      "maxDataPoints": 2000
+    },
+    {
+      "type": "timeseries",
+      "title": "HikariCP 커넥션",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 8,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "hikaricp_connections_active",
+          "legendFormat": "active",
+          "interval": "5s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "B",
+          "expr": "hikaricp_connections_idle",
+          "legendFormat": "idle",
+          "interval": "5s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "C",
+          "expr": "hikaricp_connections_pending",
+          "legendFormat": "pending",
+          "interval": "5s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "D",
+          "expr": "hikaricp_connections_max",
+          "legendFormat": "max",
+          "interval": "5s"
+        }
+      ],
+      "id": 5,
+      "interval": "5s",
+      "maxDataPoints": 2000
+    },
+    {
+      "type": "timeseries",
+      "title": "HikariCP 획득 대기와 점유 시간 p95",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 8,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(hikaricp_connections_acquire_milliseconds_bucket[30s])))",
+          "legendFormat": "acquire p95",
+          "interval": "5s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(hikaricp_connections_usage_milliseconds_bucket[30s])))",
+          "legendFormat": "usage p95",
+          "interval": "5s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "C",
+          "expr": "hikaricp_connections_acquire_max_milliseconds",
+          "legendFormat": "acquire max",
+          "interval": "5s"
+        }
+      ],
+      "id": 6,
+      "interval": "5s",
+      "maxDataPoints": 2000
+    },
+    {
+      "type": "timeseries",
+      "title": "CPU 사용률",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "process_cpu_usage",
+          "legendFormat": "앱 프로세스",
+          "interval": "5s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "B",
+          "expr": "system_cpu_usage",
+          "legendFormat": "시스템 전체",
+          "interval": "5s"
+        }
+      ],
+      "id": 7,
+      "interval": "5s",
+      "maxDataPoints": 2000
+    },
+    {
+      "type": "timeseries",
+      "title": "JVM 힙과 스레드",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 16,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "live threads"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(jvm_memory_used_bytes{area=\"heap\"})",
+          "legendFormat": "heap used",
+          "interval": "5s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "B",
+          "expr": "jvm_threads_live",
+          "legendFormat": "live threads",
+          "interval": "5s"
+        }
+      ],
+      "id": 8,
+      "interval": "5s",
+      "maxDataPoints": 2000
+    },
+    {
+      "type": "timeseries",
+      "title": "SQL 실행 시간 p95",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 16,
+        "w": 8,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(jdbc_query_milliseconds_bucket[30s])))",
+          "legendFormat": "query p95",
+          "interval": "5s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "B",
+          "expr": "jdbc_query_max_milliseconds",
+          "legendFormat": "query max",
+          "interval": "5s"
+        }
+      ],
+      "id": 9,
+      "interval": "5s",
+      "maxDataPoints": 2000
+    },
+    {
+      "type": "timeseries",
+      "title": "동시 처리 중인 요청과 연결",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(http_server_requests_active_milliseconds_count{uri!~\"/api/actuator.*\"})",
+          "legendFormat": "처리 중인 요청",
+          "interval": "5s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "B",
+          "expr": "tomcat_connections_current",
+          "legendFormat": "열린 연결",
+          "interval": "5s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "C",
+          "expr": "tomcat_threads_busy",
+          "legendFormat": "Tomcat busy",
+          "interval": "5s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "D",
+          "expr": "clamp_min(sum(tomcat_connections_current) - sum(http_server_requests_active_milliseconds_count{uri!~\"/api/actuator.*\"}), 0)",
+          "legendFormat": "처리 못 하는 연결 (대기 + 유휴)",
+          "interval": "5s"
+        }
+      ],
+      "id": 10,
+      "interval": "5s",
+      "maxDataPoints": 2000
+    },
+    {
+      "type": "timeseries",
+      "title": "대화 목록 조회 평균 응답 시간: 사용자(k6) vs 서버",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(rate(k6_http_req_duration_milliseconds_sum{name=\"browse_conversations\"}[30s])) / sum(rate(k6_http_req_duration_milliseconds_count{name=\"browse_conversations\"}[30s]))",
+          "legendFormat": "사용자(k6)",
+          "interval": "5s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "B",
+          "expr": "sum(rate(http_server_requests_milliseconds_sum{uri=\"/api/v1/residents/me/conversations\", method=\"GET\"}[30s])) / sum(rate(http_server_requests_milliseconds_count{uri=\"/api/v1/residents/me/conversations\", method=\"GET\"}[30s]))",
+          "legendFormat": "서버",
+          "interval": "5s"
+        }
+      ],
+      "id": 11,
+      "interval": "5s",
+      "maxDataPoints": 2000
+    },
+    {
+      "type": "timeseries",
+      "title": "채팅 전송 평균 응답 시간: 사용자(k6) vs 서버",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum(rate(k6_http_req_duration_milliseconds_sum{name=~\"chat_.*\"}[30s])) / sum(rate(k6_http_req_duration_milliseconds_count{name=~\"chat_.*\"}[30s]))",
+          "legendFormat": "사용자(k6)",
+          "interval": "5s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "B",
+          "expr": "sum(rate(http_server_requests_milliseconds_sum{uri=\"/api/v1/residents/me/conversations\", method=\"POST\"}[30s])) / sum(rate(http_server_requests_milliseconds_count{uri=\"/api/v1/residents/me/conversations\", method=\"POST\"}[30s]))",
+          "legendFormat": "서버",
+          "interval": "5s"
+        }
+      ],
+      "id": 12,
+      "interval": "5s",
+      "maxDataPoints": 2000
+    },
+    {
+      "type": "timeseries",
+      "title": "k6 초당 요청: 성공과 실패",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "max",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "sum by (name) (rate(k6_http_reqs_total{name=~\"chat_.*|browse_conversations\", status=~\"2..\"}[30s]))",
+          "legendFormat": "성공 {{name}}",
+          "interval": "5s"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "B",
+          "expr": "sum by (name) (rate(k6_http_reqs_total{name=~\"chat_.*|browse_conversations\", status!~\"2..\"}[30s]))",
+          "legendFormat": "실패 {{name}}",
+          "interval": "5s"
+        }
+      ],
+      "id": 13,
+      "interval": "5s",
+      "maxDataPoints": 2000
+    }
+  ]
+}
