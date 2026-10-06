@@ -37,6 +37,9 @@ public class StructuredLogger {
         fields.put("duration_ms", durationMs);
         fields.put("outcome", normalizeOutcome(outcome));
         fields.put("error_code", "fail".equals(outcome) ? errorCode : null);
+        if (MDC.get("method") != null) {
+            fields.put("method", MDC.get("method"));
+        }
         log(event("stage_done", traceId, route, fields));
     }
 
