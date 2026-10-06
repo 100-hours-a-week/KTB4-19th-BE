@@ -11,8 +11,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jpa.test.autoconfigure.TestEntityManager;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Slice;
 
 import com.homes.zipsai.building.domain.Building;
 import com.homes.zipsai.building.domain.Complaint;
@@ -67,7 +67,7 @@ class ComplaintRepositoryTest {
         saveComplaint(saveFile("leak.jpg"));
         entityManager.clear();
 
-        Page<Complaint> found = findManagerComplaints();
+        Slice<Complaint> found = findManagerComplaints();
 
         assertThat(found.getContent()).singleElement()
             .satisfies(complaint -> assertThat(Hibernate.isInitialized(complaint.getAttachment())).isTrue());
@@ -79,14 +79,14 @@ class ComplaintRepositoryTest {
         saveComplaint(null);
         entityManager.clear();
 
-        Page<Complaint> found = findManagerComplaints();
+        Slice<Complaint> found = findManagerComplaints();
 
         assertThat(found.getContent()).singleElement()
             .extracting(Complaint::getAttachment)
             .isNull();
     }
 
-    private Page<Complaint> findManagerComplaints() {
+    private Slice<Complaint> findManagerComplaints() {
         return complaintRepository.findManagerComplaints(building.getId(), null, List.of(ComplaintStatus.PENDING),
             false, Complaint.URGENCY_THRESHOLD, PageRequest.of(0, 10));
     }
