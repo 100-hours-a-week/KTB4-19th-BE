@@ -85,7 +85,7 @@ class ManagerComplaintListApiTest {
 
         mvc.perform(get(COMPLAINTS).with(manager(owner.manager().getId())))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.totalCount").value(2))
+            .andExpect(jsonPath("$.data.totalCount").doesNotExist())
             .andExpect(jsonPath("$.data.page").value(0))
             .andExpect(jsonPath("$.data.pageSize").value(20))
             .andExpect(jsonPath("$.data.hasNext").value(false))
@@ -108,26 +108,26 @@ class ManagerComplaintListApiTest {
 
         mvc.perform(get(COMPLAINTS).param("keyword", "  누수  ").with(manager(owner.manager().getId())))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.totalCount").value(1))
+            .andExpect(jsonPath("$.data.complaints.length()").value(1))
             .andExpect(jsonPath("$.data.complaints[0].title").value("천장 누수"));
 
         mvc.perform(get(COMPLAINTS).param("keyword", "   ").with(manager(owner.manager().getId())))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.totalCount").value(2));
+            .andExpect(jsonPath("$.data.complaints.length()").value(2));
 
         mvc.perform(get(COMPLAINTS).param("status", "IN_PROGRESS").with(manager(owner.manager().getId())))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.totalCount").value(1))
+            .andExpect(jsonPath("$.data.complaints.length()").value(1))
             .andExpect(jsonPath("$.data.complaints[0].statusCode").value("IN_PROGRESS"));
 
         mvc.perform(get(COMPLAINTS).param("status", "PENDING", "IN_PROGRESS")
                 .with(manager(owner.manager().getId())))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.totalCount").value(2));
+            .andExpect(jsonPath("$.data.complaints.length()").value(2));
 
         mvc.perform(get(COMPLAINTS).param("urgentOnly", "true").with(manager(owner.manager().getId())))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.totalCount").value(1))
+            .andExpect(jsonPath("$.data.complaints.length()").value(1))
             .andExpect(jsonPath("$.data.complaints[0].isUrgent").value(true));
 
     }
@@ -141,7 +141,6 @@ class ManagerComplaintListApiTest {
         mvc.perform(get(COMPLAINTS).param("page", "0").param("size", "1")
                 .with(manager(owner.manager().getId())))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.data.totalCount").value(2))
             .andExpect(jsonPath("$.data.page").value(0))
             .andExpect(jsonPath("$.data.pageSize").value(1))
             .andExpect(jsonPath("$.data.hasNext").value(true))

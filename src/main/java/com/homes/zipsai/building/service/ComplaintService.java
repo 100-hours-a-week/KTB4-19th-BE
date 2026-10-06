@@ -7,6 +7,7 @@ import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -119,7 +120,7 @@ public class ComplaintService {
         String normalizedKeyword = normalizeKeyword(keyword);
         List<ComplaintStatus> statuses = normalizeStatuses(statusValues);
         Pageable pageable = PageRequest.of(page, size, MANAGER_COMPLAINT_SORT);
-        Page<Complaint> complaints = complaintRepository.findManagerComplaints(
+        Slice<Complaint> complaints = complaintRepository.findManagerComplaints(
             building.getId(), normalizedKeyword, statuses, urgentOnly, Complaint.URGENCY_THRESHOLD, pageable);
         return ComplaintListResponse.from(complaints, this::attachmentUrl);
     }

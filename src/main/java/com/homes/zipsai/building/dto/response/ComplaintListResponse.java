@@ -4,27 +4,25 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.function.Function;
 
-import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Slice;
 
 import com.homes.zipsai.building.domain.Complaint;
 import com.homes.zipsai.building.domain.ComplaintStatus;
 import com.homes.zipsai.common.domain.File;
 
 public record ComplaintListResponse(
-        long totalCount,
         int page,
         int pageSize,
         boolean hasNext,
         List<ComplaintItem> complaints
 ) {
 
-    public static ComplaintListResponse from(Page<Complaint> page, Function<File, String> fileUrl) {
+    public static ComplaintListResponse from(Slice<Complaint> slice, Function<File, String> fileUrl) {
         return new ComplaintListResponse(
-            page.getTotalElements(),
-            page.getNumber(),
-            page.getSize(),
-            page.hasNext(),
-            page.getContent().stream().map(complaint -> ComplaintItem.from(complaint, fileUrl)).toList()
+            slice.getNumber(),
+            slice.getSize(),
+            slice.hasNext(),
+            slice.getContent().stream().map(complaint -> ComplaintItem.from(complaint, fileUrl)).toList()
         );
     }
 
