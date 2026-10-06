@@ -50,6 +50,9 @@ class JdbcTimingRequestIntegrationTest {
     @Autowired
     ObjectMapper objectMapper;
 
+    @Autowired
+    StructuredLogger structuredLogger;
+
 
     private Logger logger;
     private ListAppender<ILoggingEvent> appender;
@@ -123,7 +126,7 @@ class JdbcTimingRequestIntegrationTest {
     @Test
     @DisplayName("MySQL JPA flush의 실제 JDBC 경과 시간을 나노초 합계로 수집한다")
     void collectsActualJpaFlushAtNanosecondResolution() {
-        JdbcTimingContext.begin();
+        JdbcTimingContext.begin(structuredLogger, "trace-123", "/api/v1/residents/me/conversations");
         JdbcTimingContext.Measurement measurement;
         try {
             conversationTestFixture.unconnectedResident();
