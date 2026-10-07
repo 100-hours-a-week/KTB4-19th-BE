@@ -192,7 +192,7 @@ public class ComplaintService {
 
     private void verifyManagesBuilding(Long managerId) {
         if (!buildingRepository.existsByManager_IdAndDeletedAtIsNull(managerId)) {
-            throw new ForbiddenException();
+            throw new NotFoundException(NotFoundException.Resource.BUILDING);
         }
     }
 
