@@ -158,10 +158,11 @@ public class Conversation extends BaseTimeEntity {
     }
 
     public void markComplaintCreated(String complaintTitle, AiComplaintDraft confirmedDraft) {
-        this.type = ConversationType.COMPLAINT;
+        if (currentRoute != AiRoute.KNOWLEDGE) {
+            this.type = ConversationType.COMPLAINT;
+        }
         this.status = ConversationStatus.COMPLAINT_CREATED;
         this.title = complaintTitle;
-        this.currentRoute = null;
         this.complaintState = null;
         storeDraft(confirmedDraft);
     }

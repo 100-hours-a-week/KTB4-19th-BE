@@ -16,6 +16,7 @@ import com.homes.zipsai.building.domain.Complaint;
 import com.homes.zipsai.building.domain.ComplaintContent;
 import com.homes.zipsai.building.domain.ComplaintDetail;
 import com.homes.zipsai.building.domain.ComplaintStatus;
+import com.homes.zipsai.building.domain.ComplaintType;
 import com.homes.zipsai.building.domain.Room;
 import com.homes.zipsai.building.dto.request.ComplaintCreateRequest;
 import com.homes.zipsai.building.dto.request.ComplaintStatusUpdateRequest;
@@ -64,12 +65,14 @@ public class ComplaintService {
 
         AiComplaintDraft confirmedDraft = conversation.currentDraft().withEdits(request.toDraftEdits());
         ComplaintContent content = ComplaintContent.from(confirmedDraft);
+        ComplaintType type = ComplaintType.from(conversation.getCurrentRoute());
         Complaint complaint = complaintRepository.save(Complaint.builder()
             .conversation(conversation)
             .user(room.getResident())
             .building(room.getBuilding())
             .attachment(conversationService.findRepresentativeImage(conversation.getId()))
             .title(content.title())
+            .type(type)
             .urgency(URGENCY_NOT_EVALUATED)
             .roomNo(room.getRoomNo())
             .build());
@@ -87,8 +90,7 @@ public class ComplaintService {
     @Transactional(readOnly = true)
     public ComplaintDetailResponse getManagerComplaint(Long managerId, Long complaintId) {
         Complaint complaint = getManagerComplaintEntity(managerId, complaintId);
-        ComplaintDetail detail = complaintDetailRepository.findById(complaintId)
-            .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.COMPLAINT));
+        ComplaintDetail detail = getComplaintDetail(complaintId);
         return ComplaintDetailResponse.from(complaint, detail,
             conversationService.findImages(complaint.getConversation().getId()), this::attachmentUrl);
     }
@@ -151,8 +153,7 @@ public class ComplaintService {
         if (!complaint.getUser().getId().equals(residentId)) {
             throw new ForbiddenException();
         }
-        ComplaintDetail detail = complaintDetailRepository.findById(complaintId)
-            .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.COMPLAINT));
+        ComplaintDetail detail = getComplaintDetail(complaintId);
         return ResidentComplaintDetailResponse.from(complaint, detail,
             conversationService.findImages(complaint.getConversation().getId()), this::attachmentUrl);
     }
@@ -208,4 +209,8 @@ public class ComplaintService {
         return complaint;
     }
 
+    private ComplaintDetail getComplaintDetail(Long complaintId) {
+        return complaintDetailRepository.findById(complaintId)
+            .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.COMPLAINT));
+    }
 }
