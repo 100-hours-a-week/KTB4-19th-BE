@@ -9,5 +9,7 @@ import com.homes.zipsai.building.domain.Building;
 public interface BuildingRepository extends JpaRepository<Building, Long> {
     boolean existsByManager_Id(Long managerId);
 
+    boolean existsByManager_IdAndDeletedAtIsNull(Long managerId);
+
     Optional<Building> findByManager_IdAndDeletedAtIsNull(Long managerId);
 }

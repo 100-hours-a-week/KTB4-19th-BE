@@ -163,10 +163,6 @@ class ComplaintServicePhotoUrlTest {
             new S3StorageService.PresignedDownload("https://s3.test/" + invocation.getArgument(0)));
     }
 
-    private void givenManagedBuilding() {
-        given(buildingRepository.findByManager_IdAndDeletedAtIsNull(MANAGER_ID)).willReturn(Optional.of(building));
-    }
-
     private void givenManagerDetail(List<File> images) {
         Complaint complaint = complaint(images.isEmpty() ? null : images.getFirst());
         given(complaintRepository.findByIdAndDeletedAtIsNull(COMPLAINT_ID)).willReturn(Optional.of(complaint));
@@ -176,7 +172,6 @@ class ComplaintServicePhotoUrlTest {
     }
 
     private void givenManagerComplaints(Complaint complaint) {
-        givenManagedBuilding();
         given(complaintRepository.findManagerComplaints(any(), any(), any(), anyBoolean(), anyInt(), any()))
             .willReturn(page(complaint));
     }

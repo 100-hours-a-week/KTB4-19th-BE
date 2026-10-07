@@ -43,7 +43,7 @@ public interface ComplaintRepository extends JpaRepository<Complaint, Long> {
     @EntityGraph(attributePaths = {"building", "attachment"})
     @Query("""
             select c from Complaint c
-            where c.building.id = :buildingId
+            where c.building.manager.id = :managerId
                 and c.deletedAt is null
                 and c.building.deletedAt is null
                 and (:keyword is null or lower(c.title) like lower(concat('%', :keyword, '%')))
@@ -51,7 +51,7 @@ public interface ComplaintRepository extends JpaRepository<Complaint, Long> {
                 and (:urgentOnly = false or c.urgency >= :urgentThreshold)
             """)
     Slice<Complaint> findManagerComplaints(
-            @Param("buildingId") Long buildingId,
+            @Param("managerId") Long managerId,
             @Param("keyword") String keyword,
             @Param("statuses") List<ComplaintStatus> statuses,
             @Param("urgentOnly") boolean urgentOnly,

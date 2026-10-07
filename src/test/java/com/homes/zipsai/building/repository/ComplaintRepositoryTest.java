@@ -46,13 +46,15 @@ class ComplaintRepositoryTest {
     @Autowired
     TestEntityManager entityManager;
 
+    private User manager;
+
     private User resident;
 
     private Building building;
 
     @BeforeEach
     void setUp() {
-        User manager = userRepository.save(new User("manager@example.com", "password", "관리자", null));
+        manager = userRepository.save(new User("manager@example.com", "password", "관리자", null));
         resident = userRepository.save(new User("resident@example.com", "password", "입주민", null));
         building = buildingRepository.save(Building.builder()
             .manager(manager)
@@ -86,12 +88,35 @@ class ComplaintRepositoryTest {
             .isNull();
     }
 
+    @Test
+    @DisplayName("관리자 민원 목록은 담당 건물의 민원만 조회한다")
+    void findsOnlyComplaintsOfManagedBuilding() {
+        saveComplaint(null);
+        User otherManager = userRepository.save(new User("other@example.com", "password", "다른 관리자", null));
+        Building otherBuilding = buildingRepository.save(Building.builder()
+            .manager(otherManager)
+            .roadAddress("서울시 강남구 테헤란로 2")
+            .buildingName("다른 빌딩")
+            .build());
+        saveComplaint(otherBuilding, null);
+        entityManager.clear();
+
+        Slice<Complaint> found = findManagerComplaints();
+
+        assertThat(found.getContent()).singleElement()
+            .satisfies(complaint -> assertThat(complaint.getBuilding().getId()).isEqualTo(building.getId()));
+    }
+
     private Slice<Complaint> findManagerComplaints() {
-        return complaintRepository.findManagerComplaints(building.getId(), null, List.of(ComplaintStatus.PENDING),
+        return complaintRepository.findManagerComplaints(manager.getId(), null, List.of(ComplaintStatus.PENDING),
             false, Complaint.URGENCY_THRESHOLD, PageRequest.of(0, 10));
     }
 
     private void saveComplaint(File attachment) {
+        saveComplaint(building, attachment);
+    }
+
+    private void saveComplaint(Building complaintBuilding, File attachment) {
         Conversation conversation = conversationRepository.save(Conversation.builder()
             .user(resident)
             .type(ConversationType.COMPLAINT)
@@ -100,7 +125,7 @@ class ComplaintRepositoryTest {
         complaintRepository.save(Complaint.builder()
             .conversation(conversation)
             .user(resident)
-            .building(building)
+            .building(complaintBuilding)
             .attachment(attachment)
             .title("천장 누수")
             .urgency(5)
