@@ -18,6 +18,7 @@ import com.homes.zipsai.building.domain.ComplaintDetail;
 import com.homes.zipsai.building.domain.ComplaintStatus;
 import com.homes.zipsai.building.domain.ComplaintType;
 import com.homes.zipsai.building.domain.Room;
+import com.homes.zipsai.building.dto.request.ComplaintCommentUpdateRequest;
 import com.homes.zipsai.building.dto.request.ComplaintCreateRequest;
 import com.homes.zipsai.building.dto.request.ComplaintStatusUpdateRequest;
 import com.homes.zipsai.building.dto.response.ComplaintCreateResponse;
@@ -105,6 +106,23 @@ public class ComplaintService {
         complaint.changeStatus(ComplaintStatus.valueOf(request.statusCode()));
         complaintRepository.flush();
         return ComplaintStatusUpdateResponse.from(complaint);
+    }
+
+    @Transactional
+    public void updateManagerComplaintComment(
+            Long managerId,
+            Long complaintId,
+            ComplaintCommentUpdateRequest request
+    ) {
+        Complaint complaint = getManagerComplaintEntity(managerId, complaintId);
+        complaint.verifyCommentable();
+        getComplaintDetail(complaintId).updateComment(request.comment());
+    }
+
+    @Transactional
+    public void deleteManagerComplaintComment(Long managerId, Long complaintId) {
+        getManagerComplaintEntity(managerId, complaintId);
+        getComplaintDetail(complaintId).deleteComment();
     }
 
     @Transactional(readOnly = true)

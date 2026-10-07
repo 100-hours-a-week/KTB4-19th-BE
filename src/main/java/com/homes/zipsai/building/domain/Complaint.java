@@ -18,6 +18,7 @@ import jakarta.persistence.Table;
 import com.homes.zipsai.common.domain.File;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.global.domain.BaseTimeEntity;
+import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.user.domain.User;
 
 import lombok.AccessLevel;
@@ -86,6 +87,12 @@ public class Complaint extends BaseTimeEntity {
         this.status = ComplaintStatus.PENDING;
         this.urgency = urgency;
         this.roomNo = roomNo;
+    }
+
+    public void verifyCommentable() {
+        if (status != ComplaintStatus.DONE) {
+            throw new ConflictException(ConflictException.Reason.COMPLAINT_NOT_DONE);
+        }
     }
 
     public void changeStatus(ComplaintStatus status) {
