@@ -150,8 +150,7 @@ class RuleDocumentServiceIndexingTest {
     @DisplayName("문서를 삭제하면 AI 색인 정리 요청에 HTTP 요청 trace_id를 담는다")
     void sendsTraceIdWhenDocumentDeleted() {
         given(documentRepository.findById(DOCUMENT_ID)).willReturn(Optional.of(savedDocument()));
-        given(documentRepository.findAllByBuilding_IdAndValidTrueAndDeletedAtIsNullOrderByUpdatedAtDesc(BUILDING_ID))
-            .willReturn(List.of());
+        given(documentRepository.findValidIdsByBuildingId(BUILDING_ID)).willReturn(List.of());
 
         ruleDocumentService.delete(MANAGER_ID, DOCUMENT_ID);
 
@@ -163,8 +162,7 @@ class RuleDocumentServiceIndexingTest {
     void keepsDocumentDeletedWhenIndexingCleanupFails() {
         RuleDocument document = savedDocument();
         given(documentRepository.findById(DOCUMENT_ID)).willReturn(Optional.of(document));
-        given(documentRepository.findAllByBuilding_IdAndValidTrueAndDeletedAtIsNullOrderByUpdatedAtDesc(BUILDING_ID))
-            .willReturn(List.of());
+        given(documentRepository.findValidIdsByBuildingId(BUILDING_ID)).willReturn(List.of());
         doThrow(new AiUnavailableException()).when(aiIndexingClient).cleanup(BUILDING_ID, TRACE_ID, List.of());
 
         ruleDocumentService.delete(MANAGER_ID, DOCUMENT_ID);

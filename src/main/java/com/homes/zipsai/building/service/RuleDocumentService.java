@@ -138,9 +138,8 @@ public class RuleDocumentService {
     private void index(RuleDocument document, Building building) {
         try {
             String fileKey = "s3://" + storageProperties.uploadBucket() + "/" + document.getAttachment().getFileKey();
-            List<String> validDocumentIds = documentRepository
-                    .findAllByBuilding_IdAndValidTrueAndDeletedAtIsNullOrderByUpdatedAtDesc(building.getId())
-                    .stream().map(item -> String.valueOf(item.getId())).toList();
+            List<String> validDocumentIds = documentRepository.findValidIdsByBuildingId(building.getId())
+                    .stream().map(String::valueOf).toList();
             AiIndexingClient client = aiIndexingClient.getIfAvailable();
             if (client == null) {
                 LOGGER.error("AI 색인 클라이언트가 설정되지 않았습니다. buildingId={}, docId={}",
@@ -157,9 +156,8 @@ public class RuleDocumentService {
 
     private void indexCleanup(Building building) {
         try {
-            List<String> validDocumentIds = documentRepository
-                    .findAllByBuilding_IdAndValidTrueAndDeletedAtIsNullOrderByUpdatedAtDesc(building.getId())
-                    .stream().map(item -> String.valueOf(item.getId())).toList();
+            List<String> validDocumentIds = documentRepository.findValidIdsByBuildingId(building.getId())
+                    .stream().map(String::valueOf).toList();
             AiIndexingClient client = aiIndexingClient.getIfAvailable();
             if (client != null) {
                 client.cleanup(building.getId(), MDC.get("traceId"), validDocumentIds);
