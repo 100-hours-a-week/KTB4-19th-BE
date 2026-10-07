@@ -12,7 +12,6 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.homes.zipsai.building.domain.Building;
 import com.homes.zipsai.building.domain.Complaint;
 import com.homes.zipsai.building.domain.ComplaintContent;
 import com.homes.zipsai.building.domain.ComplaintDetail;
@@ -115,13 +114,14 @@ public class ComplaintService {
             int page,
             int size
     ) {
-        Building building = buildingRepository.findByManager_IdAndDeletedAtIsNull(managerId)
-            .orElseThrow(ForbiddenException::new);
         String normalizedKeyword = normalizeKeyword(keyword);
         List<ComplaintStatus> statuses = normalizeStatuses(statusValues);
         Pageable pageable = PageRequest.of(page, size, MANAGER_COMPLAINT_SORT);
         Slice<Complaint> complaints = complaintRepository.findManagerComplaints(
-            building.getId(), normalizedKeyword, statuses, urgentOnly, Complaint.URGENCY_THRESHOLD, pageable);
+            managerId, normalizedKeyword, statuses, urgentOnly, Complaint.URGENCY_THRESHOLD, pageable);
+        if (complaints.isEmpty()) {
+            verifyManagesBuilding(managerId);
+        }
         return ComplaintListResponse.from(complaints, this::attachmentUrl);
     }
 
@@ -188,6 +188,12 @@ public class ComplaintService {
             }
         }
         return statuses.stream().distinct().toList();
+    }
+
+    private void verifyManagesBuilding(Long managerId) {
+        if (!buildingRepository.existsByManager_IdAndDeletedAtIsNull(managerId)) {
+            throw new ForbiddenException();
+        }
     }
 
     private Complaint getManagerComplaintEntity(Long managerId, Long complaintId) {
