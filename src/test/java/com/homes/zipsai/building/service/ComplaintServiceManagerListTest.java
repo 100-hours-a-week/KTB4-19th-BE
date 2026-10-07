@@ -32,7 +32,7 @@ import com.homes.zipsai.building.repository.ComplaintRepository;
 import com.homes.zipsai.common.config.StorageProperties;
 import com.homes.zipsai.common.service.S3StorageService;
 import com.homes.zipsai.conversation.service.ConversationService;
-import com.homes.zipsai.global.exception.ForbiddenException;
+import com.homes.zipsai.global.exception.NotFoundException;
 import com.homes.zipsai.user.domain.User;
 
 @ExtendWith(MockitoExtension.class)
@@ -79,13 +79,14 @@ class ComplaintServiceManagerListTest {
     }
 
     @Test
-    @DisplayName("담당 건물이 없는 관리자는 민원 목록을 볼 수 없다")
+    @DisplayName("담당 건물이 없는 관리자는 건물을 찾을 수 없다는 오류를 받는다")
     void rejectsManagerWithoutBuilding() {
         givenManagerComplaints(List.of());
         given(buildingRepository.existsByManager_IdAndDeletedAtIsNull(MANAGER_ID)).willReturn(false);
 
         assertThatThrownBy(() -> complaintService.getManagerComplaints(MANAGER_ID, null, null, false, 0, 20))
-            .isInstanceOf(ForbiddenException.class);
+            .isInstanceOf(NotFoundException.class)
+            .hasFieldOrPropertyWithValue("code", "BUILDING_NOT_FOUND");
     }
 
     @Test

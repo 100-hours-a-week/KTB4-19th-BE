@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -175,6 +176,16 @@ class ManagerComplaintListApiTest {
         mvc.perform(get(COMPLAINTS).param("status", "UNKNOWN").with(manager(owner.manager().getId())))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error.code").value("INVALID_QUERY_PARAMETER"));
+    }
+
+    @Test
+    @DisplayName("담당 건물이 없는 관리자가 민원 목록을 조회하면 404를 받는다")
+    void returnsNotFoundForManagerWithoutBuilding() throws Exception {
+        User managerWithoutBuilding = user(UserRole.MANAGER);
+
+        mvc.perform(get(COMPLAINTS).with(manager(managerWithoutBuilding.getId())))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.error.code").value("BUILDING_NOT_FOUND"));
     }
 
     private ManagerBuilding managerBuilding() {
