@@ -23,6 +23,7 @@ public class StubAiConverseClient implements AiConverseClient {
     private static final String LOCATION_FIELD = "location";
     private static final String SYMPTOM_FIELD = "symptom";
     private static final String STUB_ISSUE_TYPE = "other";
+    private static final String STUB_IMAGE_SUMMARY = "테스트용 사진 요약";
     private static final Map<String, String> QUESTIONS = Map.of(
         SYMPTOM_FIELD, "어떤 불편이 있으신가요?",
         LOCATION_FIELD, "문제가 생긴 위치가 어디인가요? (예: 안방 천장)");
@@ -93,20 +94,48 @@ public class StubAiConverseClient implements AiConverseClient {
         AiComplaintDraft draft = fillNextMissingField(previous, text);
         List<String> missingFields = missingFields(draft);
         String occurredAt = draft.occurredAt() == null ? null : draft.occurredAt().toString();
+        List<AiConverseRequest.MessageImage> images = request.message().images();
         AiConverseResponse.DraftPatch patch = AiConverseResponse.DraftPatch.builder()
             .location(draft.location())
             .symptom(draft.symptom())
             .occurredAt(occurredAt)
             .issueType(STUB_ISSUE_TYPE)
+            .attachmentIds(draftAttachmentIds(request.complaintDraft(), images))
+            .build();
+        AiConverseResponse.Result result = AiConverseResponse.Result.builder()
+            .complaintDraft(patch)
+            .missingFields(missingFields)
+            .imageAnalysis(analyze(images))
             .build();
         if (missingFields.isEmpty()) {
-            return response(turnId, AiRoute.COMPLAINT, null, "접수 내용을 정리했어요. 아래 내용으로 민원을 접수할까요?",
-                AiConverseResponse.Result.builder().complaintDraft(patch).missingFields(missingFields).build());
+            return response(turnId, AiRoute.COMPLAINT, null, "접수 내용을 정리했어요. 아래 내용으로 민원을 접수할까요?", result);
         }
         String question = QUESTIONS.get(missingFields.getFirst());
         String reply = previous.isEmpty() ? "불편을 드려 죄송해요. " + question : question;
-        return response(turnId, AiRoute.COMPLAINT, AiComplaintState.COLLECTING, reply,
-            AiConverseResponse.Result.builder().complaintDraft(patch).missingFields(missingFields).build());
+        return response(turnId, AiRoute.COMPLAINT, AiComplaintState.COLLECTING, reply, result);
+    }
+
+    private List<Long> draftAttachmentIds(AiConverseRequest.ComplaintDraftPayload previousDraft,
+                                          List<AiConverseRequest.MessageImage> images) {
+        List<Long> attachmentIds = new ArrayList<>();
+        if (previousDraft != null) {
+            attachmentIds.addAll(previousDraft.attachmentIds());
+        }
+        for (AiConverseRequest.MessageImage image : images) {
+            attachmentIds.add(image.attachmentId());
+        }
+        return attachmentIds;
+    }
+
+    private AiConverseResponse.ImageAnalysis analyze(List<AiConverseRequest.MessageImage> images) {
+        if (images.isEmpty()) {
+            return null;
+        }
+        List<AiConverseResponse.ImageObservation> observations = new ArrayList<>();
+        for (AiConverseRequest.MessageImage image : images) {
+            observations.add(new AiConverseResponse.ImageObservation(image.attachmentId(), STUB_IMAGE_SUMMARY, null));
+        }
+        return new AiConverseResponse.ImageAnalysis(observations);
     }
 
     private AiConverseResponse askAgain(String turnId) {
