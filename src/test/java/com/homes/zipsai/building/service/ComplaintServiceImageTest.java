@@ -12,6 +12,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.homes.zipsai.building.domain.Building;
@@ -55,13 +56,16 @@ class ComplaintServiceImageTest {
     @Mock
     S3StorageService s3StorageService;
 
+    @Mock
+    ApplicationEventPublisher events;
+
     ComplaintService complaintService;
 
     @BeforeEach
     void setUp() {
         complaintService = new ComplaintService(complaintRepository, complaintDetailRepository,
             buildingRepository, residentRoomService, conversationService, s3StorageService,
-            new StorageProperties(null, null, null, 300, 0));
+            new StorageProperties(null, null, null, 300, 0), events);
         given(conversationService.getOwnedConversation(RESIDENT_ID, CONVERSATION_ID))
             .willReturn(readyConversation());
         given(residentRoomService.getLivingRoom(RESIDENT_ID)).willReturn(livingRoom(user(RESIDENT_ID)));
@@ -123,7 +127,7 @@ class ComplaintServiceImageTest {
     }
 
     private static Room livingRoom(User resident) {
-        Room room = new Room(new Building(user(99L), "서울시 테스트로 1", "테스트빌"), "302");
+        Room room = new Room(withId(new Building(user(99L), "서울시 테스트로 1", "테스트빌"), 7L), "302");
         room.invite();
         room.moveIn(resident);
         return room;
