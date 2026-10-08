@@ -27,6 +27,7 @@ import com.homes.zipsai.common.service.S3StorageService;
 import com.homes.zipsai.conversation.ai.AiConverseRequest;
 import com.homes.zipsai.conversation.ai.AiConverseRequest.HistoryMessage;
 import com.homes.zipsai.conversation.ai.AiConverseResponse;
+import com.homes.zipsai.conversation.ai.AiConverseResponse.ImageObservation;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.conversation.domain.Message;
@@ -180,6 +181,7 @@ public class ConversationService {
     public MessageSendResponse saveAiReply(PendingAiReply pendingReply, AiConverseResponse aiResponse) {
         Conversation conversation = conversationRepository.getReferenceById(pendingReply.conversation().getId());
         conversation.applyAiResponse(aiResponse);
+        saveImageAnalysis(pendingReply.residentMessage().messageId(), aiResponse.imageObservations());
         MessageType messageType = MessageType.TEXT;
         if (conversation.isReadyToConfirmComplaint()) {
             messageType = MessageType.SUMMARY_CARD;
@@ -273,6 +275,23 @@ public class ConversationService {
             attachments.add(toAttachmentResponse(fileGroup));
         }
         return attachments;
+    }
+
+    private void saveImageAnalysis(Long residentMessageId, List<ImageObservation> observations) {
+        if (observations.isEmpty()) {
+            return;
+        }
+
+        Map<Long, ImageObservation> observationsByAttachmentId = new HashMap<>();
+        for (ImageObservation observation : observations) {
+            observationsByAttachmentId.put(observation.attachmentId(), observation);
+        }
+        for (MessageFileGroup fileGroup : messageFileGroupRepository.findAllByMessageIds(List.of(residentMessageId))) {
+            ImageObservation observation = observationsByAttachmentId.get(fileGroup.getAttachment().getId());
+            if (observation != null) {
+                fileGroup.recordAnalysis(observation.summary(), observation.ocrText());
+            }
+        }
     }
 
     private List<HistoryMessage> getHistory(Long conversationId) {

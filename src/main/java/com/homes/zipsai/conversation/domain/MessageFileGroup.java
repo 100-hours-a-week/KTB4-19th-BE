@@ -13,6 +13,7 @@ import jakarta.persistence.UniqueConstraint;
 
 import com.homes.zipsai.common.domain.File;
 import com.homes.zipsai.global.domain.BaseTimeEntity;
+import com.homes.zipsai.global.util.TextUtils;
 
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -31,6 +32,9 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class MessageFileGroup extends BaseTimeEntity {
 
+    private static final int SUMMARY_MAX_LENGTH = 100;
+    private static final int OCR_TEXT_MAX_LENGTH = 200;
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "file_group_id")
@@ -47,10 +51,21 @@ public class MessageFileGroup extends BaseTimeEntity {
     @Column(name = "file_group_seq", nullable = false)
     private int fileGroupSeq;
 
+    @Column(name = "summary", length = SUMMARY_MAX_LENGTH)
+    private String summary;
+
+    @Column(name = "ocr_text", length = OCR_TEXT_MAX_LENGTH)
+    private String ocrText;
+
     @Builder
     public MessageFileGroup(Message message, File attachment, int fileGroupSeq) {
         this.message = message;
         this.attachment = attachment;
         this.fileGroupSeq = fileGroupSeq;
+    }
+
+    public void recordAnalysis(String summary, String ocrText) {
+        this.summary = TextUtils.truncate(summary, SUMMARY_MAX_LENGTH);
+        this.ocrText = TextUtils.truncate(ocrText, OCR_TEXT_MAX_LENGTH);
     }
 }

@@ -125,8 +125,9 @@ class ComplaintNotificationIntegrationTest {
                 .type(ConversationType.INQUIRY).title("천장 누수").build());
             conversation.applyAiResponse(new AiConverseResponse("ai_response_success", "test-turn",
                 new AiConverseResponse.Data(AiRoute.COMPLAINT, AiComplaintState.READY_TO_CONFIRM, "접수할까요?",
-                    new AiConverseResponse.Result(
-                        new AiConverseResponse.DraftPatch("거실", "천장 누수", null), null, List.of(), List.of()))));
+                    AiConverseResponse.Result.builder()
+                        .complaintDraft(AiConverseResponse.DraftPatch.builder().location("거실").symptom("천장 누수").build())
+                        .build())));
         });
     }
 

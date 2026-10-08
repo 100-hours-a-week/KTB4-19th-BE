@@ -78,8 +78,10 @@ class AiConverseRequestImageTest {
     private static AiConverseResponse collectingWithSymptom() {
         return new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, "trace",
             new AiConverseResponse.Data(AiRoute.COMPLAINT, AiComplaintState.COLLECTING, "위치가 어디인가요?",
-                new AiConverseResponse.Result(new AiConverseResponse.DraftPatch(null, "천장 누수", null), null,
-                    List.of("location"), List.of())));
+                AiConverseResponse.Result.builder()
+                    .complaintDraft(AiConverseResponse.DraftPatch.builder().symptom("천장 누수").build())
+                    .missingFields(List.of("location"))
+                    .build()));
     }
 
     private Message message(long id, SenderType senderType, String content) {

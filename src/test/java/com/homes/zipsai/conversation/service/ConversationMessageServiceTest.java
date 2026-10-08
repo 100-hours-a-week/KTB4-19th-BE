@@ -174,6 +174,6 @@ class ConversationMessageServiceTest {
     private static AiConverseResponse aiResponse(String turnId) {
         return new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, turnId,
             new AiConverseResponse.Data(AiRoute.COMPLAINT, AiComplaintState.COLLECTING, "위치가 어디인가요?",
-                new AiConverseResponse.Result(null, null, List.of("location"), List.of())));
+                AiConverseResponse.Result.builder().missingFields(List.of("location")).build()));
     }
 }

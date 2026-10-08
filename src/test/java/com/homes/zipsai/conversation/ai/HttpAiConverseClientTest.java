@@ -84,9 +84,50 @@ class HttpAiConverseClientTest {
         assertThat(response.route()).isEqualTo(AiRoute.COMPLAINT);
         assertThat(response.nextComplaintState()).isNull();
         assertThat(response.reply()).isEqualTo("아래 내용으로 민원을 접수할까요?");
-        assertThat(response.draftPatch().location()).isEqualTo("안방 천장");
+        assertThat(response.complaintDraft().location()).isEqualTo("안방 천장");
         assertThat(response.qaCardQuestion()).isNull();
         assertThat(response.isConversationComplete()).isTrue();
+        mockRestServiceServer.verify();
+    }
+
+    @Test
+    @DisplayName("AI 서버의 사진 분석 결과와 민원 초안 사진 필드를 읽는다")
+    void readsImageAnalysisAndDraftAttachments() {
+        mockRestServiceServer.expect(requestTo(CONVERSE_URL))
+            .andRespond(withSuccess("""
+                {
+                  "code": "ai_response_success",
+                  "turn_id": "%s",
+                  "data": {
+                    "route": "complaint",
+                    "next_complaint_state": "collecting",
+                    "reply": "사진 확인했어요. 위치가 어디인가요?",
+                    "result": {
+                      "complaint_draft": {
+                        "issue_type": "leak",
+                        "symptom": "천장 누수",
+                        "attachmentIds": [31, 32],
+                        "representative_attachment_id": 32
+                      },
+                      "missing_fields": ["location"],
+                      "citations": [],
+                      "image_analysis": {
+                        "images": [
+                          { "attachmentId": 31, "summary": "천장 얼룩", "ocrText": "관리실 010" }
+                        ]
+                      }
+                    }
+                  }
+                }
+                """.formatted(TURN_ID), MediaType.APPLICATION_JSON));
+
+        AiConverseResponse response = httpAiConverseClient.converse(request());
+
+        assertThat(response.complaintDraft().issueType()).isEqualTo("leak");
+        assertThat(response.complaintDraft().attachmentIds()).containsExactly(31L, 32L);
+        assertThat(response.complaintDraft().representativeAttachmentId()).isEqualTo(32L);
+        assertThat(response.imageObservations())
+            .containsExactly(new AiConverseResponse.ImageObservation(31L, "천장 얼룩", "관리실 010"));
         mockRestServiceServer.verify();
     }
 
@@ -118,7 +159,7 @@ class HttpAiConverseClientTest {
         AiConverseResponse response = httpAiConverseClient.converse(request());
 
         assertThat(response.isSuccess()).isTrue();
-        assertThat(response.draftPatch().occurredAt())
+        assertThat(response.complaintDraft().toDraft().occurredAt())
             .isEqualTo(OffsetDateTime.parse("2026-09-23T00:00:00+09:00"));
         mockRestServiceServer.verify();
     }

@@ -10,7 +10,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
+import lombok.Builder;
 import tools.jackson.databind.PropertyNamingStrategies;
 import tools.jackson.databind.annotation.JsonNaming;
 
@@ -38,9 +40,13 @@ public record AiConverseResponse(String code, String turnId, Data data) {
         return data.reply();
     }
 
-    public AiComplaintDraft draftPatch() {
-        DraftPatch patch = data.result().complaintDraft();
-        return patch == null ? null : patch.toDraft();
+    public DraftPatch complaintDraft() {
+        return data.result().complaintDraft();
+    }
+
+    public List<ImageObservation> imageObservations() {
+        ImageAnalysis imageAnalysis = data.result().imageAnalysis();
+        return imageAnalysis == null ? List.of() : imageAnalysis.images();
     }
 
     public String qaCardQuestion() {
@@ -63,13 +69,14 @@ public record AiConverseResponse(String code, String turnId, Data data) {
                        String reply, Result result) {
 
         public Data {
-            result = result == null ? new Result(null, null, List.of(), List.of()) : result;
+            result = result == null ? Result.builder().build() : result;
         }
     }
 
+    @Builder
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Result(DraftPatch complaintDraft, QaCardDraft qaCardDraft, List<String> missingFields,
-                         List<Citation> citations) {
+                         List<Citation> citations, ImageAnalysis imageAnalysis) {
 
         public Result {
             missingFields = missingFields == null ? List.of() : List.copyOf(missingFields);
@@ -81,10 +88,13 @@ public record AiConverseResponse(String code, String turnId, Data data) {
     public record Citation(String sourceType, String sourceId, String title, String snippet, String url) {
     }
 
+    @Builder
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-    public record DraftPatch(String location, String symptom, String occurredAt) {
+    public record DraftPatch(String location, String symptom, String occurredAt, String issueType,
+                             @JsonProperty("attachmentIds") List<Long> attachmentIds,
+                             Long representativeAttachmentId) {
 
-        AiComplaintDraft toDraft() {
+        public AiComplaintDraft toDraft() {
             return new AiComplaintDraft(location, symptom, parseOccurredAt(occurredAt));
         }
 
@@ -110,5 +120,15 @@ public record AiConverseResponse(String code, String turnId, Data data) {
     }
 
     public record QaCardDraft(String question) {
+    }
+
+    public record ImageAnalysis(List<ImageObservation> images) {
+
+        public ImageAnalysis {
+            images = images == null ? List.of() : List.copyOf(images);
+        }
+    }
+
+    public record ImageObservation(Long attachmentId, String summary, String ocrText) {
     }
 }

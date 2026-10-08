@@ -4,8 +4,10 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.util.List;
 
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -42,6 +44,7 @@ public class Conversation extends BaseTimeEntity {
 
     private static final int LOCATION_MAX_LENGTH = 50;
     private static final int SYMPTOM_MAX_LENGTH = 100;
+    private static final int ISSUE_TYPE_MAX_LENGTH = 20;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -82,6 +85,16 @@ public class Conversation extends BaseTimeEntity {
 
     @Column(name = "draft_occurred_at")
     private OffsetDateTime draftOccurredAt;
+
+    @Column(name = "draft_issue_type", length = ISSUE_TYPE_MAX_LENGTH)
+    private String draftIssueType;
+
+    @Convert(converter = AttachmentIdsConverter.class)
+    @Column(name = "draft_attachment_ids")
+    private List<Long> draftAttachmentIds;
+
+    @Column(name = "draft_representative_attachment_id")
+    private Long draftRepresentativeAttachmentId;
 
     @Builder
     public Conversation(User user, ConversationType type, String title) {
@@ -137,11 +150,12 @@ public class Conversation extends BaseTimeEntity {
         this.currentRoute = response.route();
 
         String qaCardQuestion = response.qaCardQuestion();
-        AiComplaintDraft draftPatch = response.draftPatch();
+        AiConverseResponse.DraftPatch draftPatch = response.complaintDraft();
         if (qaCardQuestion != null) {
             storeDraft(new AiComplaintDraft(null, qaCardQuestion, null));
         } else if (draftPatch != null) {
-            storeDraft(currentDraft().withEdits(draftPatch));
+            storeDraft(currentDraft().withEdits(draftPatch.toDraft()));
+            storeDraftIssueTypeAndImages(draftPatch);
         }
 
         this.complaintState = response.isConversationComplete()
@@ -187,6 +201,18 @@ public class Conversation extends BaseTimeEntity {
             return null;
         }
         return lastMessageAt.plus(IDLE_TIME_TO_CLOSE);
+    }
+
+    private void storeDraftIssueTypeAndImages(AiConverseResponse.DraftPatch patch) {
+        if (patch.issueType() != null) {
+            this.draftIssueType = TextUtils.truncate(patch.issueType(), ISSUE_TYPE_MAX_LENGTH);
+        }
+        if (patch.attachmentIds() != null) {
+            this.draftAttachmentIds = List.copyOf(patch.attachmentIds());
+        }
+        if (patch.representativeAttachmentId() != null) {
+            this.draftRepresentativeAttachmentId = patch.representativeAttachmentId();
+        }
     }
 
     private void storeDraft(AiComplaintDraft draft) {

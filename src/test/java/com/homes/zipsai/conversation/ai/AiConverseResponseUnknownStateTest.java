@@ -37,8 +37,8 @@ class AiConverseResponseUnknownStateTest {
         AiConverseResponse response = read("ready_to_confirm");
 
         assertThat(response.reply()).isEqualTo("민원 정보를 확인했습니다.");
-        assertThat(response.draftPatch().location()).isEqualTo("카테부");
-        assertThat(response.draftPatch().symptom()).isEqualTo("천장무너짐");
+        assertThat(response.complaintDraft().location()).isEqualTo("카테부");
+        assertThat(response.complaintDraft().symptom()).isEqualTo("천장무너짐");
     }
 
     @Test

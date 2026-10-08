@@ -21,6 +21,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import com.homes.zipsai.building.service.ResidentRoomService;
 import com.homes.zipsai.common.config.StorageProperties;
+import com.homes.zipsai.common.domain.File;
 import com.homes.zipsai.common.repository.FileRepository;
 import com.homes.zipsai.common.service.S3StorageService;
 import com.homes.zipsai.conversation.ai.AiConverseRequest;
@@ -29,6 +30,7 @@ import com.homes.zipsai.conversation.ai.AiRoute;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.conversation.domain.Message;
+import com.homes.zipsai.conversation.domain.MessageFileGroup;
 import com.homes.zipsai.conversation.domain.MessageType;
 import com.homes.zipsai.conversation.domain.SenderType;
 import com.homes.zipsai.conversation.dto.response.MessageResponse;
@@ -147,6 +149,42 @@ class ConversationServiceAiReplyTest {
     }
 
     @Test
+    @DisplayName("AI가 분석한 사진의 요약과 글자를 입주민 메시지 사진에 저장한다")
+    void savesImageAnalysisOnResidentMessageImage() {
+        givenReplySaved();
+        MessageFileGroup fileGroup = givenResidentMessageImage(31L);
+
+        conversationService.saveAiReply(pendingAiReply(true, null),
+            complaintWithImageAnalysis(new AiConverseResponse.ImageObservation(31L, "천장 얼룩", "관리실 010")));
+
+        assertThat(fileGroup.getSummary()).isEqualTo("천장 얼룩");
+        assertThat(fileGroup.getOcrText()).isEqualTo("관리실 010");
+    }
+
+    @Test
+    @DisplayName("이번 메시지에 없는 사진의 분석 결과는 무시한다")
+    void ignoresImageAnalysisOfOtherAttachment() {
+        givenReplySaved();
+        MessageFileGroup fileGroup = givenResidentMessageImage(31L);
+
+        conversationService.saveAiReply(pendingAiReply(true, null),
+            complaintWithImageAnalysis(new AiConverseResponse.ImageObservation(99L, "천장 얼룩", null)));
+
+        assertThat(fileGroup.getSummary()).isNull();
+        assertThat(fileGroup.getOcrText()).isNull();
+    }
+
+    @Test
+    @DisplayName("사진 분석 결과가 없으면 메시지 사진을 조회하지 않는다")
+    void skipsImageLookupWithoutImageAnalysis() {
+        givenReplySaved();
+
+        conversationService.saveAiReply(pendingAiReply(true, null), knowledge("화요일과 금요일입니다.", CITATIONS));
+
+        then(messageFileGroupRepository).should(never()).findAllByMessageIds(any());
+    }
+
+    @Test
     @DisplayName("첫 메시지의 답변을 받지 못하면 사진 연결, 메시지, 대화를 모두 지운다")
     void deletesConversationWhenFirstMessageIsUnanswered() {
         conversationService.discardUnansweredMessage(pendingAiReply(true, null));
@@ -180,6 +218,15 @@ class ConversationServiceAiReplyTest {
         });
     }
 
+    private MessageFileGroup givenResidentMessageImage(Long attachmentId) {
+        File attachment = File.builder().fileKey("conversations/ceiling.jpg").fileType("jpg").build();
+        ReflectionTestUtils.setField(attachment, "id", attachmentId);
+        MessageFileGroup fileGroup = MessageFileGroup.builder().attachment(attachment).fileGroupSeq(1).build();
+        given(messageFileGroupRepository.findAllByMessageIds(List.of(RESIDENT_MESSAGE_ID)))
+            .willReturn(List.of(fileGroup));
+        return fileGroup;
+    }
+
     private Message savedMessage() {
         ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
         then(messageRepository).should().save(messageCaptor.capture());
@@ -194,9 +241,19 @@ class ConversationServiceAiReplyTest {
         return new PendingAiReply(conversation, residentMessage, newConversation, previousLastMessageAt, aiRequest);
     }
 
+    private static AiConverseResponse complaintWithImageAnalysis(AiConverseResponse.ImageObservation observation) {
+        AiConverseResponse.ImageAnalysis imageAnalysis = new AiConverseResponse.ImageAnalysis(List.of(observation));
+        return new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, TURN_ID,
+            new AiConverseResponse.Data(AiRoute.COMPLAINT, null, "위치가 어디인가요?",
+                AiConverseResponse.Result.builder()
+                    .missingFields(List.of("location"))
+                    .imageAnalysis(imageAnalysis)
+                    .build()));
+    }
+
     private static AiConverseResponse knowledge(String reply, List<AiConverseResponse.Citation> citations) {
         return new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, TURN_ID,
             new AiConverseResponse.Data(AiRoute.KNOWLEDGE, null, reply,
-                new AiConverseResponse.Result(null, null, List.of(), citations)));
+                AiConverseResponse.Result.builder().citations(citations).build()));
     }
 }
