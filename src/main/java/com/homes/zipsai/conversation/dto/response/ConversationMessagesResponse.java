@@ -24,6 +24,7 @@ public record ConversationMessagesResponse(
                                                   LocalDateTime now) {
         ConversationStatus status = conversation.statusAt(now);
         return new ConversationMessagesResponse(conversation.getId(), conversation.getTitle(), status,
-            status.getLabel(), conversation.closesAt(), complaintId, hasNext, nextCursor, messages);
+            status.labelFor(conversation.getCurrentRoute()), conversation.closesAt(), complaintId, hasNext,
+            nextCursor, messages);
     }
 }

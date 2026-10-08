@@ -9,6 +9,7 @@ import java.util.function.Function;
 import com.homes.zipsai.building.domain.Complaint;
 import com.homes.zipsai.building.domain.ComplaintDetail;
 import com.homes.zipsai.building.domain.ComplaintStatus;
+import com.homes.zipsai.building.domain.ComplaintType;
 import com.homes.zipsai.common.domain.File;
 
 public record ComplaintDetailResponse(
@@ -18,6 +19,7 @@ public record ComplaintDetailResponse(
         String buildingName,
         String roomNo,
         String title,
+        ComplaintType complaintType,
         ComplaintStatus statusCode,
         String statusLabel,
         int urgency,
@@ -26,6 +28,7 @@ public record ComplaintDetailResponse(
         OffsetDateTime occurredTime,
         String symptom,
         String aiSummary,
+        String comment,
         int attachmentCount,
         List<AttachmentItem> attachments,
         LocalDateTime createdAt,
@@ -42,6 +45,7 @@ public record ComplaintDetailResponse(
             complaint.getBuilding().getBuildingName(),
             complaint.getRoomNo(),
             complaint.getTitle(),
+            complaint.getType(),
             complaint.getStatus(),
             complaint.getStatus().getLabel(),
             complaint.getUrgency(),
@@ -50,6 +54,7 @@ public record ComplaintDetailResponse(
             detail.getOccurredTime(),
             detail.getSymptom(),
             detail.getAiSummary(),
+            detail.getComment(),
             images.size(),
             attachments,
             complaint.getCreatedAt(),

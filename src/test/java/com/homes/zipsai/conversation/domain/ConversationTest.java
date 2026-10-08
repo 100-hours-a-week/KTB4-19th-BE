@@ -69,6 +69,40 @@ class ConversationTest {
     }
 
     @Test
+    @DisplayName("QA로 접수한 대화는 생활 문의 대화로 남는다")
+    void keepsInquiryTypeAfterQaCreated() {
+        Conversation conversation = conversation();
+        conversation.applyAiResponse(qaCard("관리자님 연락처 알려주세요"));
+
+        conversation.markComplaintCreated("관리자님 연락처 알려주세요",
+            new AiComplaintDraft(null, "관리자님 연락처 알려주세요", null));
+
+        assertThat(conversation.getType()).isEqualTo(ConversationType.INQUIRY);
+    }
+
+    @Test
+    @DisplayName("민원으로 접수한 대화는 민원 대화가 된다")
+    void changesToComplaintTypeAfterComplaintCreated() {
+        Conversation conversation = conversation();
+        conversation.applyAiResponse(complaint("안방", "천장 누수", List.of()));
+
+        conversation.markComplaintCreated("천장 누수", new AiComplaintDraft("안방", "천장 누수", null));
+
+        assertThat(conversation.getType()).isEqualTo(ConversationType.COMPLAINT);
+    }
+
+    @Test
+    @DisplayName("민원을 접수해도 마지막 대화 경로는 남긴다")
+    void keepsLastRouteAfterComplaintCreated() {
+        Conversation conversation = conversation();
+        conversation.applyAiResponse(complaint("안방", "천장 누수", List.of()));
+
+        conversation.markComplaintCreated("천장 누수", new AiComplaintDraft("안방", "천장 누수", null));
+
+        assertThat(conversation.getCurrentRoute()).isEqualTo(AiRoute.COMPLAINT);
+    }
+
+    @Test
     @DisplayName("요약 카드가 뜨기 전에는 민원을 접수할 수 없다")
     void rejectsComplaintBeforeSummaryCard() {
         Conversation conversation = conversation();

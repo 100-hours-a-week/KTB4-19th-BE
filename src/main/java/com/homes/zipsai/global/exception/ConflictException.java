@@ -20,6 +20,11 @@ public class ConflictException extends ApiException {
                 "이미 민원이 접수된 대화입니다.",
                 "conversationId",
                 "하나의 대화에서는 민원을 한 번만 접수할 수 있습니다."),
+        COMPLAINT_NOT_DONE(
+                "COMPLAINT_NOT_DONE",
+                "처리가 완료된 민원에만 코멘트를 남길 수 있습니다.",
+                "complaintId",
+                "민원을 처리완료로 바꾼 뒤 다시 시도해 주세요."),
         COMPLAINT_NOT_READY(
                 "COMPLAINT_NOT_READY",
                 "접수할 내용이 아직 정리되지 않았습니다.",

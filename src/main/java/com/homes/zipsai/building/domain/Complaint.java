@@ -18,6 +18,7 @@ import jakarta.persistence.Table;
 import com.homes.zipsai.common.domain.File;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.global.domain.BaseTimeEntity;
+import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.user.domain.User;
 
 import lombok.AccessLevel;
@@ -58,6 +59,10 @@ public class Complaint extends BaseTimeEntity {
     private String title;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "complaint_type", length = 10)
+    private ComplaintType type;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "complaint_status", nullable = false, length = 20)
     private ComplaintStatus status;
 
@@ -72,15 +77,22 @@ public class Complaint extends BaseTimeEntity {
 
     @Builder
     public Complaint(Conversation conversation, User user, Building building, File attachment,
-                     String title, int urgency, String roomNo) {
+                     String title, ComplaintType type, int urgency, String roomNo) {
         this.conversation = conversation;
         this.user = user;
         this.building = building;
         this.attachment = attachment;
         this.title = title;
+        this.type = type;
         this.status = ComplaintStatus.PENDING;
         this.urgency = urgency;
         this.roomNo = roomNo;
+    }
+
+    public void verifyCommentable() {
+        if (status != ComplaintStatus.DONE) {
+            throw new ConflictException(ConflictException.Reason.COMPLAINT_NOT_DONE);
+        }
     }
 
     public void changeStatus(ComplaintStatus status) {
