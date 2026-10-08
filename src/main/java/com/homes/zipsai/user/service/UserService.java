@@ -18,6 +18,7 @@ import com.homes.zipsai.building.repository.BuildingRepository;
 import com.homes.zipsai.building.repository.RoomRepository;
 import com.homes.zipsai.building.service.ResidentRoomService;
 import com.homes.zipsai.global.exception.ConflictException;
+import com.homes.zipsai.global.exception.ForbiddenException;
 import com.homes.zipsai.global.exception.UnauthorizedException;
 import com.homes.zipsai.global.exception.ValidationFailedException.Reason;
 import com.homes.zipsai.global.security.AuthPrincipal;
@@ -63,6 +64,22 @@ public class UserService {
             throw new UnauthorizedException();
         }
         return user;
+    }
+
+    @Transactional(readOnly = true)
+    public void requireEligibleUser(Long userId) {
+        User user = userRepository.findById(userId).orElseThrow(ForbiddenException::new);
+        if (user.getDeletedAt() != null || user.getStatus() != UserStatus.ACTIVE) {
+            throw new ForbiddenException();
+        }
+        boolean eligible = switch (user.getRole()) {
+            case MANAGER -> buildingRepository.existsByManager_IdAndDeletedAtIsNull(userId);
+            case RESIDENT -> roomRepository.existsLivingByResidentId(userId);
+            default -> false;
+        };
+        if (!eligible) {
+            throw new ForbiddenException();
+        }
     }
 
     @Transactional(readOnly = true)
