@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.homes.zipsai.building.domain.Building;
@@ -60,13 +61,16 @@ class ComplaintServiceCommentTest {
     @Mock
     S3StorageService s3StorageService;
 
+    @Mock
+    ApplicationEventPublisher applicationEventPublisher;
+
     ComplaintService complaintService;
 
     @BeforeEach
     void setUp() {
         complaintService = new ComplaintService(complaintRepository, complaintDetailRepository,
             buildingRepository, residentRoomService, conversationService, s3StorageService,
-            new StorageProperties(null, null, null, 300, 0));
+            new StorageProperties(null, null, null, 300, 0), applicationEventPublisher);
     }
 
     @Test

@@ -21,6 +21,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.homes.zipsai.building.domain.Building;
@@ -66,6 +67,9 @@ class ComplaintServicePhotoUrlTest {
     @Mock
     S3StorageService s3StorageService;
 
+    @Mock
+    ApplicationEventPublisher events;
+
     ComplaintService complaintService;
     User resident;
     Building building;
@@ -74,7 +78,7 @@ class ComplaintServicePhotoUrlTest {
     void setUp() {
         complaintService = new ComplaintService(complaintRepository, complaintDetailRepository,
             buildingRepository, residentRoomService, conversationService, s3StorageService,
-            new StorageProperties(null, null, null, 300, 0));
+            new StorageProperties(null, null, null, 300, 0), events);
         resident = user(RESIDENT_ID);
         building = withId(new Building(user(MANAGER_ID), "서울시 테스트로 1", "테스트빌"), 7L);
     }
@@ -217,7 +221,7 @@ class ComplaintServicePhotoUrlTest {
     }
 
     private static Room livingRoom(User resident) {
-        Room room = new Room(new Building(user(99L), "서울시 테스트로 1", "테스트빌"), "302");
+        Room room = new Room(withId(new Building(user(99L), "서울시 테스트로 1", "테스트빌"), 7L), "302");
         room.invite();
         room.moveIn(resident);
         return room;

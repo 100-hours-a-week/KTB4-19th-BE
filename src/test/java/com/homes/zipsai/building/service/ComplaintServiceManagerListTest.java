@@ -21,6 +21,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.SliceImpl;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.homes.zipsai.building.domain.Building;
@@ -58,13 +59,16 @@ class ComplaintServiceManagerListTest {
     @Mock
     S3StorageService s3StorageService;
 
+    @Mock
+    ApplicationEventPublisher events;
+
     ComplaintService complaintService;
 
     @BeforeEach
     void setUp() {
         complaintService = new ComplaintService(complaintRepository, complaintDetailRepository,
             buildingRepository, residentRoomService, conversationService, s3StorageService,
-            new StorageProperties(null, null, null, 300, 0));
+            new StorageProperties(null, null, null, 300, 0), events);
     }
 
     @Test

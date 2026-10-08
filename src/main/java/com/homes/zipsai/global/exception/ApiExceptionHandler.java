@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.context.MessageSourceResolvable;
 import org.springframework.core.MethodParameter;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
@@ -30,6 +31,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.util.DisconnectedClientHelper;
 
 import com.giffing.bucket4j.spring.boot.starter.context.RateLimitException;
 import com.homes.zipsai.global.logging.ServerErrorLog;
@@ -44,7 +46,8 @@ public class ApiExceptionHandler {
         if (exception.code != null) {
             MDC.put("errorCode", exception.code);
         }
-        return ResponseEntity.status(exception.status).body(ApiResponse.error(exception));
+        return ResponseEntity.status(exception.status).contentType(MediaType.APPLICATION_JSON)
+                .body(ApiResponse.error(exception));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -147,6 +150,9 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<?> unexpected(Exception exception, HttpServletRequest request) {
+        if (DisconnectedClientHelper.isClientDisconnectedException(exception)) {
+            return null;
+        }
         LOGGER.error("Unhandled API failure: {}", exception.getClass().getName(), exception);
         ServerErrorLog.of(request, exception).print();
         return handle(new InternalServerException());
