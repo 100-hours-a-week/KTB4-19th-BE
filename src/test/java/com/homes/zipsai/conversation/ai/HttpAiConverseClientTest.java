@@ -59,11 +59,19 @@ class HttpAiConverseClientTest {
             .andExpect(jsonPath("$.current_complaint_state").value("collecting"))
             .andExpect(jsonPath("$.message.message_id").value("21"))
             .andExpect(jsonPath("$.message.text").value("안방 천장 가운데요"))
-            .andExpect(jsonPath("$.message.image_urls").isEmpty())
+            .andExpect(jsonPath("$.message.images[0].attachmentId").value(32))
+            .andExpect(jsonPath("$.message.images[0].url").value("https://s3.test/ceiling.jpg"))
             .andExpect(jsonPath("$.conversation_history[0].role").value("user"))
             .andExpect(jsonPath("$.conversation_history[0].message_id").value("19"))
             .andExpect(jsonPath("$.conversation_history[0].text").value("천장에서 물이 새요"))
+            .andExpect(jsonPath("$.conversation_history[0].images[0].attachmentId").value(31))
+            .andExpect(jsonPath("$.conversation_history[0].images[0].summary").value("천장 얼룩"))
+            .andExpect(jsonPath("$.conversation_history[0].images[0].ocrText").value("관리실 010"))
+            .andExpect(jsonPath("$.conversation_history[1].role").value("assistant"))
+            .andExpect(jsonPath("$.conversation_history[1].images").doesNotExist())
+            .andExpect(jsonPath("$.complaint_draft.issue_type").value("leak"))
             .andExpect(jsonPath("$.complaint_draft.symptom").value("천장에서 물이 새요"))
+            .andExpect(jsonPath("$.complaint_draft.attachmentIds[0]").value(31))
             .andRespond(withSuccess(complaintReply(), MediaType.APPLICATION_JSON));
 
         httpAiConverseClient.converse(request());
@@ -296,8 +304,16 @@ class HttpAiConverseClientTest {
         return new AiConverseRequest(
             1L, "302", "7", "11", TURN_ID, TRACE_ID,
             AiRoute.COMPLAINT, AiComplaintState.COLLECTING,
-            new AiConverseRequest.MessagePayload("21", "안방 천장 가운데요", List.of()),
-            List.of(new AiConverseRequest.HistoryMessage("19", AiTurnRole.USER, "천장에서 물이 새요", List.of())),
-            new AiConverseRequest.ComplaintDraftPayload(null, "천장에서 물이 새요", null, List.of()));
+            new AiConverseRequest.MessagePayload("21", "안방 천장 가운데요",
+                List.of(new AiConverseRequest.MessageImage(32L, "https://s3.test/ceiling.jpg"))),
+            List.of(
+                new AiConverseRequest.HistoryMessage("19", AiTurnRole.USER, "천장에서 물이 새요",
+                    List.of(new AiConverseRequest.HistoryImage(31L, "천장 얼룩", "관리실 010"))),
+                new AiConverseRequest.HistoryMessage("20", AiTurnRole.ASSISTANT, "위치가 어디인가요?", null)),
+            AiConverseRequest.ComplaintDraftPayload.builder()
+                .issueType("leak")
+                .symptom("천장에서 물이 새요")
+                .attachmentIds(List.of(31L))
+                .build());
     }
 }

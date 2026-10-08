@@ -29,10 +29,13 @@ import com.homes.zipsai.common.config.StorageProperties;
 import com.homes.zipsai.common.domain.File;
 import com.homes.zipsai.common.repository.FileRepository;
 import com.homes.zipsai.common.service.S3StorageService;
+import com.homes.zipsai.conversation.ai.AiConverseRequest;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.conversation.domain.Message;
 import com.homes.zipsai.conversation.domain.MessageFileGroup;
+import com.homes.zipsai.conversation.domain.MessageType;
+import com.homes.zipsai.conversation.domain.SenderType;
 import com.homes.zipsai.conversation.dto.response.AttachmentResponse;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
@@ -92,8 +95,9 @@ class ConversationServiceImageTest {
         assertThat(pendingAiReply.residentMessage().attachments()).containsExactly(
             new AttachmentResponse(5L, "https://s3.test/key-5", 1),
             new AttachmentResponse(4L, "https://s3.test/key-4", 2));
-        assertThat(pendingAiReply.aiRequest().message().imageUrls())
-            .containsExactly("https://s3.test/key-5", "https://s3.test/key-4");
+        assertThat(pendingAiReply.aiRequest().message().images()).containsExactly(
+            new AiConverseRequest.MessageImage(5L, "https://s3.test/key-5"),
+            new AiConverseRequest.MessageImage(4L, "https://s3.test/key-4"));
     }
 
     @Test
@@ -107,7 +111,7 @@ class ConversationServiceImageTest {
             conversationService.saveFirstMessage(RESIDENT_ID, "천장에서 물이 새요", List.of(4L, 4L));
 
         assertThat(pendingAiReply.residentMessage().attachments()).hasSize(1);
-        assertThat(pendingAiReply.aiRequest().message().imageUrls()).hasSize(1);
+        assertThat(pendingAiReply.aiRequest().message().images()).hasSize(1);
     }
 
     @Test
@@ -118,7 +122,7 @@ class ConversationServiceImageTest {
         PendingAiReply pendingAiReply = conversationService.saveFirstMessage(RESIDENT_ID, "천장에서 물이 새요", null);
 
         assertThat(pendingAiReply.residentMessage().attachments()).isEmpty();
-        assertThat(pendingAiReply.aiRequest().message().imageUrls()).isEmpty();
+        assertThat(pendingAiReply.aiRequest().message().images()).isEmpty();
     }
 
     @Test
@@ -132,7 +136,8 @@ class ConversationServiceImageTest {
 
         assertThat(pendingAiReply.conversation().getTitle()).isEqualTo("사진 문의");
         assertThat(pendingAiReply.aiRequest().message().text()).isEmpty();
-        assertThat(pendingAiReply.aiRequest().message().imageUrls()).containsExactly("https://s3.test/key-4");
+        assertThat(pendingAiReply.aiRequest().message().images())
+            .containsExactly(new AiConverseRequest.MessageImage(4L, "https://s3.test/key-4"));
     }
 
     @Test
@@ -201,6 +206,32 @@ class ConversationServiceImageTest {
         assertThatThrownBy(() -> conversationService.saveNextMessage(RESIDENT_ID, 10L, "안방이요", List.of(4L)))
             .isInstanceOf(ForbiddenException.class);
         then(messageRepository).should(never()).save(any());
+    }
+
+    @Test
+    @DisplayName("이전 메시지 사진은 presigned URL 없이 ID와 분석 결과로 AI에 전달된다")
+    void sendsHistoryImageAnalysisWithoutPresignedUrl() {
+        Conversation conversation =
+            withId(new Conversation(resident, ConversationType.INQUIRY, "천장에서 물이 새요"), 10L);
+        Message firstMessage =
+            withId(new Message(conversation, "천장에서 물이 새요", SenderType.RESIDENT, MessageType.TEXT, "turn-1"), 21L);
+        MessageFileGroup fileGroup = MessageFileGroup.builder()
+            .message(firstMessage)
+            .attachment(uploaded(4L, resident, "jpg"))
+            .fileGroupSeq(1)
+            .build();
+        fileGroup.recordAnalysis("천장 얼룩", "관리실 010");
+        given(conversationRepository.findByIdAndDeletedAtIsNull(10L)).willReturn(Optional.of(conversation));
+        given(messageRepository.findAllByConversationId(10L)).willReturn(List.of(firstMessage));
+        given(messageFileGroupRepository.findAllByMessageIds(List.of(21L))).willReturn(List.of(fileGroup));
+        given(messageRepository.save(any(Message.class)))
+            .willAnswer(invocation -> withId(invocation.getArgument(0), 22L));
+
+        PendingAiReply pendingAiReply = conversationService.saveNextMessage(RESIDENT_ID, 10L, "안방이요", null);
+
+        assertThat(pendingAiReply.aiRequest().conversationHistory().getFirst().images())
+            .containsExactly(new AiConverseRequest.HistoryImage(4L, "천장 얼룩", "관리실 010"));
+        then(s3StorageService).should(never()).prepareDownload(anyString(), any());
     }
 
     private void givenSavedMessage() {

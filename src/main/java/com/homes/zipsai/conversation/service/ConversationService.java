@@ -25,7 +25,9 @@ import com.homes.zipsai.common.domain.FileStatus;
 import com.homes.zipsai.common.repository.FileRepository;
 import com.homes.zipsai.common.service.S3StorageService;
 import com.homes.zipsai.conversation.ai.AiConverseRequest;
+import com.homes.zipsai.conversation.ai.AiConverseRequest.HistoryImage;
 import com.homes.zipsai.conversation.ai.AiConverseRequest.HistoryMessage;
+import com.homes.zipsai.conversation.ai.AiConverseRequest.MessageImage;
 import com.homes.zipsai.conversation.ai.AiConverseResponse;
 import com.homes.zipsai.conversation.ai.AiConverseResponse.ImageObservation;
 import com.homes.zipsai.conversation.domain.Conversation;
@@ -153,7 +155,7 @@ public class ConversationService {
         List<AttachmentResponse> attachments = attachImages(residentMessage, images);
 
         AiConverseRequest aiRequest = AiConverseRequest.of(room, conversation, residentMessage,
-            fileUrls(attachments), List.of(), MDC.get("traceId"));
+            messageImages(attachments), List.of(), MDC.get("traceId"));
         return new PendingAiReply(conversation, MessageResponse.of(residentMessage, attachments), true, null,
             aiRequest);
     }
@@ -172,7 +174,7 @@ public class ConversationService {
         List<AttachmentResponse> attachments = attachImages(residentMessage, images);
 
         AiConverseRequest aiRequest = AiConverseRequest.of(room, conversation, residentMessage,
-            fileUrls(attachments), history, MDC.get("traceId"));
+            messageImages(attachments), history, MDC.get("traceId"));
         return new PendingAiReply(conversation, MessageResponse.of(residentMessage, attachments), false,
             previousLastMessageAt, aiRequest);
     }
@@ -296,11 +298,17 @@ public class ConversationService {
 
     private List<HistoryMessage> getHistory(Long conversationId) {
         List<Message> messages = messageRepository.findAllByConversationId(conversationId);
-        Map<Long, List<AttachmentResponse>> attachments = findAttachments(messages);
+        List<Long> messageIds = messages.stream().map(message -> message.getId()).toList();
+
+        Map<Long, List<HistoryImage>> images = new HashMap<>();
+        for (MessageFileGroup fileGroup : messageFileGroupRepository.findAllByMessageIds(messageIds)) {
+            images.computeIfAbsent(fileGroup.getMessage().getId(), messageId -> new ArrayList<>())
+                .add(HistoryImage.from(fileGroup));
+        }
 
         List<HistoryMessage> history = new ArrayList<>();
         for (Message message : messages) {
-            history.add(HistoryMessage.of(message, fileUrls(attachments.getOrDefault(message.getId(), List.of()))));
+            history.add(HistoryMessage.of(message, images.getOrDefault(message.getId(), List.of())));
         }
         return history;
     }
@@ -334,8 +342,10 @@ public class ConversationService {
         return new AttachmentResponse(attachment.getId(), fileUrl, fileGroup.getFileGroupSeq());
     }
 
-    private static List<String> fileUrls(List<AttachmentResponse> attachments) {
-        return attachments.stream().map(attachment -> attachment.fileUrl()).toList();
+    private static List<MessageImage> messageImages(List<AttachmentResponse> attachments) {
+        return attachments.stream()
+            .map(attachment -> new MessageImage(attachment.attachmentId(), attachment.fileUrl()))
+            .toList();
     }
 
     private Message saveResidentMessage(Conversation conversation, String content) {
