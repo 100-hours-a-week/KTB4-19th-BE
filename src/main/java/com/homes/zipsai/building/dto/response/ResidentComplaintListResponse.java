@@ -8,6 +8,7 @@ import org.springframework.data.domain.Page;
 
 import com.homes.zipsai.building.domain.Complaint;
 import com.homes.zipsai.building.domain.ComplaintStatus;
+import com.homes.zipsai.building.domain.ComplaintType;
 import com.homes.zipsai.common.domain.File;
 
 public record ResidentComplaintListResponse(
@@ -31,6 +32,7 @@ public record ResidentComplaintListResponse(
     public record ComplaintItem(
             Long complaintId,
             String title,
+            ComplaintType complaintType,
             ComplaintStatus statusCode,
             String statusLabel,
             String fileUrl,
@@ -41,6 +43,7 @@ public record ResidentComplaintListResponse(
             return new ComplaintItem(
                 complaint.getId(),
                 complaint.getTitle(),
+                complaint.getType(),
                 complaint.getStatus(),
                 complaint.getStatus().getLabel(),
                 fileUrl.apply(complaint.getAttachment()),

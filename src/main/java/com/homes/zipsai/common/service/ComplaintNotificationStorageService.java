@@ -52,7 +52,9 @@ public class ComplaintNotificationStorageService {
                 return null;
             }
         }
-        Notification notification = notificationRepository.save(new Notification(objectMapper.writeValueAsString(content)));
+        Notification notification = notificationRepository.save(
+            new Notification(objectMapper.writeValueAsString(content))
+        );
         return userNotificationRepository.save(new UserNotification(recipient, notification));
     }
 

@@ -20,6 +20,7 @@ public record ConversationListItemResponse(
     public static ConversationListItemResponse of(Conversation conversation, LocalDateTime now) {
         ConversationStatus status = conversation.statusAt(now);
         return new ConversationListItemResponse(conversation.getId(), conversation.getTitle(), conversation.getType(),
-            status.name(), status.getLabel(), conversation.getLastMessageAt(), conversation.closesAt());
+            status.name(), status.labelFor(conversation.getCurrentRoute()), conversation.getLastMessageAt(),
+            conversation.closesAt());
     }
 }

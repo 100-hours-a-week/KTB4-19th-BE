@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import com.homes.zipsai.building.domain.Complaint;
+import com.homes.zipsai.building.domain.ComplaintType;
 import com.homes.zipsai.building.domain.Room;
 import com.homes.zipsai.building.service.ResidentRoomService;
 import com.homes.zipsai.common.config.StorageProperties;
@@ -292,7 +293,8 @@ public class ConversationService {
             return null;
         }
         long imageCount = messageFileGroupRepository.countByConversationId(conversation.getId());
-        return SummaryCardResponse.of(conversation.currentDraft(), imageCount);
+        return SummaryCardResponse.of(ComplaintType.from(conversation.getCurrentRoute()),
+            conversation.currentDraft(), imageCount);
     }
 
     private Map<Long, List<AttachmentResponse>> findAttachments(List<Message> messages) {

@@ -9,14 +9,17 @@ import jakarta.validation.constraints.Positive;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.homes.zipsai.building.dto.request.ComplaintCommentUpdateRequest;
 import com.homes.zipsai.building.dto.request.ComplaintStatusUpdateRequest;
 import com.homes.zipsai.building.dto.response.ComplaintDetailResponse;
 import com.homes.zipsai.building.dto.response.ComplaintListResponse;
@@ -48,6 +51,29 @@ public class ManagerComplaintController {
     ) {
         return ResponseEntity.ok(ApiResponse.data(
             complaintService.updateManagerComplaintStatus(principal.userId(), complaintId, request)));
+    }
+
+    @Operation(summary = "민원 코멘트 저장",
+        description = "관리자가 관리 대상 건물의 민원에 처리 내용이나 QA 답변을 저장. 처리완료된 민원만 작성과 수정 가능.")
+    @PutMapping("/{complaintId}/comment")
+    public ResponseEntity<ApiResponse<Void>> updateComplaintComment(
+            @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal,
+            @PathVariable @Positive(message = "1 이상의 정수여야 합니다.") Long complaintId,
+            @Valid @RequestBody ComplaintCommentUpdateRequest request
+    ) {
+        complaintService.updateManagerComplaintComment(principal.userId(), complaintId, request);
+        return ResponseEntity.ok(ApiResponse.data(null));
+    }
+
+    @Operation(summary = "민원 코멘트 삭제",
+        description = "관리자가 관리 대상 건물의 민원 코멘트를 삭제.")
+    @DeleteMapping("/{complaintId}/comment")
+    public ResponseEntity<ApiResponse<Void>> deleteComplaintComment(
+            @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal,
+            @PathVariable @Positive(message = "1 이상의 정수여야 합니다.") Long complaintId
+    ) {
+        complaintService.deleteManagerComplaintComment(principal.userId(), complaintId);
+        return ResponseEntity.ok(ApiResponse.data(null));
     }
 
     @Operation(summary = "민원 상세 조회",

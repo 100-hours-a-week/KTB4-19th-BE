@@ -8,6 +8,7 @@ import org.springframework.data.domain.Slice;
 
 import com.homes.zipsai.building.domain.Complaint;
 import com.homes.zipsai.building.domain.ComplaintStatus;
+import com.homes.zipsai.building.domain.ComplaintType;
 import com.homes.zipsai.common.domain.File;
 
 public record ComplaintListResponse(
@@ -31,6 +32,7 @@ public record ComplaintListResponse(
             String buildingName,
             String roomNo,
             String title,
+            ComplaintType complaintType,
             ComplaintStatus statusCode,
             String statusLabel,
             int urgency,
@@ -45,6 +47,7 @@ public record ComplaintListResponse(
                 complaint.getBuilding().getBuildingName(),
                 complaint.getRoomNo(),
                 complaint.getTitle(),
+                complaint.getType(),
                 complaint.getStatus(),
                 complaint.getStatus().getLabel(),
                 complaint.getUrgency(),

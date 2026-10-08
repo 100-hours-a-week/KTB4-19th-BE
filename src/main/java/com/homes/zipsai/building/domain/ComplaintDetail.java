@@ -56,4 +56,12 @@ public class ComplaintDetail extends BaseTimeEntity {
         this.occurredTime = occurredTime;
         this.aiSummary = aiSummary;
     }
+
+    public void updateComment(String comment) {
+        this.comment = comment;
+    }
+
+    public void deleteComment() {
+        this.comment = null;
+    }
 }

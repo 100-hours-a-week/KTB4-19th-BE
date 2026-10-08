@@ -22,6 +22,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import com.homes.zipsai.building.domain.Building;
 import com.homes.zipsai.building.domain.Complaint;
 import com.homes.zipsai.building.domain.ComplaintDetail;
+import com.homes.zipsai.building.domain.ComplaintType;
 import com.homes.zipsai.building.domain.Room;
 import com.homes.zipsai.building.dto.request.ComplaintCreateRequest;
 import com.homes.zipsai.building.repository.BuildingRepository;
@@ -103,6 +104,44 @@ class ComplaintServiceCreateTest {
     }
 
     @Test
+    @DisplayName("요약 카드로 접수한 민원은 일반 민원으로 저장한다")
+    void savesComplaintTypeForSummaryCard() {
+        givenConversation(conversationWithDraft("안방 천장", "천장에서 물이 샘", List.of()));
+        givenComplaintSaved();
+
+        complaintService.createComplaint(RESIDENT_ID, new ComplaintCreateRequest(CONVERSATION_ID, null, null, null));
+
+        assertThat(savedComplaint().getType()).isEqualTo(ComplaintType.COMPLAINT);
+    }
+
+    @Test
+    @DisplayName("QA 카드로 접수한 민원은 QA로 저장한다")
+    void savesQaTypeForQaCard() {
+        Conversation conversation = conversation();
+        conversation.applyAiResponse(qaCardResponse("분리수거는 어디서 하나요?"));
+        givenConversation(conversation);
+        givenComplaintSaved();
+
+        complaintService.createComplaint(RESIDENT_ID, new ComplaintCreateRequest(CONVERSATION_ID, null, null, null));
+
+        assertThat(savedComplaint().getType()).isEqualTo(ComplaintType.QA);
+    }
+
+    @Test
+    @DisplayName("질의로 시작한 대화라도 마지막 카드가 요약 카드면 일반 민원으로 저장한다")
+    void savesComplaintTypeWhenLastCardIsSummaryCard() {
+        Conversation conversation = conversation();
+        conversation.applyAiResponse(answeredQuestionResponse());
+        conversation.applyAiResponse(summaryCardResponse("안방 천장", "천장에서 물이 샘", List.of()));
+        givenConversation(conversation);
+        givenComplaintSaved();
+
+        complaintService.createComplaint(RESIDENT_ID, new ComplaintCreateRequest(CONVERSATION_ID, null, null, null));
+
+        assertThat(savedComplaint().getType()).isEqualTo(ComplaintType.COMPLAINT);
+    }
+
+    @Test
     @DisplayName("요약 카드가 뜨기 전에 접수하면 민원을 저장하지 않는다")
     void savesNothingBeforeSummaryCard() {
         given(conversationService.getOwnedConversation(RESIDENT_ID, CONVERSATION_ID))
@@ -129,6 +168,12 @@ class ComplaintServiceCreateTest {
             .willAnswer(invocation -> invocation.getArgument(0));
     }
 
+    private Complaint savedComplaint() {
+        ArgumentCaptor<Complaint> complaintCaptor = ArgumentCaptor.forClass(Complaint.class);
+        then(complaintRepository).should().save(complaintCaptor.capture());
+        return complaintCaptor.getValue();
+    }
+
     private ComplaintDetail savedDetail() {
         ArgumentCaptor<ComplaintDetail> complaintDetailCaptor = ArgumentCaptor.forClass(ComplaintDetail.class);
         then(complaintDetailRepository).should().save(complaintDetailCaptor.capture());
@@ -136,16 +181,39 @@ class ComplaintServiceCreateTest {
     }
 
     private static Conversation conversationWithDraft(String location, String symptom, List<String> missingFields) {
-        Conversation conversation = withId(Conversation.builder()
+        Conversation conversation = conversation();
+        conversation.applyAiResponse(summaryCardResponse(location, symptom, missingFields));
+        return conversation;
+    }
+
+    private static Conversation conversation() {
+        return withId(Conversation.builder()
             .user(user(RESIDENT_ID))
             .type(ConversationType.INQUIRY)
             .title("천장에서 물이 새요")
             .build(), CONVERSATION_ID);
-        conversation.applyAiResponse(new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, "trace-1",
-            new AiConverseResponse.Data(AiRoute.COMPLAINT, AiComplaintState.COLLECTING, "확인해 주세요",
-                new AiConverseResponse.Result(new AiConverseResponse.DraftPatch(location, symptom, null), null,
-                    missingFields, List.of()))));
-        return conversation;
+    }
+
+    private static AiConverseResponse summaryCardResponse(String location, String symptom,
+                                                          List<String> missingFields) {
+        return aiResponse(AiRoute.COMPLAINT, new AiConverseResponse.Result(
+            new AiConverseResponse.DraftPatch(location, symptom, null), null, missingFields, List.of()));
+    }
+
+    private static AiConverseResponse qaCardResponse(String question) {
+        return aiResponse(AiRoute.KNOWLEDGE, new AiConverseResponse.Result(
+            null, new AiConverseResponse.QaCardDraft(question), List.of(), List.of()));
+    }
+
+    private static AiConverseResponse answeredQuestionResponse() {
+        AiConverseResponse.Citation citation =
+            new AiConverseResponse.Citation("building_document", "guide-1", "생활 안내", null, null);
+        return aiResponse(AiRoute.KNOWLEDGE, new AiConverseResponse.Result(null, null, List.of(), List.of(citation)));
+    }
+
+    private static AiConverseResponse aiResponse(AiRoute route, AiConverseResponse.Result result) {
+        return new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, "trace-1",
+            new AiConverseResponse.Data(route, AiComplaintState.COLLECTING, "확인해 주세요", result));
     }
 
     private static User user(long id) {

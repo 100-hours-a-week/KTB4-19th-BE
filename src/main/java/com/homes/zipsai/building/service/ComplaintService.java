@@ -17,7 +17,9 @@ import com.homes.zipsai.building.domain.Complaint;
 import com.homes.zipsai.building.domain.ComplaintContent;
 import com.homes.zipsai.building.domain.ComplaintDetail;
 import com.homes.zipsai.building.domain.ComplaintStatus;
+import com.homes.zipsai.building.domain.ComplaintType;
 import com.homes.zipsai.building.domain.Room;
+import com.homes.zipsai.building.dto.request.ComplaintCommentUpdateRequest;
 import com.homes.zipsai.building.dto.request.ComplaintCreateRequest;
 import com.homes.zipsai.building.dto.request.ComplaintStatusUpdateRequest;
 import com.homes.zipsai.building.dto.response.ComplaintCreateResponse;
@@ -69,12 +71,14 @@ public class ComplaintService {
 
         AiComplaintDraft confirmedDraft = conversation.currentDraft().withEdits(request.toDraftEdits());
         ComplaintContent content = ComplaintContent.from(confirmedDraft);
+        ComplaintType type = ComplaintType.from(conversation.getCurrentRoute());
         Complaint complaint = complaintRepository.save(Complaint.builder()
             .conversation(conversation)
             .user(room.getResident())
             .building(room.getBuilding())
             .attachment(conversationService.findRepresentativeImage(conversation.getId()))
             .title(content.title())
+            .type(type)
             .urgency(URGENCY_NOT_EVALUATED)
             .roomNo(room.getRoomNo())
             .build());
@@ -86,17 +90,18 @@ public class ComplaintService {
             .aiSummary(content.aiSummary())
             .build());
         conversation.markComplaintCreated(content.title(), confirmedDraft);
-        applicationEventPublisher.publishEvent(new ComplaintNotificationEvent(ComplaintNotificationContent.complaintCreated(
-            complaint.getId(), complaint.getBuilding().getId(), complaint.getTitle(), complaint.getRoomNo(),
-            TimeUtils.now()), complaint.getUser().getId()));
+        applicationEventPublisher.publishEvent(new ComplaintNotificationEvent(
+            ComplaintNotificationContent.complaintCreated(
+                complaint.getId(), complaint.getBuilding().getId(), complaint.getTitle(), complaint.getRoomNo(),
+                TimeUtils.now()),
+            complaint.getUser().getId()));
         return ComplaintCreateResponse.of(complaint, detail);
     }
 
     @Transactional(readOnly = true)
     public ComplaintDetailResponse getManagerComplaint(Long managerId, Long complaintId) {
         Complaint complaint = getManagerComplaintEntity(managerId, complaintId);
-        ComplaintDetail detail = complaintDetailRepository.findById(complaintId)
-            .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.COMPLAINT));
+        ComplaintDetail detail = getComplaintDetail(complaintId);
         return ComplaintDetailResponse.from(complaint, detail,
             conversationService.findImages(complaint.getConversation().getId()), this::attachmentUrl);
     }
@@ -110,11 +115,30 @@ public class ComplaintService {
         Complaint complaint = getManagerComplaintEntity(managerId, complaintId);
         if (complaint.changeStatus(ComplaintStatus.valueOf(request.statusCode()))) {
             complaintRepository.flush();
-            applicationEventPublisher.publishEvent(new ComplaintNotificationEvent(ComplaintNotificationContent.complaintStatusChanged(
-                complaint.getId(), complaint.getBuilding().getId(), complaint.getTitle(), complaint.getStatus(),
-                TimeUtils.now()), complaint.getUser().getId()));
+            applicationEventPublisher.publishEvent(new ComplaintNotificationEvent(
+                ComplaintNotificationContent.complaintStatusChanged(
+                    complaint.getId(), complaint.getBuilding().getId(), complaint.getTitle(), complaint.getStatus(),
+                    TimeUtils.now()),
+                complaint.getUser().getId()));
         }
         return ComplaintStatusUpdateResponse.from(complaint);
+    }
+
+    @Transactional
+    public void updateManagerComplaintComment(
+            Long managerId,
+            Long complaintId,
+            ComplaintCommentUpdateRequest request
+    ) {
+        Complaint complaint = getManagerComplaintEntity(managerId, complaintId);
+        complaint.verifyCommentable();
+        getComplaintDetail(complaintId).updateComment(request.comment());
+    }
+
+    @Transactional
+    public void deleteManagerComplaintComment(Long managerId, Long complaintId) {
+        getManagerComplaintEntity(managerId, complaintId);
+        getComplaintDetail(complaintId).deleteComment();
     }
 
     @Transactional(readOnly = true)
@@ -163,8 +187,7 @@ public class ComplaintService {
         if (!complaint.getUser().getId().equals(residentId)) {
             throw new ForbiddenException();
         }
-        ComplaintDetail detail = complaintDetailRepository.findById(complaintId)
-            .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.COMPLAINT));
+        ComplaintDetail detail = getComplaintDetail(complaintId);
         return ResidentComplaintDetailResponse.from(complaint, detail,
             conversationService.findImages(complaint.getConversation().getId()), this::attachmentUrl);
     }
@@ -220,4 +243,8 @@ public class ComplaintService {
         return complaint;
     }
 
+    private ComplaintDetail getComplaintDetail(Long complaintId) {
+        return complaintDetailRepository.findById(complaintId)
+            .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.COMPLAINT));
+    }
 }
