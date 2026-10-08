@@ -46,21 +46,24 @@ class AiConverseResponseRouteCompletionTest {
     @Test
     @DisplayName("불명확은 다른 경로의 종료 조건을 따르지 않는다")
     void ignoresOtherRouteConditionsWhileUnclear() {
-        AiConverseResponse response = response(AiRoute.CLARIFY, new Result(null, null, List.of(), List.of()));
+        AiConverseResponse response = response(AiRoute.CLARIFY, Result.builder().build());
 
         assertThat(response.isConversationComplete()).isFalse();
     }
 
     private static AiConverseResponse complaint(List<String> missingFields) {
-        return response(AiRoute.COMPLAINT, new Result(null, null, missingFields, List.of()));
+        return response(AiRoute.COMPLAINT, Result.builder().missingFields(missingFields).build());
     }
 
     private static AiConverseResponse knowledge(List<Citation> citations) {
-        return response(AiRoute.KNOWLEDGE, new Result(null, null, List.of(), citations));
+        return response(AiRoute.KNOWLEDGE, Result.builder().citations(citations).build());
     }
 
     private static AiConverseResponse clarify() {
-        return response(AiRoute.CLARIFY, new Result(null, null, List.of("location"), List.of(citation())));
+        return response(AiRoute.CLARIFY, Result.builder()
+            .missingFields(List.of("location"))
+            .citations(List.of(citation()))
+            .build());
     }
 
     private static Citation citation() {

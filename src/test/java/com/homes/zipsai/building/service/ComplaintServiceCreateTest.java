@@ -196,19 +196,24 @@ class ComplaintServiceCreateTest {
 
     private static AiConverseResponse summaryCardResponse(String location, String symptom,
                                                           List<String> missingFields) {
-        return aiResponse(AiRoute.COMPLAINT, new AiConverseResponse.Result(
-            new AiConverseResponse.DraftPatch(location, symptom, null), null, missingFields, List.of()));
+        AiConverseResponse.DraftPatch patch =
+            AiConverseResponse.DraftPatch.builder().location(location).symptom(symptom).build();
+        return aiResponse(AiRoute.COMPLAINT, AiConverseResponse.Result.builder()
+            .complaintDraft(patch)
+            .missingFields(missingFields)
+            .build());
     }
 
     private static AiConverseResponse qaCardResponse(String question) {
-        return aiResponse(AiRoute.KNOWLEDGE, new AiConverseResponse.Result(
-            null, new AiConverseResponse.QaCardDraft(question), List.of(), List.of()));
+        return aiResponse(AiRoute.KNOWLEDGE, AiConverseResponse.Result.builder()
+            .qaCardDraft(new AiConverseResponse.QaCardDraft(question))
+            .build());
     }
 
     private static AiConverseResponse answeredQuestionResponse() {
         AiConverseResponse.Citation citation =
             new AiConverseResponse.Citation("building_document", "guide-1", "생활 안내", null, null);
-        return aiResponse(AiRoute.KNOWLEDGE, new AiConverseResponse.Result(null, null, List.of(), List.of(citation)));
+        return aiResponse(AiRoute.KNOWLEDGE, AiConverseResponse.Result.builder().citations(List.of(citation)).build());
     }
 
     private static AiConverseResponse aiResponse(AiRoute route, AiConverseResponse.Result result) {

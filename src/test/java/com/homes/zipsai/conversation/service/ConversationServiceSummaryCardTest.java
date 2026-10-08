@@ -141,8 +141,9 @@ class ConversationServiceSummaryCardTest {
     private static AiConverseResponse qaCardResponse() {
         return new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, "trace-1",
             new AiConverseResponse.Data(AiRoute.KNOWLEDGE, AiComplaintState.COLLECTING, "질문을 전달해 두었습니다",
-                new AiConverseResponse.Result(null, new AiConverseResponse.QaCardDraft("분리수거는 어디서 하나요?"),
-                    List.of(), List.of())));
+                AiConverseResponse.Result.builder()
+                    .qaCardDraft(new AiConverseResponse.QaCardDraft("분리수거는 어디서 하나요?"))
+                    .build()));
     }
 
     private static <T> T withId(T entity, long id) {

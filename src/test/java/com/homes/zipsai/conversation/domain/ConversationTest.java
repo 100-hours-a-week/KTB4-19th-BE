@@ -45,6 +45,44 @@ class ConversationTest {
     }
 
     @Test
+    @DisplayName("AI가 준 민원 유형과 사진 목록, 대표 사진을 초안에 저장한다")
+    void storesDraftIssueTypeAndAttachments() {
+        Conversation conversation = conversation();
+
+        conversation.applyAiResponse(complaintWithImages("leak", List.of(31L, 32L), 32L));
+
+        assertThat(conversation.getDraftIssueType()).isEqualTo("leak");
+        assertThat(conversation.getDraftAttachmentIds()).containsExactly(31L, 32L);
+        assertThat(conversation.getDraftRepresentativeAttachmentId()).isEqualTo(32L);
+    }
+
+    @Test
+    @DisplayName("민원 유형과 사진 값이 비어 오면 저장된 값을 유지한다")
+    void keepsDraftAttachmentsWhenPatchHasNoValue() {
+        Conversation conversation = conversation();
+        conversation.applyAiResponse(complaintWithImages("leak", List.of(31L), 31L));
+
+        conversation.applyAiResponse(complaintWithImages(null, null, null));
+
+        assertThat(conversation.getDraftIssueType()).isEqualTo("leak");
+        assertThat(conversation.getDraftAttachmentIds()).containsExactly(31L);
+        assertThat(conversation.getDraftRepresentativeAttachmentId()).isEqualTo(31L);
+    }
+
+    @Test
+    @DisplayName("민원 유형과 사진 값이 새로 오면 저장된 값을 바꾼다")
+    void replacesDraftAttachmentsWithNewValues() {
+        Conversation conversation = conversation();
+        conversation.applyAiResponse(complaintWithImages("leak", List.of(31L), 31L));
+
+        conversation.applyAiResponse(complaintWithImages("mold", List.of(31L, 33L), 33L));
+
+        assertThat(conversation.getDraftIssueType()).isEqualTo("mold");
+        assertThat(conversation.getDraftAttachmentIds()).containsExactly(31L, 33L);
+        assertThat(conversation.getDraftRepresentativeAttachmentId()).isEqualTo(33L);
+    }
+
+    @Test
     @DisplayName("접수 확인을 기다리는 대화에는 메시지를 보낼 수 없다")
     void rejectsMessageWhileAwaitingConfirmation() {
         Conversation conversation = conversation();
@@ -196,14 +234,28 @@ class ConversationTest {
     }
 
     private static AiConverseResponse complaint(String location, String symptom, List<String> missingFields) {
-        AiConverseResponse.DraftPatch patch = new AiConverseResponse.DraftPatch(location, symptom, null);
+        AiConverseResponse.DraftPatch patch =
+            AiConverseResponse.DraftPatch.builder().location(location).symptom(symptom).build();
         return response(AiRoute.COMPLAINT, AiComplaintState.COLLECTING,
-            new AiConverseResponse.Result(patch, null, missingFields, List.of()));
+            AiConverseResponse.Result.builder().complaintDraft(patch).missingFields(missingFields).build());
+    }
+
+    private static AiConverseResponse complaintWithImages(String issueType, List<Long> attachmentIds,
+                                                          Long representativeAttachmentId) {
+        AiConverseResponse.DraftPatch patch = AiConverseResponse.DraftPatch.builder()
+            .symptom("천장 누수")
+            .issueType(issueType)
+            .attachmentIds(attachmentIds)
+            .representativeAttachmentId(representativeAttachmentId)
+            .build();
+        return response(AiRoute.COMPLAINT, AiComplaintState.COLLECTING,
+            AiConverseResponse.Result.builder().complaintDraft(patch).missingFields(List.of("location")).build());
     }
 
     private static AiConverseResponse qaCard(String question) {
-        return response(AiRoute.KNOWLEDGE, null, new AiConverseResponse.Result(
-            null, new AiConverseResponse.QaCardDraft(question), List.of(), List.of()));
+        return response(AiRoute.KNOWLEDGE, null, AiConverseResponse.Result.builder()
+            .qaCardDraft(new AiConverseResponse.QaCardDraft(question))
+            .build());
     }
 
     private static AiConverseResponse response(AiRoute route, AiComplaintState nextComplaintState,

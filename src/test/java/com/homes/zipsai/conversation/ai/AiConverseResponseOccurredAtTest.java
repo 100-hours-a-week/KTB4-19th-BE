@@ -52,13 +52,18 @@ class AiConverseResponseOccurredAtTest {
     @Test
     @DisplayName("시각을 읽지 못해도 위치와 증상은 남는다")
     void keepsOtherFieldsWhenTimeIsUnreadable() {
-        AiComplaintDraft draft = new DraftPatch("안방 천장", "물이 샌다", "어제 저녁").toDraft();
+        AiComplaintDraft draft = DraftPatch.builder()
+            .location("안방 천장")
+            .symptom("물이 샌다")
+            .occurredAt("어제 저녁")
+            .build()
+            .toDraft();
 
         assertThat(draft.location()).isEqualTo("안방 천장");
         assertThat(draft.symptom()).isEqualTo("물이 샌다");
     }
 
     private static AiComplaintDraft draftOf(String occurredAt) {
-        return new DraftPatch(null, null, occurredAt).toDraft();
+        return DraftPatch.builder().occurredAt(occurredAt).build().toDraft();
     }
 }
