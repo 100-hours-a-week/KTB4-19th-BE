@@ -5,6 +5,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,12 +15,14 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.homes.zipsai.common.dto.NotificationListResponse;
 import com.homes.zipsai.common.dto.NotificationReadRequest;
 import com.homes.zipsai.common.dto.NotificationReadResponse;
 import com.homes.zipsai.common.dto.NotificationUnreadCountResponse;
 import com.homes.zipsai.common.service.NotificationService;
+import com.homes.zipsai.common.service.SseService;
 import com.homes.zipsai.global.response.ApiResponse;
 import com.homes.zipsai.global.security.AuthPrincipal;
 
@@ -35,6 +38,15 @@ import lombok.RequiredArgsConstructor;
 public class NotificationController {
 
     private final NotificationService notificationService;
+    private final SseService sseService;
+
+    @Operation(summary = "SSE 연결")
+    @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter subscribe(
+            @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal
+    ) {
+        return sseService.subscribe(principal.userId());
+    }
 
     @Operation(summary = "알림 목록 조회")
     @GetMapping
