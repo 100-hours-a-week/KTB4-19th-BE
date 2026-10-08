@@ -18,6 +18,7 @@ import jakarta.persistence.Table;
 import com.homes.zipsai.common.domain.File;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.global.domain.BaseTimeEntity;
+import com.homes.zipsai.global.util.TimeUtils;
 import com.homes.zipsai.user.domain.User;
 
 import lombok.AccessLevel;
@@ -83,10 +84,14 @@ public class Complaint extends BaseTimeEntity {
         this.roomNo = roomNo;
     }
 
-    public void changeStatus(ComplaintStatus status) {
+    public boolean changeStatus(ComplaintStatus status) {
+        if (this.status == status) {
+            return false;
+        }
         this.status = status;
         if (status == ComplaintStatus.DONE) {
-            this.resolvedAt = LocalDateTime.now();
+            this.resolvedAt = TimeUtils.now();
         }
+        return true;
     }
 }

@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -29,7 +30,9 @@ import com.homes.zipsai.building.repository.BuildingRepository;
 import com.homes.zipsai.building.repository.ComplaintDetailRepository;
 import com.homes.zipsai.building.repository.ComplaintRepository;
 import com.homes.zipsai.common.config.StorageProperties;
+import com.homes.zipsai.common.domain.ComplaintNotificationContent;
 import com.homes.zipsai.common.domain.File;
+import com.homes.zipsai.common.event.ComplaintNotificationEvent;
 import com.homes.zipsai.common.service.S3StorageService;
 import com.homes.zipsai.conversation.ai.AiComplaintDraft;
 import com.homes.zipsai.conversation.domain.Conversation;
@@ -37,6 +40,7 @@ import com.homes.zipsai.conversation.service.ConversationService;
 import com.homes.zipsai.global.exception.ForbiddenException;
 import com.homes.zipsai.global.exception.InvalidQueryParameterException;
 import com.homes.zipsai.global.exception.NotFoundException;
+import com.homes.zipsai.global.util.TimeUtils;
 
 import lombok.RequiredArgsConstructor;
 
@@ -55,6 +59,7 @@ public class ComplaintService {
     private final ConversationService conversationService;
     private final S3StorageService s3StorageService;
     private final StorageProperties storageProperties;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     @Transactional
     public ComplaintCreateResponse createComplaint(Long userId, ComplaintCreateRequest request) {
@@ -81,6 +86,9 @@ public class ComplaintService {
             .aiSummary(content.aiSummary())
             .build());
         conversation.markComplaintCreated(content.title(), confirmedDraft);
+        applicationEventPublisher.publishEvent(new ComplaintNotificationEvent(ComplaintNotificationContent.complaintCreated(
+            complaint.getId(), complaint.getBuilding().getId(), complaint.getTitle(), complaint.getRoomNo(),
+            TimeUtils.now()), complaint.getUser().getId()));
         return ComplaintCreateResponse.of(complaint, detail);
     }
 
@@ -100,8 +108,12 @@ public class ComplaintService {
             ComplaintStatusUpdateRequest request
     ) {
         Complaint complaint = getManagerComplaintEntity(managerId, complaintId);
-        complaint.changeStatus(ComplaintStatus.valueOf(request.statusCode()));
-        complaintRepository.flush();
+        if (complaint.changeStatus(ComplaintStatus.valueOf(request.statusCode()))) {
+            complaintRepository.flush();
+            applicationEventPublisher.publishEvent(new ComplaintNotificationEvent(ComplaintNotificationContent.complaintStatusChanged(
+                complaint.getId(), complaint.getBuilding().getId(), complaint.getTitle(), complaint.getStatus(),
+                TimeUtils.now()), complaint.getUser().getId()));
+        }
         return ComplaintStatusUpdateResponse.from(complaint);
     }
 
