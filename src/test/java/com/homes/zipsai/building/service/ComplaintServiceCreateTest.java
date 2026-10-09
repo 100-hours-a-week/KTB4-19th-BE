@@ -81,8 +81,10 @@ class ComplaintServiceCreateTest {
     void mergesResidentEditsIntoAiDraft() {
         givenConversation(conversationWithDraft("안방 천장", "천장에서 물이 샘", List.of()));
         givenComplaintSaved();
+        ComplaintCreateRequest request =
+            ComplaintCreateRequest.builder().conversationId(CONVERSATION_ID).location("거실 천장").build();
 
-        complaintService.createComplaint(RESIDENT_ID, new ComplaintCreateRequest(CONVERSATION_ID, "거실 천장", null, null));
+        complaintService.createComplaint(RESIDENT_ID, request);
 
         ComplaintDetail complaintDetail = savedDetail();
         assertThat(complaintDetail.getLocation()).isEqualTo("거실 천장");
@@ -96,7 +98,7 @@ class ComplaintServiceCreateTest {
         givenConversation(conversation);
         givenComplaintSaved();
 
-        complaintService.createComplaint(RESIDENT_ID, new ComplaintCreateRequest(CONVERSATION_ID, null, null, null));
+        complaintService.createComplaint(RESIDENT_ID, createRequest());
 
         assertThat(conversation.getType()).isEqualTo(ConversationType.COMPLAINT);
         assertThat(conversation.getStatus()).isEqualTo(ConversationStatus.COMPLAINT_CREATED);
@@ -109,7 +111,7 @@ class ComplaintServiceCreateTest {
         givenConversation(conversationWithDraft("안방 천장", "천장에서 물이 샘", List.of()));
         givenComplaintSaved();
 
-        complaintService.createComplaint(RESIDENT_ID, new ComplaintCreateRequest(CONVERSATION_ID, null, null, null));
+        complaintService.createComplaint(RESIDENT_ID, createRequest());
 
         assertThat(savedComplaint().getType()).isEqualTo(ComplaintType.COMPLAINT);
     }
@@ -122,7 +124,7 @@ class ComplaintServiceCreateTest {
         givenConversation(conversation);
         givenComplaintSaved();
 
-        complaintService.createComplaint(RESIDENT_ID, new ComplaintCreateRequest(CONVERSATION_ID, null, null, null));
+        complaintService.createComplaint(RESIDENT_ID, createRequest());
 
         assertThat(savedComplaint().getType()).isEqualTo(ComplaintType.QA);
     }
@@ -136,7 +138,7 @@ class ComplaintServiceCreateTest {
         givenConversation(conversation);
         givenComplaintSaved();
 
-        complaintService.createComplaint(RESIDENT_ID, new ComplaintCreateRequest(CONVERSATION_ID, null, null, null));
+        complaintService.createComplaint(RESIDENT_ID, createRequest());
 
         assertThat(savedComplaint().getType()).isEqualTo(ComplaintType.COMPLAINT);
     }
@@ -147,7 +149,7 @@ class ComplaintServiceCreateTest {
         given(conversationService.getOwnedConversation(RESIDENT_ID, CONVERSATION_ID))
             .willReturn(conversationWithDraft("안방 천장", null, List.of("symptom")));
 
-        ComplaintCreateRequest request = new ComplaintCreateRequest(CONVERSATION_ID, null, null, null);
+        ComplaintCreateRequest request = createRequest();
 
         assertThatThrownBy(() -> complaintService.createComplaint(RESIDENT_ID, request))
             .isInstanceOf(ConflictException.class)
@@ -178,6 +180,10 @@ class ComplaintServiceCreateTest {
         ArgumentCaptor<ComplaintDetail> complaintDetailCaptor = ArgumentCaptor.forClass(ComplaintDetail.class);
         then(complaintDetailRepository).should().save(complaintDetailCaptor.capture());
         return complaintDetailCaptor.getValue();
+    }
+
+    private static ComplaintCreateRequest createRequest() {
+        return ComplaintCreateRequest.builder().conversationId(CONVERSATION_ID).build();
     }
 
     private static Conversation conversationWithDraft(String location, String symptom, List<String> missingFields) {
