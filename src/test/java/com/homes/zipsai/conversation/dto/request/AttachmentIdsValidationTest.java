@@ -2,7 +2,7 @@ package com.homes.zipsai.conversation.dto.request;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
@@ -26,28 +26,27 @@ class AttachmentIdsValidationTest {
     }
 
     @Test
-    @DisplayName("사진은 3장까지 보낼 수 있다")
-    void allowsUpToThreeImages() {
-        assertThat(VALIDATOR.validate(new MessageSendRequest("안방이요", List.of(1L, 2L, 3L)))).isEmpty();
-        assertThat(VALIDATOR.validate(new ConversationCreateRequest("천장에서 물이 새요", List.of(1L, 2L, 3L))))
-            .isEmpty();
+    @DisplayName("사진은 1장까지 보낼 수 있다")
+    void allowsOneImage() {
+        assertThat(VALIDATOR.validate(new MessageSendRequest("안방이요", List.of(1L)))).isEmpty();
+        assertThat(VALIDATOR.validate(new ConversationCreateRequest("천장에서 물이 새요", List.of(1L)))).isEmpty();
     }
 
     @Test
-    @DisplayName("사진이 3장을 넘으면 검증에 실패한다")
-    void rejectsMoreThanThreeImages() {
-        List<Long> fourImages = List.of(1L, 2L, 3L, 4L);
+    @DisplayName("사진이 1장을 넘으면 검증에 실패한다")
+    void rejectsMoreThanOneImage() {
+        List<Long> twoImages = List.of(1L, 2L);
 
-        assertThat(fields(VALIDATOR.validate(new MessageSendRequest("안방이요", fourImages))))
+        assertThat(fields(VALIDATOR.validate(new MessageSendRequest("안방이요", twoImages))))
             .containsExactly("attachmentIds");
-        assertThat(fields(VALIDATOR.validate(new ConversationCreateRequest("천장에서 물이 새요", fourImages))))
+        assertThat(fields(VALIDATOR.validate(new ConversationCreateRequest("천장에서 물이 새요", twoImages))))
             .containsExactly("attachmentIds");
     }
 
     @Test
     @DisplayName("사진 ID에 null이 있으면 검증에 실패한다")
     void rejectsNullImageId() {
-        List<Long> withNull = Arrays.asList(1L, null);
+        List<Long> withNull = Collections.singletonList(null);
 
         assertThat(VALIDATOR.validate(new MessageSendRequest("안방이요", withNull))).hasSize(1);
         assertThat(VALIDATOR.validate(new ConversationCreateRequest("천장에서 물이 새요", withNull))).hasSize(1);

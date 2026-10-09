@@ -101,6 +101,20 @@ class ConversationServiceImageTest {
     }
 
     @Test
+    @DisplayName("webp 사진은 첨부할 수 있다")
+    void attachesWebpImage() {
+        givenFiles(uploaded(4L, resident, "webp"));
+        givenSavedMessage();
+        givenAttachedImages();
+
+        PendingAiReply pendingAiReply =
+            conversationService.saveFirstMessage(RESIDENT_ID, "천장에서 물이 새요", List.of(4L));
+
+        assertThat(pendingAiReply.aiRequest().message().images()).containsExactly(
+            new AiConverseRequest.MessageImage(4L, "https://s3.test/key-4"));
+    }
+
+    @Test
     @DisplayName("같은 사진을 두 번 보내면 한 번만 첨부된다")
     void attachesDuplicateImageOnce() {
         givenFiles(uploaded(4L, resident, "jpg"));
@@ -163,8 +177,8 @@ class ConversationServiceImageTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"pdf", "heic", "gif"})
-    @DisplayName("jpg와 png가 아닌 파일은 첨부할 수 없다")
-    void rejectsFileThatIsNotJpgOrPng(String fileType) {
+    @DisplayName("jpg, png, webp가 아닌 파일은 첨부할 수 없다")
+    void rejectsFileThatIsNotSupportedImage(String fileType) {
         givenFiles(uploaded(4L, resident, fileType));
 
         assertThatThrownBy(() -> conversationService.saveFirstMessage(RESIDENT_ID, "천장에서 물이 새요", List.of(4L)))

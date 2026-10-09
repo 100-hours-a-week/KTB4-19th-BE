@@ -30,7 +30,7 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class FileService {
-    private static final Set<String> ALLOWED_TYPES = Set.of("jpg", "jpeg", "png", "pdf");
+    private static final Set<String> ALLOWED_TYPES = Set.of("jpg", "jpeg", "png", "webp", "pdf");
 
     private final FileRepository fileRepository;
     private final UserRepository userRepository;
@@ -129,6 +129,7 @@ public class FileService {
         return switch (extension) {
             case "jpg", "jpeg" -> "image/jpeg";
             case "png" -> "image/png";
+            case "webp" -> "image/webp";
             default -> "application/pdf";
         };
     }
