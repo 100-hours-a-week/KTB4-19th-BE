@@ -401,7 +401,7 @@ class ComplaintNotificationIntegrationTest {
 
     private long createComplaint() {
         return complaintService.createComplaint(resident.getId(),
-            new ComplaintCreateRequest(conversation.getId(), null, null, null)).complaintId();
+            ComplaintCreateRequest.builder().conversationId(conversation.getId()).build()).complaintId();
     }
 
     private void changeStatus(long complaintId, ComplaintStatus status) {

@@ -9,7 +9,9 @@ import jakarta.validation.constraints.Size;
 import com.homes.zipsai.conversation.ai.AiComplaintDraft;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Builder;
 
+@Builder
 public record ComplaintCreateRequest(
     @Schema(description = "민원으로 전환할 대화 ID", example = "32")
     @NotNull

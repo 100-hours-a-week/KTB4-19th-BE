@@ -472,7 +472,7 @@ class SseIntegrationTest {
         CompletableFuture<String> created = notification(managerStream.body());
         CompletableFuture<String> changed = notification(residentStream.body());
         Long complaintId = complaints.createComplaint(resident.getId(),
-            new ComplaintCreateRequest(conversation.getId(), null, null, null)).complaintId();
+            ComplaintCreateRequest.builder().conversationId(conversation.getId()).build()).complaintId();
         assertThat(created.get(3, TimeUnit.SECONDS)).contains("event:notification");
         assertThat(changed).isNotDone();
         complaints.updateManagerComplaintStatus(manager.getId(), complaintId,
