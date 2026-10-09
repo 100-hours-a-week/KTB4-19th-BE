@@ -28,60 +28,74 @@ class AiConverseRequestImageTest {
     private final Message currentMessage = message(23L, SenderType.RESIDENT, "안방이요");
 
     @Test
-    @DisplayName("지금 보낸 메시지의 사진은 message에 담긴다")
+    @DisplayName("지금 보낸 메시지의 사진은 ID와 URL로 message에 담긴다")
     void putsCurrentMessageImagesInMessage() {
-        AiConverseRequest request = AiConverseRequest.of(room, conversation, currentMessage,
-            List.of("https://s3.test/current.jpg"), List.of(), "trace");
+        List<AiConverseRequest.MessageImage> images =
+            List.of(new AiConverseRequest.MessageImage(31L, "https://s3.test/current.jpg"));
 
-        assertThat(request.message().imageUrls()).containsExactly("https://s3.test/current.jpg");
+        AiConverseRequest request =
+            AiConverseRequest.of(room, conversation, currentMessage, images, List.of(), "trace");
+
+        assertThat(request.message().images()).containsExactlyElementsOf(images);
     }
 
     @Test
-    @DisplayName("이전 메시지의 사진은 각 이력 메시지에 담긴다")
-    void putsPreviousImagesInEachHistoryMessage() {
-        List<AiConverseRequest.HistoryMessage> history = List.of(
-            AiConverseRequest.HistoryMessage.of(firstMessage, List.of("https://s3.test/first.jpg")),
-            AiConverseRequest.HistoryMessage.of(reply, List.of()));
+    @DisplayName("이전 입주민 메시지의 사진은 ID와 분석 결과로 이력에 담긴다")
+    void putsImageAnalysisInResidentHistory() {
+        AiConverseRequest.HistoryImage image = new AiConverseRequest.HistoryImage(31L, "천장 얼룩", "관리실 010");
 
-        AiConverseRequest request = AiConverseRequest.of(room, conversation, currentMessage, List.of(), history, "trace");
+        AiConverseRequest.HistoryMessage history = AiConverseRequest.HistoryMessage.of(firstMessage, List.of(image));
 
-        assertThat(request.conversationHistory().getFirst().imageUrls())
-            .containsExactly("https://s3.test/first.jpg");
-        assertThat(request.conversationHistory().getLast().imageUrls()).isEmpty();
-        assertThat(request.message().imageUrls()).isEmpty();
+        assertThat(history.images()).containsExactly(image);
     }
 
     @Test
-    @DisplayName("민원 초안이 있으면 대화의 모든 사진이 초안에 담긴다")
-    void putsEveryConversationImageInComplaintDraft() {
-        conversation.applyAiResponse(collectingWithSymptom());
-        List<AiConverseRequest.HistoryMessage> history = List.of(
-            AiConverseRequest.HistoryMessage.of(firstMessage, List.of("https://s3.test/first.jpg")),
-            AiConverseRequest.HistoryMessage.of(reply, List.of()));
+    @DisplayName("사진이 없는 입주민 이력은 빈 사진 목록으로 담긴다")
+    void putsEmptyImagesInResidentHistoryWithoutImages() {
+        AiConverseRequest.HistoryMessage history = AiConverseRequest.HistoryMessage.of(firstMessage, List.of());
 
-        AiConverseRequest request = AiConverseRequest.of(room, conversation, currentMessage,
-            List.of("https://s3.test/current.jpg"), history, "trace");
-
-        assertThat(request.complaintDraft().imageUrls())
-            .containsExactly("https://s3.test/first.jpg", "https://s3.test/current.jpg");
+        assertThat(history.images()).isEmpty();
     }
 
     @Test
-    @DisplayName("민원 초안이 없으면 사진이 있어도 초안은 보내지 않는다")
+    @DisplayName("AI 답변 이력에는 사진 필드를 담지 않는다")
+    void omitsImagesInAssistantHistory() {
+        AiConverseRequest.HistoryMessage history = AiConverseRequest.HistoryMessage.of(reply, List.of());
+
+        assertThat(history.images()).isNull();
+    }
+
+    @Test
+    @DisplayName("민원 초안에는 저장된 민원 유형과 사진 ID가 담긴다")
+    void putsStoredIssueTypeAndAttachmentIdsInComplaintDraft() {
+        conversation.applyAiResponse(collectingWithImages());
+
+        AiConverseRequest request =
+            AiConverseRequest.of(room, conversation, currentMessage, List.of(), List.of(), "trace");
+
+        assertThat(request.complaintDraft().issueType()).isEqualTo("leak");
+        assertThat(request.complaintDraft().attachmentIds()).containsExactly(31L, 32L);
+        assertThat(request.complaintDraft().symptom()).isEqualTo("천장 누수");
+    }
+
+    @Test
+    @DisplayName("민원 초안이 없으면 초안은 보내지 않는다")
     void omitsComplaintDraftWithoutDraft() {
-        AiConverseRequest request = AiConverseRequest.of(room, conversation, currentMessage,
-            List.of("https://s3.test/current.jpg"), List.of(), "trace");
+        AiConverseRequest request =
+            AiConverseRequest.of(room, conversation, currentMessage, List.of(), List.of(), "trace");
 
         assertThat(request.complaintDraft()).isNull();
     }
 
-    private static AiConverseResponse collectingWithSymptom() {
+    private static AiConverseResponse collectingWithImages() {
+        AiConverseResponse.DraftPatch patch = AiConverseResponse.DraftPatch.builder()
+            .symptom("천장 누수")
+            .issueType("leak")
+            .attachmentIds(List.of(31L, 32L))
+            .build();
         return new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, "trace",
             new AiConverseResponse.Data(AiRoute.COMPLAINT, AiComplaintState.COLLECTING, "위치가 어디인가요?",
-                AiConverseResponse.Result.builder()
-                    .complaintDraft(AiConverseResponse.DraftPatch.builder().symptom("천장 누수").build())
-                    .missingFields(List.of("location"))
-                    .build()));
+                AiConverseResponse.Result.builder().complaintDraft(patch).missingFields(List.of("location")).build()));
     }
 
     private Message message(long id, SenderType senderType, String content) {

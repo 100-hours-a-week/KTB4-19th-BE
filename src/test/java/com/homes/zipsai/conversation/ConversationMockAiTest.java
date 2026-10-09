@@ -92,11 +92,13 @@ class ConversationMockAiTest {
 
         ArgumentCaptor<AiConverseRequest> aiConverseRequestCaptor = ArgumentCaptor.forClass(AiConverseRequest.class);
         then(aiConverseClient).should(times(2)).converse(aiConverseRequestCaptor.capture());
-        assertThat(aiConverseRequestCaptor.getAllValues().getFirst().message().imageUrls()).hasSize(1);
+        assertThat(aiConverseRequestCaptor.getAllValues().getFirst().message().images())
+            .extracting(image -> image.attachmentId()).containsExactly(firstImage);
         AiConverseRequest followUp = aiConverseRequestCaptor.getAllValues().getLast();
-        assertThat(followUp.message().imageUrls()).hasSize(1);
-        assertThat(followUp.conversationHistory().getFirst().imageUrls()).hasSize(1);
-        assertThat(followUp.conversationHistory().getLast().imageUrls()).isEmpty();
+        assertThat(followUp.message().images()).extracting(image -> image.attachmentId()).containsExactly(secondImage);
+        assertThat(followUp.conversationHistory().getFirst().images())
+            .extracting(image -> image.attachmentId()).containsExactly(firstImage);
+        assertThat(followUp.conversationHistory().getLast().images()).isNull();
 
         MvcTestResult result = getMessages(resident, conversationId);
         assertThat(result).hasStatusOk()
