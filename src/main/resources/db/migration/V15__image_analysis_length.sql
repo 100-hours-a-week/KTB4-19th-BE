@@ -1,0 +1,3 @@
+ALTER TABLE Message_file_groups
+    MODIFY COLUMN summary VARCHAR(500) NULL,
+    MODIFY COLUMN ocr_text VARCHAR(500) NULL;

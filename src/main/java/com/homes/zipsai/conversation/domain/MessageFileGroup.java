@@ -32,8 +32,8 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class MessageFileGroup extends BaseTimeEntity {
 
-    private static final int SUMMARY_MAX_LENGTH = 100;
-    private static final int OCR_TEXT_MAX_LENGTH = 200;
+    private static final int SUMMARY_MAX_LENGTH = 500;
+    private static final int OCR_TEXT_MAX_LENGTH = 500;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
