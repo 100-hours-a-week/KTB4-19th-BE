@@ -16,7 +16,7 @@ public record MessageSendRequest(
     String content,
 
     @Schema(description = "업로드 완료된 사진 첨부 ID (jpg, png, 최대 3개)")
-    @Size(max = 3, message = "첨부 사진은 3장 이하여야 합니다.")
+    @Size(max = 1, message = "첨부 사진은 1장 이하여야 합니다.")
     List<@NotNull Long> attachmentIds
 ) {
 
