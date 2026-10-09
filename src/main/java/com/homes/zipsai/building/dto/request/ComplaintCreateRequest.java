@@ -27,7 +27,11 @@ public record ComplaintCreateRequest(
 
     @Schema(description = "수정한 증상", example = "천장 가운데에서 물이 떨어짐")
     @Size(max = 100, message = "증상은 100자 이하여야 합니다.")
-    String symptom
+    String symptom,
+
+    @Schema(description = "질의 접수 시 고른 대표 사진 ID. 없으면 첫 사진", example = "41")
+    @Positive(message = "1 이상의 정수여야 합니다.")
+    Long representativeAttachmentId
 ) {
 
     public AiComplaintDraft toDraftEdits() {

@@ -59,4 +59,16 @@ class ComplaintCreateRequestValidationTest {
             .extracting(ConstraintViolation::getMessage)
             .isEqualTo("증상은 100자 이하여야 합니다.");
     }
+
+    @Test
+    @DisplayName("대표 사진 ID가 1보다 작으면 검증에 실패한다")
+    void rejectsNonPositiveRepresentativeAttachmentId() {
+        ComplaintCreateRequest request =
+            ComplaintCreateRequest.builder().conversationId(1L).representativeAttachmentId(0L).build();
+
+        assertThat(VALIDATOR.validate(request))
+            .singleElement()
+            .extracting(violation -> violation.getPropertyPath().toString())
+            .isEqualTo("representativeAttachmentId");
+    }
 }

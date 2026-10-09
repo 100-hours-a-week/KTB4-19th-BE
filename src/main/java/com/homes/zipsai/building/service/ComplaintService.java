@@ -76,7 +76,7 @@ public class ComplaintService {
             .conversation(conversation)
             .user(room.getResident())
             .building(room.getBuilding())
-            .attachment(conversationService.findRepresentativeImage(conversation.getId()))
+            .attachment(representativeImage(conversation.getId(), type, request.representativeAttachmentId()))
             .title(content.title())
             .type(type)
             .urgency(URGENCY_NOT_EVALUATED)
@@ -190,6 +190,16 @@ public class ComplaintService {
         ComplaintDetail detail = getComplaintDetail(complaintId);
         return ResidentComplaintDetailResponse.from(complaint, detail,
             conversationService.findImages(complaint.getConversation().getId()), this::attachmentUrl);
+    }
+
+    private File representativeImage(Long conversationId, ComplaintType type, Long representativeAttachmentId) {
+        if (type != ComplaintType.QA || representativeAttachmentId == null) {
+            return conversationService.findRepresentativeImage(conversationId);
+        }
+        return conversationService.findImages(conversationId).stream()
+            .filter(image -> image.getId().equals(representativeAttachmentId))
+            .findFirst()
+            .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.ATTACHMENT));
     }
 
     private String attachmentUrl(File attachment) {
