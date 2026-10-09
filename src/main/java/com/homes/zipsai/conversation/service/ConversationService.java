@@ -223,14 +223,6 @@ public class ConversationService {
             .toList();
     }
 
-    @Transactional(readOnly = true)
-    public File findRepresentativeImage(Long conversationId) {
-        return messageFileGroupRepository.findAllByConversationId(conversationId, Limit.of(1)).stream()
-            .map(MessageFileGroup::getAttachment)
-            .findFirst()
-            .orElse(null);
-    }
-
     public Conversation getOwnedConversation(Long userId, Long conversationId) {
         Conversation conversation = conversationRepository.findByIdAndDeletedAtIsNull(conversationId)
             .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.CONVERSATION));
