@@ -60,7 +60,7 @@ public class ConversationService {
 
     private static final int TITLE_MAX_LENGTH = 30;
     private static final String IMAGE_ONLY_TITLE = "사진 문의";
-    private static final Set<String> IMAGE_TYPES = Set.of("jpg", "jpeg", "png");
+    private static final Set<String> IMAGE_TYPES = Set.of("jpg", "jpeg", "png", "webp");
 
     private final ConversationRepository conversationRepository;
     private final MessageRepository messageRepository;

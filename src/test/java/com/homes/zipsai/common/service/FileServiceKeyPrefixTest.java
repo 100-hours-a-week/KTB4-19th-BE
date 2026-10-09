@@ -3,6 +3,7 @@ package com.homes.zipsai.common.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.atLeastOnce;
@@ -91,6 +92,14 @@ class FileServiceKeyPrefixTest {
         then(s3StorageService).should()
             .prepareUpload(keyCaptor.capture(), anyString(), any(Duration.class));
         assertThat(keyCaptor.getValue()).isEqualTo(savedKey());
+    }
+
+    @Test
+    @DisplayName("webp 사진은 image/webp 형식으로 업로드 URL을 발급한다")
+    void presignsWebpUploadWithWebpContentType() {
+        fileService.createUpload(PRINCIPAL, "leak.webp", "webp", 1024, FilePurpose.CONVERSATION);
+
+        then(s3StorageService).should().prepareUpload(anyString(), eq("image/webp"), any(Duration.class));
     }
 
     private String savedKey() {
