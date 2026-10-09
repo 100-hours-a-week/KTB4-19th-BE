@@ -3,6 +3,7 @@ package com.homes.zipsai.building.service;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
@@ -76,7 +77,7 @@ public class ComplaintService {
             .conversation(conversation)
             .user(room.getResident())
             .building(room.getBuilding())
-            .attachment(representativeImage(conversation.getId(), type, request.representativeAttachmentId()))
+            .attachment(selectRepresentativeImage(conversation, type, request.representativeAttachmentId()))
             .title(content.title())
             .type(type)
             .urgency(URGENCY_NOT_EVALUATED)
@@ -192,14 +193,28 @@ public class ComplaintService {
             conversationService.findImages(complaint.getConversation().getId()), this::attachmentUrl);
     }
 
-    private File representativeImage(Long conversationId, ComplaintType type, Long representativeAttachmentId) {
-        if (type != ComplaintType.QA || representativeAttachmentId == null) {
-            return conversationService.findRepresentativeImage(conversationId);
+    private File selectRepresentativeImage(Conversation conversation, ComplaintType type,
+                                           Long residentChosenAttachmentId) {
+        List<File> images = conversationService.findImages(conversation.getId());
+        if (type == ComplaintType.QA && residentChosenAttachmentId != null) {
+            return findImage(images, residentChosenAttachmentId)
+                .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.ATTACHMENT));
         }
-        return conversationService.findImages(conversationId).stream()
-            .filter(image -> image.getId().equals(representativeAttachmentId))
-            .findFirst()
-            .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.ATTACHMENT));
+        if (type == ComplaintType.QA) {
+            return firstImage(images);
+        }
+        return findImage(images, conversation.getDraftRepresentativeAttachmentId())
+            .orElseGet(() -> firstImage(images));
+    }
+
+    private Optional<File> findImage(List<File> images, Long attachmentId) {
+        return images.stream()
+            .filter(image -> image.getId().equals(attachmentId))
+            .findFirst();
+    }
+
+    private File firstImage(List<File> images) {
+        return images.isEmpty() ? null : images.getFirst();
     }
 
     private String attachmentUrl(File attachment) {

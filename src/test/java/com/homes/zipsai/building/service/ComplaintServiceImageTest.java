@@ -3,7 +3,6 @@ package com.homes.zipsai.building.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
@@ -77,24 +76,50 @@ class ComplaintServiceImageTest {
     }
 
     @Test
-    @DisplayName("대화의 대표 사진을 민원 대표 사진으로 저장한다")
-    void savesConversationRepresentativeImage() {
-        givenConversation(AiRoute.COMPLAINT);
+    @DisplayName("일반 민원은 AI가 고른 사진을 대표 사진으로 저장한다")
+    void savesImageChosenByAiForComplaint() {
+        givenConversation(AiRoute.COMPLAINT, 5L);
         givenComplaintSaved();
-        File representative = uploaded(4L);
-        given(conversationService.findRepresentativeImage(CONVERSATION_ID)).willReturn(representative);
+        File chosen = uploaded(5L);
+        given(conversationService.findImages(CONVERSATION_ID)).willReturn(List.of(uploaded(4L), chosen));
 
         complaintService.createComplaint(RESIDENT_ID, createRequest());
 
-        assertThat(savedComplaint().getAttachment()).isEqualTo(representative);
+        assertThat(savedComplaint().getAttachment()).isEqualTo(chosen);
     }
 
     @Test
-    @DisplayName("대화에 사진이 없으면 대표 사진 없이 저장한다")
-    void savesComplaintWithoutRepresentativeWhenNoImage() {
-        givenConversation(AiRoute.COMPLAINT);
+    @DisplayName("일반 민원에 AI가 고른 사진이 없으면 첫 사진을 저장한다")
+    void savesFirstImageForComplaintWithoutAiChoice() {
+        givenConversation(AiRoute.COMPLAINT, null);
         givenComplaintSaved();
-        given(conversationService.findRepresentativeImage(CONVERSATION_ID)).willReturn(null);
+        File first = uploaded(4L);
+        given(conversationService.findImages(CONVERSATION_ID)).willReturn(List.of(first, uploaded(5L)));
+
+        complaintService.createComplaint(RESIDENT_ID, createRequest());
+
+        assertThat(savedComplaint().getAttachment()).isEqualTo(first);
+    }
+
+    @Test
+    @DisplayName("AI가 고른 사진이 대화에 없으면 첫 사진으로 접수한다")
+    void savesFirstImageWhenAiChoiceIsNotInConversation() {
+        givenConversation(AiRoute.COMPLAINT, 99L);
+        givenComplaintSaved();
+        File first = uploaded(4L);
+        given(conversationService.findImages(CONVERSATION_ID)).willReturn(List.of(first));
+
+        complaintService.createComplaint(RESIDENT_ID, createRequest());
+
+        assertThat(savedComplaint().getAttachment()).isEqualTo(first);
+    }
+
+    @Test
+    @DisplayName("사진 없는 일반 민원은 대표 사진 없이 저장한다")
+    void savesComplaintWithoutRepresentativeWhenNoImage() {
+        givenConversation(AiRoute.COMPLAINT, 5L);
+        givenComplaintSaved();
+        given(conversationService.findImages(CONVERSATION_ID)).willReturn(List.of());
 
         complaintService.createComplaint(RESIDENT_ID, createRequest());
 
@@ -102,9 +127,22 @@ class ComplaintServiceImageTest {
     }
 
     @Test
+    @DisplayName("일반 민원은 입주민이 보낸 사진 ID를 쓰지 않는다")
+    void ignoresResidentChoiceForComplaint() {
+        givenConversation(AiRoute.COMPLAINT, null);
+        givenComplaintSaved();
+        File first = uploaded(4L);
+        given(conversationService.findImages(CONVERSATION_ID)).willReturn(List.of(first, uploaded(5L)));
+
+        complaintService.createComplaint(RESIDENT_ID, createRequest(5L));
+
+        assertThat(savedComplaint().getAttachment()).isEqualTo(first);
+    }
+
+    @Test
     @DisplayName("질의로 접수하면 입주민이 고른 사진을 대표 사진으로 저장한다")
     void savesImageChosenByResidentForQa() {
-        givenConversation(AiRoute.KNOWLEDGE);
+        givenConversation(AiRoute.KNOWLEDGE, null);
         givenComplaintSaved();
         File chosen = uploaded(5L);
         given(conversationService.findImages(CONVERSATION_ID)).willReturn(List.of(uploaded(4L), chosen));
@@ -117,7 +155,7 @@ class ComplaintServiceImageTest {
     @Test
     @DisplayName("질의로 접수할 때 대화에 없는 사진을 고르면 민원을 만들지 않는다")
     void rejectsQaRepresentativeNotInConversation() {
-        givenConversation(AiRoute.KNOWLEDGE);
+        givenConversation(AiRoute.KNOWLEDGE, null);
         given(conversationService.findImages(CONVERSATION_ID)).willReturn(List.of(uploaded(4L)));
         ComplaintCreateRequest request = createRequest(99L);
 
@@ -128,12 +166,12 @@ class ComplaintServiceImageTest {
     }
 
     @Test
-    @DisplayName("질의로 접수할 때 대표 사진을 고르지 않으면 첫 사진을 저장한다")
+    @DisplayName("질의로 접수할 때 대표 사진을 고르지 않으면 AI 값과 상관없이 첫 사진을 저장한다")
     void savesFirstImageForQaWithoutChoice() {
-        givenConversation(AiRoute.KNOWLEDGE);
+        givenConversation(AiRoute.KNOWLEDGE, 5L);
         givenComplaintSaved();
         File first = uploaded(4L);
-        given(conversationService.findRepresentativeImage(CONVERSATION_ID)).willReturn(first);
+        given(conversationService.findImages(CONVERSATION_ID)).willReturn(List.of(first, uploaded(5L)));
 
         complaintService.createComplaint(RESIDENT_ID, createRequest());
 
@@ -143,32 +181,18 @@ class ComplaintServiceImageTest {
     @Test
     @DisplayName("사진 없는 질의는 대표 사진 없이 저장한다")
     void savesQaWithoutRepresentativeWhenNoImage() {
-        givenConversation(AiRoute.KNOWLEDGE);
+        givenConversation(AiRoute.KNOWLEDGE, null);
         givenComplaintSaved();
-        given(conversationService.findRepresentativeImage(CONVERSATION_ID)).willReturn(null);
+        given(conversationService.findImages(CONVERSATION_ID)).willReturn(List.of());
 
         complaintService.createComplaint(RESIDENT_ID, createRequest());
 
         assertThat(savedComplaint().getAttachment()).isNull();
     }
 
-    @Test
-    @DisplayName("일반 민원은 고른 사진 ID를 무시하고 첫 사진을 저장한다")
-    void ignoresChosenImageForComplaint() {
-        givenConversation(AiRoute.COMPLAINT);
-        givenComplaintSaved();
-        File first = uploaded(4L);
-        given(conversationService.findRepresentativeImage(CONVERSATION_ID)).willReturn(first);
-
-        complaintService.createComplaint(RESIDENT_ID, createRequest(5L));
-
-        assertThat(savedComplaint().getAttachment()).isEqualTo(first);
-        then(conversationService).should(never()).findImages(anyLong());
-    }
-
-    private void givenConversation(AiRoute route) {
+    private void givenConversation(AiRoute route, Long aiRepresentativeAttachmentId) {
         given(conversationService.getOwnedConversation(RESIDENT_ID, CONVERSATION_ID))
-            .willReturn(readyConversation(route));
+            .willReturn(readyConversation(route, aiRepresentativeAttachmentId));
     }
 
     private void givenComplaintSaved() {
@@ -195,7 +219,7 @@ class ComplaintServiceImageTest {
             .build();
     }
 
-    private static Conversation readyConversation(AiRoute route) {
+    private static Conversation readyConversation(AiRoute route, Long aiRepresentativeAttachmentId) {
         Conversation conversation = Conversation.builder()
             .user(user(RESIDENT_ID))
             .type(ConversationType.INQUIRY)
@@ -203,6 +227,7 @@ class ComplaintServiceImageTest {
             .build();
         ReflectionTestUtils.setField(conversation, "complaintState", AiComplaintState.READY_TO_CONFIRM);
         ReflectionTestUtils.setField(conversation, "currentRoute", route);
+        ReflectionTestUtils.setField(conversation, "draftRepresentativeAttachmentId", aiRepresentativeAttachmentId);
         return withId(conversation, CONVERSATION_ID);
     }
 
