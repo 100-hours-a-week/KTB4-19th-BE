@@ -319,7 +319,7 @@ class GlobalExceptionHandlerTest {
             throw new TooManyRequestsException();
         }
 
-        private void validationArgument(ValidationRequest request) {
+        private void validationArgument(@RequestBody ValidationRequest request) {
         }
 
         private static MethodParameter validationParameter() {

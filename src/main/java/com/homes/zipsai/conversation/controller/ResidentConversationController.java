@@ -1,10 +1,9 @@
 package com.homes.zipsai.conversation.controller;
 
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -13,10 +12,11 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.homes.zipsai.conversation.dto.request.ConversationCreateRequest;
+import com.homes.zipsai.conversation.dto.request.ConversationListRequest;
+import com.homes.zipsai.conversation.dto.request.MessageListRequest;
 import com.homes.zipsai.conversation.dto.request.MessageSendRequest;
 import com.homes.zipsai.conversation.dto.response.ConversationCreateResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationListResponse;
@@ -46,14 +46,10 @@ public class ResidentConversationController {
     @GetMapping
     public ResponseEntity<ApiResponse<ConversationListResponse>> getConversations(
         @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal,
-        @Parameter(description = "대화 제목 검색어") @RequestParam(required = false) String keyword,
-        @Parameter(description = "이전 응답의 nextCursor") @RequestParam(required = false) String cursor,
-        @Parameter(description = "조회 개수 (최대 100)")
-        @RequestParam(defaultValue = "20") @Min(value = 1, message = "1 이상이어야 합니다.")
-        @Max(value = 100, message = "100 이하여야 합니다.") int size
+        @ParameterObject @Valid ConversationListRequest request
     ) {
-        return ResponseEntity.ok(
-            ApiResponse.data(conversationService.getConversations(principal.userId(), keyword, cursor, size)));
+        return ResponseEntity.ok(ApiResponse.data(conversationService.getConversations(
+            principal.userId(), request.keyword(), request.cursor(), request.size())));
     }
 
     @Operation(summary = "대화 시작 (첫 메시지 전송)",
@@ -74,14 +70,11 @@ public class ResidentConversationController {
     public ResponseEntity<ApiResponse<ConversationMessagesResponse>> getMessages(
         @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal,
         @PathVariable @Positive(message = "1 이상의 정수여야 합니다.") Long conversationId,
-        @Parameter(description = "마지막으로 조회한 가장 오래된 messageId")
-        @RequestParam(required = false) @Positive(message = "1 이상의 정수여야 합니다.") Long cursor,
-        @Parameter(description = "조회 개수 (최대 100)")
-        @RequestParam(defaultValue = "20") @Min(value = 1, message = "1 이상이어야 합니다.")
-        @Max(value = 100, message = "100 이하여야 합니다.") int size
+        @ParameterObject @Valid MessageListRequest request
     ) {
         return ResponseEntity.ok(
-            ApiResponse.data(conversationService.getMessages(principal.userId(), conversationId, cursor, size)));
+            ApiResponse.data(conversationService.getMessages(
+                principal.userId(), conversationId, request.cursor(), request.size())));
     }
 
     @Operation(summary = "메시지 전송",

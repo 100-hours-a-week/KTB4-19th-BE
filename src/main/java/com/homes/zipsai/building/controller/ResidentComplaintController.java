@@ -1,12 +1,9 @@
 package com.homes.zipsai.building.controller;
 
-import java.util.List;
-
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -15,10 +12,10 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.homes.zipsai.building.dto.request.ComplaintCreateRequest;
+import com.homes.zipsai.building.dto.request.ResidentComplaintListRequest;
 import com.homes.zipsai.building.dto.response.ComplaintCreateResponse;
 import com.homes.zipsai.building.dto.response.ResidentComplaintDetailResponse;
 import com.homes.zipsai.building.dto.response.ResidentComplaintListResponse;
@@ -43,14 +40,10 @@ public class ResidentComplaintController {
     @GetMapping
     public ResponseEntity<ApiResponse<ResidentComplaintListResponse>> getComplaints(
         @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal,
-        @Parameter(description = "민원 제목 검색어") @RequestParam(required = false) String keyword,
-        @RequestParam(name = "status", required = false) List<String> status,
-        @RequestParam(defaultValue = "0") @Min(value = 0, message = "0 이상이어야 합니다.") int page,
-        @RequestParam(defaultValue = "20") @Min(value = 1, message = "1 이상이어야 합니다.")
-        @Max(value = 100, message = "100 이하여야 합니다.") int size
+        @ParameterObject @Valid ResidentComplaintListRequest request
     ) {
-        return ResponseEntity.ok(ApiResponse.data(
-            complaintService.getResidentComplaints(principal.userId(), keyword, status, page, size)));
+        return ResponseEntity.ok(ApiResponse.data(complaintService.getResidentComplaints(
+            principal.userId(), request.keyword(), request.status(), request.page(), request.size())));
     }
 
     @Operation(summary = "민원 상세 조회", description = "현재 거주 중인 입주민 본인의 민원 상세를 조회한다.")
