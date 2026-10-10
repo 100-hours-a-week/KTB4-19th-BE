@@ -9,6 +9,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.beans.TypeMismatchException;
 import org.springframework.context.MessageSourceResolvable;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.MediaType;
@@ -27,6 +28,7 @@ import org.springframework.web.bind.MissingPathVariableException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -51,7 +53,10 @@ public class ApiExceptionHandler {
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<?> requestBodyValidation(MethodArgumentNotValidException exception) {
+    public ResponseEntity<?> requestArgumentValidation(MethodArgumentNotValidException exception) {
+        if (!exception.getParameter().hasParameterAnnotation(RequestBody.class)) {
+            return queryParameterValidation(exception);
+        }
         return bodyValidation(exception.getBindingResult());
     }
 
@@ -96,6 +101,12 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(BindException.class)
     public ResponseEntity<?> queryParameterValidation(BindException exception) {
+        for (FieldError error : exception.getBindingResult().getFieldErrors()) {
+            if (error.contains(TypeMismatchException.class)) {
+                return handle(InvalidQueryParameterException.typeMismatch(
+                        error.getField(), error.unwrap(TypeMismatchException.class).getRequiredType()));
+            }
+        }
         return handle(new InvalidQueryParameterException(violations(exception.getBindingResult())));
     }
 

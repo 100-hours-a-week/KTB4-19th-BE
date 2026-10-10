@@ -137,7 +137,10 @@ class ResidentConversationApiTest {
     void rejectsNonNumericPageSize() {
         assertThat(mockMvcTester.get().uri(CONVERSATIONS).param("size", "abc").with(resident))
             .hasStatus(HttpStatus.BAD_REQUEST)
-            .bodyJson().extractingPath("$.error.code").isEqualTo("INVALID_QUERY_PARAMETER");
+            .bodyJson().isLenientlyEqualTo("""
+                {"error": {"code": "INVALID_QUERY_PARAMETER",
+                           "details": {"violations": [{"field": "size", "reason": "정수 형식이어야 합니다."}]}}}
+                """);
     }
 
     @Test

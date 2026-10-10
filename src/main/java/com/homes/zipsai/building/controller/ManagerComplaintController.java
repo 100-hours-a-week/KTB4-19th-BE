@@ -1,12 +1,9 @@
 package com.homes.zipsai.building.controller;
 
-import java.util.List;
-
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -16,11 +13,11 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.homes.zipsai.building.dto.request.ComplaintCommentUpdateRequest;
 import com.homes.zipsai.building.dto.request.ComplaintStatusUpdateRequest;
+import com.homes.zipsai.building.dto.request.ManagerComplaintListRequest;
 import com.homes.zipsai.building.dto.response.ComplaintDetailResponse;
 import com.homes.zipsai.building.dto.response.ComplaintListResponse;
 import com.homes.zipsai.building.dto.response.ComplaintStatusUpdateResponse;
@@ -92,15 +89,10 @@ public class ManagerComplaintController {
     @GetMapping
     public ResponseEntity<ApiResponse<ComplaintListResponse>> getComplaints(
             @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal,
-            @RequestParam(required = false) String keyword,
-            @RequestParam(name = "status", required = false) List<String> status,
-            @RequestParam(defaultValue = "false") boolean urgentOnly,
-            @RequestParam(defaultValue = "0") @Min(value = 0, message = "0 이상이어야 합니다.") int page,
-            @RequestParam(defaultValue = "20") @Min(value = 1, message = "1 이상이어야 합니다.")
-            @Max(value = 100, message = "100 이하여야 합니다.") int size
+            @ParameterObject @Valid ManagerComplaintListRequest request
     ) {
-        ComplaintListResponse response = complaintService.getManagerComplaints(
-            principal.userId(), keyword, status, urgentOnly, page, size);
+        ComplaintListResponse response = complaintService.getManagerComplaints(principal.userId(),
+            request.keyword(), request.status(), request.urgentOnly(), request.page(), request.size());
         return ResponseEntity.ok(ApiResponse.data(response));
     }
 }

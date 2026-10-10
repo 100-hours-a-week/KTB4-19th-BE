@@ -1,17 +1,17 @@
 package com.homes.zipsai.conversation.controller;
 
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.homes.zipsai.conversation.dto.request.MessageListRequest;
 import com.homes.zipsai.conversation.dto.response.ConversationMessagesResponse;
 import com.homes.zipsai.conversation.service.ConversationService;
 import com.homes.zipsai.global.response.ApiResponse;
@@ -36,13 +36,10 @@ public class ManagerConversationController {
     public ResponseEntity<ApiResponse<ConversationMessagesResponse>> getMessages(
         @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal,
         @PathVariable @Positive(message = "1 이상의 정수여야 합니다.") Long conversationId,
-        @Parameter(description = "마지막으로 조회한 가장 오래된 messageId")
-        @RequestParam(required = false) @Positive(message = "1 이상의 정수여야 합니다.") Long cursor,
-        @Parameter(description = "조회 개수 (최대 100)")
-        @RequestParam(defaultValue = "20") @Min(value = 1, message = "1 이상이어야 합니다.")
-        @Max(value = 100, message = "100 이하여야 합니다.") int size
+        @ParameterObject @Valid MessageListRequest request
     ) {
         return ResponseEntity.ok(ApiResponse.data(
-            conversationService.getComplaintMessagesForManager(principal.userId(), conversationId, cursor, size)));
+            conversationService.getComplaintMessagesForManager(
+                principal.userId(), conversationId, request.cursor(), request.size())));
     }
 }
