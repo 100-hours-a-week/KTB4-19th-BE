@@ -12,6 +12,7 @@ import static org.mockito.Mockito.never;
 import java.util.List;
 import java.util.Set;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.MDC;
 import org.springframework.http.MediaType;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter.DataWithMediaType;
@@ -39,6 +41,7 @@ import com.homes.zipsai.conversation.dto.response.ConversationReplyResponse;
 import com.homes.zipsai.conversation.dto.response.MessageResponse;
 import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.global.exception.ConflictException;
+import com.homes.zipsai.global.logging.StructuredLogger;
 
 @ExtendWith(MockitoExtension.class)
 class ConversationReplyServiceTest {
@@ -61,6 +64,11 @@ class ConversationReplyServiceTest {
     @BeforeEach
     void setUp() {
         conversationReplyService = new ConversationReplyService(conversationService, aiConverseClient, sseService);
+    }
+
+    @AfterEach
+    void clearMdc() {
+        MDC.clear();
     }
 
     @Test
@@ -95,6 +103,17 @@ class ConversationReplyServiceTest {
         assertThat(eventData(event)).isInstanceOf(ConversationReplyFailedResponse.class)
             .hasFieldOrPropertyWithValue("conversationId", CONVERSATION_ID)
             .hasFieldOrPropertyWithValue("code", new AiUnavailableException().code);
+    }
+
+    @Test
+    @DisplayName("AI 답변 처리가 실패하면 작업 로그에 남길 오류 코드를 기록한다")
+    void recordsErrorCodeForTaskLogWhenReplyFails() {
+        PendingAiReply pendingAiReply = pendingAiReply();
+        given(aiConverseClient.converse(pendingAiReply.aiRequest())).willThrow(new AiUnavailableException());
+
+        conversationReplyService.reply(RESIDENT_ID, pendingAiReply);
+
+        assertThat(MDC.get(StructuredLogger.ERROR_CODE)).isEqualTo(new AiUnavailableException().code);
     }
 
     @Test

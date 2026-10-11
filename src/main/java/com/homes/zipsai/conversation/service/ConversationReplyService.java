@@ -5,6 +5,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,7 @@ import com.homes.zipsai.global.config.AsyncConfig;
 import com.homes.zipsai.global.exception.ApiException;
 import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.global.exception.InternalServerException;
+import com.homes.zipsai.global.logging.StructuredLogger;
 
 import lombok.RequiredArgsConstructor;
 
@@ -56,14 +58,18 @@ public class ConversationReplyService {
         try {
             return event(REPLY_EVENT, askAiAndSaveReply(pendingReply));
         } catch (ApiException e) {
-            return event(REPLY_FAILED_EVENT, ConversationReplyFailedResponse.of(conversationId, e));
+            return failedEvent(conversationId, e);
         } catch (RuntimeException e) {
             LOGGER.error("AI 답변을 처리하지 못했습니다. conversationId={}", conversationId, e);
-            return event(REPLY_FAILED_EVENT,
-                ConversationReplyFailedResponse.of(conversationId, new InternalServerException()));
+            return failedEvent(conversationId, new InternalServerException());
         } finally {
             finishReplying(conversationId);
         }
+    }
+
+    private SseEmitter.SseEventBuilder failedEvent(Long conversationId, ApiException exception) {
+        MDC.put(StructuredLogger.ERROR_CODE, exception.code);
+        return event(REPLY_FAILED_EVENT, ConversationReplyFailedResponse.of(conversationId, exception));
     }
 
     private ConversationReplyResponse askAiAndSaveReply(PendingAiReply pendingReply) {
