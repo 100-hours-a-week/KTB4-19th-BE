@@ -53,7 +53,8 @@ public class ResidentConversationController {
     }
 
     @Operation(summary = "대화 시작 (첫 메시지 전송)",
-        description = "첫 메시지를 전송할 때 대화를 생성하고 AI 응답을 함께 반환한다. AI 호출이 실패하면 대화를 만들지 않는다.")
+        description = "첫 메시지로 대화를 만들고 바로 응답한다. AI 답변은 SSE chat-done 이벤트로, 실패는 chat-error 이벤트로 보내며 "
+            + "실패하면 대화를 지운다.")
     @PostMapping
     public ResponseEntity<ApiResponse<ConversationCreateResponse>> createConversation(
         @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal,
@@ -61,7 +62,7 @@ public class ResidentConversationController {
     ) {
         ConversationCreateResponse created = conversationMessageService.createConversation(
             principal.userId(), request.content(), request.attachmentIds());
-        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.data(created));
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(ApiResponse.data(created));
     }
 
     @Operation(summary = "채팅방 메세지 조회",
@@ -78,7 +79,8 @@ public class ResidentConversationController {
     }
 
     @Operation(summary = "메시지 전송",
-        description = "진행 중인 대화에 메시지를 보내고 AI 응답을 함께 반환한다. 접수 정보가 모이면 SUMMARY_CARD를 반환한다.")
+        description = "진행 중인 대화에 메시지를 저장하고 바로 응답한다. AI 답변은 SSE chat-done 이벤트로, 실패는 chat-error "
+            + "이벤트로 보낸다. 접수 정보가 모이면 답변이 SUMMARY_CARD로 온다.")
     @PostMapping("/{conversationId}/messages")
     public ResponseEntity<ApiResponse<MessageSendResponse>> sendMessage(
         @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal,
@@ -87,6 +89,6 @@ public class ResidentConversationController {
     ) {
         MessageSendResponse sent = conversationMessageService.sendMessage(
             principal.userId(), conversationId, request.content(), request.attachmentIds());
-        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.data(sent));
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(ApiResponse.data(sent));
     }
 }
