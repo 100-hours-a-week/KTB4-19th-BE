@@ -1,5 +1,6 @@
 package com.homes.zipsai.building.domain;
 
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 
 import jakarta.persistence.Column;
@@ -47,6 +48,9 @@ public class ComplaintDetail extends BaseTimeEntity {
     @Column(name = "comment", length = 200)
     private String comment;
 
+    @Column(name = "ai_feedback_sent_at")
+    private LocalDateTime aiFeedbackSentAt;
+
     @Builder
     public ComplaintDetail(Complaint complaint, String location, String symptom, OffsetDateTime occurredTime,
                            String aiSummary) {
@@ -59,9 +63,15 @@ public class ComplaintDetail extends BaseTimeEntity {
 
     public void updateComment(String comment) {
         this.comment = comment;
+        this.aiFeedbackSentAt = null;
     }
 
     public void deleteComment() {
         this.comment = null;
+        this.aiFeedbackSentAt = null;
+    }
+
+    public void markAiFeedbackSent(LocalDateTime sentAt) {
+        this.aiFeedbackSentAt = sentAt;
     }
 }
