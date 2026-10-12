@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -19,6 +20,7 @@ public class StubAiConverseClient implements AiConverseClient {
         Pattern.compile("\\?|언제|어떻게|어디서|몇 시|규칙|요일|방법|되나요|있나요|알려");
     private static final Pattern UNANSWERABLE_PATTERN = Pattern.compile("관리인|관리자|담당자|문의");
     private static final int CLARIFY_MAX_TEXT_LENGTH = 3;
+    private static final int REPLY_DELTA_LENGTH = 2;
 
     private static final String LOCATION_FIELD = "location";
     private static final String SYMPTOM_FIELD = "symptom";
@@ -32,26 +34,31 @@ public class StubAiConverseClient implements AiConverseClient {
 
     private final LogNormalDelay complaintDelay;
     private final LogNormalDelay knowledgeDelay;
+    private final Duration replyDeltaDelay;
 
     public StubAiConverseClient(@Value("${app.ai.stub.complaint-delay:0s}") Duration complaintMedian,
                                 @Value("${app.ai.stub.complaint-delay-sigma:0}") double complaintSigma,
                                 @Value("${app.ai.stub.knowledge-delay:0s}") Duration knowledgeMedian,
-                                @Value("${app.ai.stub.knowledge-delay-sigma:0}") double knowledgeSigma) {
+                                @Value("${app.ai.stub.knowledge-delay-sigma:0}") double knowledgeSigma,
+                                @Value("${app.ai.stub.reply-delta-delay:0s}") Duration replyDeltaDelay) {
         this.complaintDelay = new LogNormalDelay(complaintMedian, complaintSigma);
         this.knowledgeDelay = new LogNormalDelay(knowledgeMedian, knowledgeSigma);
+        this.replyDeltaDelay = replyDeltaDelay;
     }
 
     @Override
-    public AiConverseResponse converse(AiConverseRequest request) {
+    public AiConverseResponse converse(AiConverseRequest request, Consumer<String> onReplyDelta) {
         String turnId = request.turnId();
         String text = request.message().text() == null ? "" : request.message().text().strip();
         AiRoute route = decideRoute(request, text);
         waitLikeAiServer(route);
-        return switch (route) {
+        AiConverseResponse response = switch (route) {
             case COMPLAINT -> collectComplaint(request, turnId, text);
             case KNOWLEDGE -> answerKnowledge(turnId, text);
             case CLARIFY -> askAgain(turnId);
         };
+        streamReply(response.reply(), onReplyDelta);
+        return response;
     }
 
     private AiRoute decideRoute(AiConverseRequest request, String text) {
@@ -70,6 +77,17 @@ public class StubAiConverseClient implements AiConverseClient {
             case KNOWLEDGE -> knowledgeDelay.next();
             case CLARIFY -> Duration.ZERO;
         };
+        sleep(delay);
+    }
+
+    private void streamReply(String reply, Consumer<String> onReplyDelta) {
+        for (int start = 0; start < reply.length(); start += REPLY_DELTA_LENGTH) {
+            sleep(replyDeltaDelay);
+            onReplyDelta.accept(reply.substring(start, Math.min(start + REPLY_DELTA_LENGTH, reply.length())));
+        }
+    }
+
+    private void sleep(Duration delay) {
         try {
             Thread.sleep(delay);
         } catch (InterruptedException e) {

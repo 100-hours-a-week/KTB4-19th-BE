@@ -74,7 +74,7 @@ class HttpAiConverseClientTest {
             .andExpect(jsonPath("$.complaint_draft.attachmentIds[0]").value(31))
             .andRespond(withSuccess(complaintReply(), MediaType.APPLICATION_JSON));
 
-        httpAiConverseClient.converse(request());
+        httpAiConverseClient.converse(request(), delta -> { });
 
         mockRestServiceServer.verify();
     }
@@ -85,7 +85,7 @@ class HttpAiConverseClientTest {
         mockRestServiceServer.expect(requestTo(CONVERSE_URL))
             .andRespond(withSuccess(complaintReply(), MediaType.APPLICATION_JSON));
 
-        AiConverseResponse response = httpAiConverseClient.converse(request());
+        AiConverseResponse response = httpAiConverseClient.converse(request(), delta -> { });
 
         assertThat(response.isSuccess()).isTrue();
         assertThat(response.turnId()).isEqualTo(TURN_ID);
@@ -129,7 +129,7 @@ class HttpAiConverseClientTest {
                 }
                 """.formatted(TURN_ID), MediaType.APPLICATION_JSON));
 
-        AiConverseResponse response = httpAiConverseClient.converse(request());
+        AiConverseResponse response = httpAiConverseClient.converse(request(), delta -> { });
 
         assertThat(response.complaintDraft().issueType()).isEqualTo("leak");
         assertThat(response.complaintDraft().attachmentIds()).containsExactly(31L, 32L);
@@ -164,7 +164,7 @@ class HttpAiConverseClientTest {
                 }
                 """.formatted(TURN_ID), MediaType.APPLICATION_JSON));
 
-        AiConverseResponse response = httpAiConverseClient.converse(request());
+        AiConverseResponse response = httpAiConverseClient.converse(request(), delta -> { });
 
         assertThat(response.isSuccess()).isTrue();
         assertThat(response.complaintDraft().toDraft().occurredAt())
@@ -186,7 +186,7 @@ class HttpAiConverseClientTest {
                 MediaType.APPLICATION_JSON));
 
         try {
-            assertThatThrownBy(() -> httpAiConverseClient.converse(request()))
+            assertThatThrownBy(() -> httpAiConverseClient.converse(request(), delta -> { }))
                 .isInstanceOf(AiUnavailableException.class);
             assertThat(appender.list)
                 .anyMatch(event -> event.getFormattedMessage().contains("읽지 못했습니다")
@@ -210,7 +210,7 @@ class HttpAiConverseClientTest {
             .andRespond(withSuccess(complaintReply(), MediaType.APPLICATION_JSON));
 
         try {
-            httpAiConverseClient.converse(request());
+            httpAiConverseClient.converse(request(), delta -> { });
 
             assertThat(appender.list)
                 .anyMatch(event -> event.getFormattedMessage()
@@ -248,7 +248,7 @@ class HttpAiConverseClientTest {
                 }
                 """.formatted(TURN_ID), MediaType.APPLICATION_JSON));
 
-        AiConverseResponse response = httpAiConverseClient.converse(request());
+        AiConverseResponse response = httpAiConverseClient.converse(request(), delta -> { });
 
         assertThat(response.route()).isEqualTo(AiRoute.KNOWLEDGE);
         assertThat(response.qaCardQuestion()).isEqualTo("엘리베이터 정기 점검 일정 문의");
@@ -261,7 +261,8 @@ class HttpAiConverseClientTest {
     void mapsRateLimitToTooManyRequests() {
         mockRestServiceServer.expect(requestTo(CONVERSE_URL)).andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
 
-        assertThatThrownBy(() -> httpAiConverseClient.converse(request())).isInstanceOf(TooManyRequestsException.class);
+        assertThatThrownBy(() -> httpAiConverseClient.converse(request(), delta -> { }))
+            .isInstanceOf(TooManyRequestsException.class);
     }
 
     @Test
@@ -269,7 +270,8 @@ class HttpAiConverseClientTest {
     void mapsGatewayTimeoutToAiUnavailable() {
         mockRestServiceServer.expect(requestTo(CONVERSE_URL)).andRespond(withStatus(HttpStatus.GATEWAY_TIMEOUT));
 
-        assertThatThrownBy(() -> httpAiConverseClient.converse(request())).isInstanceOf(AiUnavailableException.class);
+        assertThatThrownBy(() -> httpAiConverseClient.converse(request(), delta -> { }))
+            .isInstanceOf(AiUnavailableException.class);
     }
 
     private static String complaintReply() {

@@ -1,5 +1,7 @@
 package com.homes.zipsai.conversation.ai;
 
+import java.util.function.Consumer;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -38,7 +40,7 @@ public class HttpAiConverseClient implements AiConverseClient {
     }
 
     @Override
-    public AiConverseResponse converse(AiConverseRequest request) {
+    public AiConverseResponse converse(AiConverseRequest request, Consumer<String> onReplyDelta) {
         String turnId = request.turnId();
         String traceId = MDC.get("traceId");
         try {

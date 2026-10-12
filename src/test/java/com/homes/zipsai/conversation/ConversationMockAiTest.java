@@ -93,7 +93,7 @@ class ConversationMockAiTest {
         RequestPostProcessor resident = conversationTestFixture.authenticatedAs(email);
         long firstImage = conversationTestFixture.uploadedFile(email, "jpg");
         long secondImage = conversationTestFixture.uploadedFile(email, "png");
-        given(aiConverseClient.converse(any())).willAnswer(ConversationMockAiTest::collectingReply);
+        given(aiConverseClient.converse(any(), any())).willAnswer(ConversationMockAiTest::collectingReply);
 
         long conversationId = startConversation(resident, "천장에서 물이 새요", firstImage);
 
@@ -102,7 +102,7 @@ class ConversationMockAiTest {
             .isEqualTo(secondImage);
 
         ArgumentCaptor<AiConverseRequest> aiConverseRequestCaptor = ArgumentCaptor.forClass(AiConverseRequest.class);
-        then(aiConverseClient).should(times(2)).converse(aiConverseRequestCaptor.capture());
+        then(aiConverseClient).should(times(2)).converse(aiConverseRequestCaptor.capture(), any());
         assertThat(aiConverseRequestCaptor.getAllValues().getFirst().message().images())
             .extracting(image -> image.attachmentId()).containsExactly(firstImage);
         AiConverseRequest followUp = aiConverseRequestCaptor.getAllValues().getLast();
@@ -130,7 +130,7 @@ class ConversationMockAiTest {
         RequestPostProcessor resident = conversationTestFixture.authenticatedAs(email);
         long image = conversationTestFixture.uploadedFile(email, "jpg");
         long before = conversationRepository.count();
-        given(aiConverseClient.converse(any()))
+        given(aiConverseClient.converse(any(), any()))
             .willThrow(new IllegalStateException("AI timeout"))
             .willAnswer(ConversationMockAiTest::collectingReply);
 
@@ -149,7 +149,7 @@ class ConversationMockAiTest {
     void separatesHttpRequestTraceIdFromAiTurnId() throws Exception {
         String email = conversationTestFixture.livingResident("302");
         RequestPostProcessor resident = conversationTestFixture.authenticatedAs(email);
-        given(aiConverseClient.converse(any())).willAnswer(ConversationMockAiTest::collectingReply);
+        given(aiConverseClient.converse(any(), any())).willAnswer(ConversationMockAiTest::collectingReply);
 
         MvcTestResult result = postConversation(resident, "천장에서 물이 새요");
         assertThat(result).hasStatus(HttpStatus.ACCEPTED);
@@ -157,7 +157,7 @@ class ConversationMockAiTest {
         long conversationId = objectMapper.readTree(result.getResponse().getContentAsString())
             .path("data").path("conversationId").asLong();
         ArgumentCaptor<AiConverseRequest> aiRequestCaptor = ArgumentCaptor.forClass(AiConverseRequest.class);
-        then(aiConverseClient).should().converse(aiRequestCaptor.capture());
+        then(aiConverseClient).should().converse(aiRequestCaptor.capture(), any());
         AiConverseRequest aiRequest = aiRequestCaptor.getValue();
         List<Message> messages = messageRepository.findAllByConversationId(conversationId);
 

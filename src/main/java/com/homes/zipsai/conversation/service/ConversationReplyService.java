@@ -2,6 +2,8 @@ package com.homes.zipsai.conversation.service;
 
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,6 +16,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.homes.zipsai.common.service.SseService;
 import com.homes.zipsai.conversation.ai.AiConverseClient;
 import com.homes.zipsai.conversation.ai.AiConverseResponse;
+import com.homes.zipsai.conversation.dto.response.ConversationReplyDeltaResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyFailedResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyResponse;
 import com.homes.zipsai.global.config.AsyncConfig;
@@ -28,6 +31,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class ConversationReplyService {
 
+    static final String REPLY_DELTA_EVENT = "chat-delta";
     static final String REPLY_EVENT = "chat-done";
     static final String REPLY_FAILED_EVENT = "chat-error";
 
@@ -50,13 +54,13 @@ public class ConversationReplyService {
 
     @Async(AsyncConfig.CHATBOT_REPLY_EXECUTOR)
     public void reply(Long userId, PendingAiReply pendingReply) {
-        sseService.send(userId, replyEvent(pendingReply));
+        sseService.send(userId, replyEvent(userId, pendingReply));
     }
 
-    private SseEmitter.SseEventBuilder replyEvent(PendingAiReply pendingReply) {
+    private SseEmitter.SseEventBuilder replyEvent(Long userId, PendingAiReply pendingReply) {
         Long conversationId = pendingReply.conversation().getId();
         try {
-            return event(REPLY_EVENT, askAiAndSaveReply(pendingReply));
+            return event(REPLY_EVENT, askAiAndSaveReply(userId, pendingReply));
         } catch (ApiException e) {
             return failedEvent(conversationId, e);
         } catch (RuntimeException e) {
@@ -72,16 +76,23 @@ public class ConversationReplyService {
         return event(REPLY_FAILED_EVENT, ConversationReplyFailedResponse.of(conversationId, exception));
     }
 
-    private ConversationReplyResponse askAiAndSaveReply(PendingAiReply pendingReply) {
+    private ConversationReplyResponse askAiAndSaveReply(Long userId, PendingAiReply pendingReply) {
         try {
             String turnId = pendingReply.aiRequest().turnId();
-            AiConverseResponse aiResponse = aiConverseClient.converse(pendingReply.aiRequest());
+            Consumer<String> onReplyDelta = replyDeltaSender(userId, pendingReply.conversation().getId());
+            AiConverseResponse aiResponse = aiConverseClient.converse(pendingReply.aiRequest(), onReplyDelta);
             verifyPairedWithRequest(turnId, aiResponse);
             return conversationService.saveAiReply(pendingReply, aiResponse);
         } catch (RuntimeException e) {
             conversationService.discardUnansweredMessage(pendingReply);
             throw e;
         }
+    }
+
+    private Consumer<String> replyDeltaSender(Long userId, Long conversationId) {
+        AtomicInteger seq = new AtomicInteger();
+        return text -> sseService.send(userId,
+            event(REPLY_DELTA_EVENT, new ConversationReplyDeltaResponse(conversationId, seq.incrementAndGet(), text)));
     }
 
     private void verifyPairedWithRequest(String turnId, AiConverseResponse aiResponse) {

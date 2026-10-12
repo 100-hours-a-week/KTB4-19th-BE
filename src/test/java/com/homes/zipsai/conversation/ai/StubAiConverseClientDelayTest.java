@@ -21,7 +21,7 @@ class StubAiConverseClientDelayTest {
     @Test
     @DisplayName("민원 경로는 민원 지연만큼 기다린 뒤 응답한다")
     void waitsComplaintDelayOnComplaintRoute() {
-        StubAiConverseClient client = new StubAiConverseClient(SHORT_DELAY, 0, LONG_DELAY, 0);
+        StubAiConverseClient client = new StubAiConverseClient(SHORT_DELAY, 0, LONG_DELAY, 0, Duration.ZERO);
 
         Duration elapsed = measure(client, "안방 천장에서 물이 떨어지고 있습니다");
 
@@ -31,7 +31,7 @@ class StubAiConverseClientDelayTest {
     @Test
     @DisplayName("규정 질의 경로는 규정 질의 지연만큼 기다린 뒤 응답한다")
     void waitsKnowledgeDelayOnKnowledgeRoute() {
-        StubAiConverseClient client = new StubAiConverseClient(LONG_DELAY, 0, SHORT_DELAY, 0);
+        StubAiConverseClient client = new StubAiConverseClient(LONG_DELAY, 0, SHORT_DELAY, 0, Duration.ZERO);
 
         Duration elapsed = measure(client, "분리수거는 어디에서 하나요?");
 
@@ -41,7 +41,7 @@ class StubAiConverseClientDelayTest {
     @Test
     @DisplayName("되묻기 경로는 기다리지 않고 바로 응답한다")
     void answersClarifyRouteWithoutDelay() {
-        StubAiConverseClient client = new StubAiConverseClient(LONG_DELAY, 0, LONG_DELAY, 0);
+        StubAiConverseClient client = new StubAiConverseClient(LONG_DELAY, 0, LONG_DELAY, 0, Duration.ZERO);
 
         Duration elapsed = measure(client, "네");
 
@@ -81,7 +81,7 @@ class StubAiConverseClientDelayTest {
         AiConverseRequest request = new AiConverseRequest(1L, "101", "1", "1", "turn-1", "trace-1", null, null,
             new AiConverseRequest.MessagePayload("1", text, List.of()), List.of(), null);
         long started = System.nanoTime();
-        client.converse(request);
+        client.converse(request, delta -> { });
         return Duration.ofNanos(System.nanoTime() - started);
     }
 

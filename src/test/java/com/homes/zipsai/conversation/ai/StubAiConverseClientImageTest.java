@@ -11,14 +11,14 @@ import org.junit.jupiter.api.Test;
 class StubAiConverseClientImageTest {
 
     private final StubAiConverseClient stubAiConverseClient =
-        new StubAiConverseClient(Duration.ZERO, 0, Duration.ZERO, 0);
+        new StubAiConverseClient(Duration.ZERO, 0, Duration.ZERO, 0, Duration.ZERO);
 
     @Test
     @DisplayName("이번 메시지 사진마다 분석 결과를 돌려준다")
     void analyzesEachCurrentImage() {
         AiConverseRequest request = complaintRequest(null, new AiConverseRequest.MessageImage(32L, "https://s3.test/a.jpg"));
 
-        AiConverseResponse response = stubAiConverseClient.converse(request);
+        AiConverseResponse response = stubAiConverseClient.converse(request, delta -> { });
 
         assertThat(response.imageObservations()).extracting(observation -> observation.attachmentId())
             .containsExactly(32L);
@@ -34,7 +34,7 @@ class StubAiConverseClientImageTest {
         AiConverseRequest request =
             complaintRequest(previousDraft, new AiConverseRequest.MessageImage(32L, "https://s3.test/a.jpg"));
 
-        AiConverseResponse response = stubAiConverseClient.converse(request);
+        AiConverseResponse response = stubAiConverseClient.converse(request, delta -> { });
 
         assertThat(response.complaintDraft().attachmentIds()).containsExactly(31L, 32L);
     }
