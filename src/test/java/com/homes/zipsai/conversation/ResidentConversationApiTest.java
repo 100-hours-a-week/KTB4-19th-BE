@@ -11,11 +11,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.task.SyncTaskExecutor;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
+
+import com.homes.zipsai.global.config.AsyncConfig;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -36,6 +41,9 @@ class ResidentConversationApiTest {
     @Autowired
     ConversationTestFixture conversationTestFixture;
 
+    @TestBean(name = AsyncConfig.CHATBOT_REPLY_EXECUTOR)
+    TaskExecutor chatbotReplyExecutor;
+
     private RequestPostProcessor resident;
 
     @BeforeEach
@@ -47,7 +55,7 @@ class ResidentConversationApiTest {
     @DisplayName("대화로 민원 정보를 모아 한 번만 접수하고 접수 뒤에는 대화가 닫힌다")
     void createsComplaintOnceFromConversation() throws Exception {
         MvcTestResult started = startConversation(resident, "천장에서 물이 새요");
-        assertThat(started).hasStatus(HttpStatus.CREATED)
+        assertThat(started).hasStatus(HttpStatus.ACCEPTED)
             .bodyJson().doesNotHavePath("$.data.assistantMessage");
         long conversationId = conversationId(started);
 
@@ -58,13 +66,18 @@ class ResidentConversationApiTest {
                                        {"senderType": "ASSISTANT", "messageType": "TEXT"}]}}
                 """);
 
-        assertThat(sendMessage(resident, conversationId, "안방 천장 가운데요")).hasStatus(HttpStatus.CREATED)
+        assertThat(sendMessage(resident, conversationId, "안방 천장 가운데요")).hasStatus(HttpStatus.ACCEPTED)
+            .bodyJson().doesNotHavePath("$.data.assistantMessage")
+            .isLenientlyEqualTo("""
+                {"data": {"conversationId": %d, "senderType": "RESIDENT", "content": "안방 천장 가운데요"}}
+                """.formatted(conversationId));
+        assertThat(getMessages(resident, conversationId)).hasStatusOk()
             .bodyJson().isLenientlyEqualTo("""
-                {"data": {"content": "안방 천장 가운데요",
-                          "assistantMessage": {"messageType": "SUMMARY_CARD",
-                                               "summaryCard": {"location": "안방 천장 가운데요",
-                                                               "symptom": "천장에서 물이 새요",
-                                                               "occurredTime": null}}}}
+                {"data": {"messages": [{}, {}, {"content": "안방 천장 가운데요"},
+                                       {"messageType": "SUMMARY_CARD",
+                                        "summaryCard": {"location": "안방 천장 가운데요",
+                                                        "symptom": "천장에서 물이 새요",
+                                                        "occurredTime": null}}]}}
                 """);
 
         assertThat(sendMessage(resident, conversationId, "네 접수해주세요")).hasStatus(HttpStatus.CONFLICT)
@@ -159,6 +172,10 @@ class ResidentConversationApiTest {
             .bodyJson().isLenientlyEqualTo("""
                 {"error": {"code": "INVALID_QUERY_PARAMETER", "details": {"violations": [{"field": "cursor"}]}}}
                 """);
+    }
+
+    static TaskExecutor chatbotReplyExecutor() {
+        return new SyncTaskExecutor();
     }
 
     private MvcTestResult startConversation(RequestPostProcessor authentication, String content) {

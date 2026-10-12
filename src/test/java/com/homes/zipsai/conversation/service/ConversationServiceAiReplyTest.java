@@ -33,8 +33,8 @@ import com.homes.zipsai.conversation.domain.Message;
 import com.homes.zipsai.conversation.domain.MessageFileGroup;
 import com.homes.zipsai.conversation.domain.MessageType;
 import com.homes.zipsai.conversation.domain.SenderType;
+import com.homes.zipsai.conversation.dto.response.ConversationReplyResponse;
 import com.homes.zipsai.conversation.dto.response.MessageResponse;
-import com.homes.zipsai.conversation.dto.response.MessageSendResponse;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
@@ -107,11 +107,11 @@ class ConversationServiceAiReplyTest {
     void savesTextReplyWhenKnowledgeHasCitations() {
         givenReplySaved();
 
-        MessageSendResponse sent =
+        ConversationReplyResponse reply =
             conversationService.saveAiReply(pendingAiReply(true, null), knowledge("화요일과 금요일입니다.", CITATIONS));
 
-        assertThat(sent.assistantMessage().messageType()).isEqualTo(MessageType.TEXT);
-        assertThat(sent.assistantMessage().summaryCard()).isNull();
+        assertThat(reply.assistantMessage().messageType()).isEqualTo(MessageType.TEXT);
+        assertThat(reply.assistantMessage().summaryCard()).isNull();
     }
 
     @Test
@@ -119,11 +119,11 @@ class ConversationServiceAiReplyTest {
     void savesSummaryCardWhenKnowledgeHasNoCitation() {
         givenReplySaved();
 
-        MessageSendResponse sent =
+        ConversationReplyResponse reply =
             conversationService.saveAiReply(pendingAiReply(true, null), knowledge("답변드리기 어렵습니다.", List.of()));
 
-        assertThat(sent.assistantMessage().messageType()).isEqualTo(MessageType.SUMMARY_CARD);
-        assertThat(sent.assistantMessage().summaryCard()).isNotNull();
+        assertThat(reply.assistantMessage().messageType()).isEqualTo(MessageType.SUMMARY_CARD);
+        assertThat(reply.assistantMessage().summaryCard()).isNotNull();
     }
 
     @Test
@@ -131,10 +131,10 @@ class ConversationServiceAiReplyTest {
     void returnsClosingTimeFiveMinutesAfterReply() {
         givenReplySaved();
 
-        MessageSendResponse sent =
+        ConversationReplyResponse reply =
             conversationService.saveAiReply(pendingAiReply(true, null), knowledge("화요일과 금요일입니다.", CITATIONS));
 
-        assertThat(sent.closesAt().toLocalDateTime()).isEqualTo(REPLIED_AT.plusMinutes(5));
+        assertThat(reply.closesAt().toLocalDateTime()).isEqualTo(REPLIED_AT.plusMinutes(5));
     }
 
     @Test
@@ -142,10 +142,10 @@ class ConversationServiceAiReplyTest {
     void returnsNoClosingTimeForSummaryCard() {
         givenReplySaved();
 
-        MessageSendResponse sent =
+        ConversationReplyResponse reply =
             conversationService.saveAiReply(pendingAiReply(true, null), knowledge("답변드리기 어렵습니다.", List.of()));
 
-        assertThat(sent.closesAt()).isNull();
+        assertThat(reply.closesAt()).isNull();
     }
 
     @Test

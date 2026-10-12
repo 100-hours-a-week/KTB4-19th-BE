@@ -19,9 +19,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.task.SyncTaskExecutor;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
@@ -36,6 +39,7 @@ import com.homes.zipsai.conversation.ai.AiRoute;
 import com.homes.zipsai.conversation.domain.Message;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
+import com.homes.zipsai.global.config.AsyncConfig;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -68,6 +72,13 @@ class ConversationMockAiTest {
     @MockitoBean
     S3StorageService s3StorageService;
 
+    @TestBean(name = AsyncConfig.CHATBOT_REPLY_EXECUTOR)
+    TaskExecutor chatbotReplyExecutor;
+
+    static TaskExecutor chatbotReplyExecutor() {
+        return new SyncTaskExecutor();
+    }
+
     @BeforeEach
     void setUp() {
         given(s3StorageService.prepareDownload(anyString(), any()))
@@ -86,7 +97,7 @@ class ConversationMockAiTest {
 
         long conversationId = startConversation(resident, "천장에서 물이 새요", firstImage);
 
-        assertThat(sendMessage(resident, conversationId, "안방이요", secondImage)).hasStatus(HttpStatus.CREATED)
+        assertThat(sendMessage(resident, conversationId, "안방이요", secondImage)).hasStatus(HttpStatus.ACCEPTED)
             .bodyJson().extractingPath("$.data.attachments[0].attachmentId").convertTo(Long.class)
             .isEqualTo(secondImage);
 
@@ -123,8 +134,7 @@ class ConversationMockAiTest {
             .willThrow(new IllegalStateException("AI timeout"))
             .willAnswer(ConversationMockAiTest::collectingReply);
 
-        assertThat(postConversation(resident, "천장에서 물이 새요", image))
-            .hasStatus(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(postConversation(resident, "천장에서 물이 새요", image)).hasStatus(HttpStatus.ACCEPTED);
         assertThat(conversationRepository.count()).isEqualTo(before);
 
         long conversationId = startConversation(resident, "천장에서 물이 새요", image);
@@ -142,7 +152,7 @@ class ConversationMockAiTest {
         given(aiConverseClient.converse(any())).willAnswer(ConversationMockAiTest::collectingReply);
 
         MvcTestResult result = postConversation(resident, "천장에서 물이 새요");
-        assertThat(result).hasStatus(HttpStatus.CREATED);
+        assertThat(result).hasStatus(HttpStatus.ACCEPTED);
         String traceId = result.getResponse().getHeader("X-Request-Id");
         long conversationId = objectMapper.readTree(result.getResponse().getContentAsString())
             .path("data").path("conversationId").asLong();
@@ -166,7 +176,7 @@ class ConversationMockAiTest {
     private long startConversation(RequestPostProcessor resident, String content, Long... attachmentIds)
         throws Exception {
         MvcTestResult created = postConversation(resident, content, attachmentIds);
-        assertThat(created).hasStatus(HttpStatus.CREATED);
+        assertThat(created).hasStatus(HttpStatus.ACCEPTED);
         return objectMapper.readTree(created.getResponse().getContentAsString())
             .path("data").path("conversationId").asLong();
     }

@@ -40,8 +40,8 @@ import com.homes.zipsai.conversation.dto.response.AttachmentResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationListItemResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationListResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationMessagesResponse;
+import com.homes.zipsai.conversation.dto.response.ConversationReplyResponse;
 import com.homes.zipsai.conversation.dto.response.MessageResponse;
-import com.homes.zipsai.conversation.dto.response.MessageSendResponse;
 import com.homes.zipsai.conversation.dto.response.SummaryCardResponse;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
@@ -180,7 +180,7 @@ public class ConversationService {
     }
 
     @Transactional
-    public MessageSendResponse saveAiReply(PendingAiReply pendingReply, AiConverseResponse aiResponse) {
+    public ConversationReplyResponse saveAiReply(PendingAiReply pendingReply, AiConverseResponse aiResponse) {
         Conversation conversation = conversationRepository.getReferenceById(pendingReply.conversation().getId());
         conversation.applyAiResponse(aiResponse);
         saveImageAnalysis(pendingReply.residentMessage().messageId(), aiResponse.imageObservations());
@@ -193,8 +193,7 @@ public class ConversationService {
         Message assistantMessage = saveMessage(conversation, reply, SenderType.ASSISTANT, messageType, turnId);
         MessageResponse assistantReply =
             MessageResponse.of(assistantMessage, List.of(), summaryCardOf(conversation, List.of(assistantMessage)));
-        return MessageSendResponse.of(conversation.getId(), pendingReply.residentMessage(), assistantReply,
-            conversation.closesAt());
+        return new ConversationReplyResponse(conversation.getId(), assistantReply, conversation.closesAt());
     }
 
     @Transactional
