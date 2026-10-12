@@ -12,11 +12,14 @@ import jakarta.annotation.PreDestroy;
 
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter.DataWithMediaType;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.homes.zipsai.common.config.SseProperties;
 import com.homes.zipsai.common.connection.SseConnection;
+import com.homes.zipsai.common.event.UserAccessRevokedEvent;
 import com.homes.zipsai.global.exception.ApiException;
 import com.homes.zipsai.user.service.UserService;
 
@@ -58,14 +61,17 @@ public class SseService {
         }
         Set<DataWithMediaType> data = event.build();
         for (SseConnection connection : current) {
-            try {
-                if (isActive(connection)) {
-                    send(connection, data);
-                }
-            } catch (RuntimeException ignored) {
-                complete(connection);
-            }
+            send(connection, data);
         }
+    }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void disconnect(UserAccessRevokedEvent event) {
+        Set<SseConnection> current = connections.get(event.userId());
+        if (current == null) {
+            return;
+        }
+        current.forEach(this::complete);
     }
 
     private boolean isActive(SseConnection connection) {
