@@ -5,6 +5,20 @@ import java.util.Map;
 
 public class InvalidQueryParameterException extends BadRequestException {
 
+    public enum Reason {
+        REQUIRED_VALUE("필수 입력값입니다."),
+        NON_FINITE_NUMBER("유한한 숫자여야 합니다."),
+        LATITUDE_OUT_OF_RANGE("위도는 -90 이상 90 이하여야 합니다."),
+        LONGITUDE_OUT_OF_RANGE("경도는 -180 이상 180 이하여야 합니다."),
+        INVALID_BOUNDS("최댓값은 최솟값보다 커야 합니다.");
+
+        private final String message;
+
+        Reason(String message) {
+            this.message = message;
+        }
+    }
+
     public static InvalidQueryParameterException typeMismatch(String field, Class<?> requiredType) {
         String reason;
         if (requiredType == int.class
@@ -22,6 +36,10 @@ public class InvalidQueryParameterException extends BadRequestException {
             reason = "요청값 형식이 올바르지 않습니다.";
         }
         return new InvalidQueryParameterException(field, reason);
+    }
+
+    public InvalidQueryParameterException(String field, Reason reason) {
+        this(field, reason.message);
     }
 
     private InvalidQueryParameterException(String field, String reason) {
