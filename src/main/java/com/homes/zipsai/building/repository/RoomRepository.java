@@ -11,8 +11,23 @@ import org.springframework.data.repository.query.Param;
 
 import com.homes.zipsai.building.domain.Room;
 import com.homes.zipsai.building.domain.RoomStatus;
+import com.homes.zipsai.building.dto.BuildingRoomCounts;
 
 public interface RoomRepository extends JpaRepository<Room, Long> {
+
+    @Query("""
+            select new com.homes.zipsai.building.dto.BuildingRoomCounts(
+                r.building.id, count(r.id),
+                count(case when r.status = com.homes.zipsai.building.domain.RoomStatus.LIVING
+                    then 1 end),
+                count(case when r.status in (com.homes.zipsai.building.domain.RoomStatus.EMPTY,
+                    com.homes.zipsai.building.domain.RoomStatus.INVITED) then 1 end)
+            )
+            from Room r
+            where r.building.id in :buildingIds and r.deletedAt is null and r.building.deletedAt is null
+            group by r.building.id
+            """)
+    List<BuildingRoomCounts> summarizeByBuildingIds(@Param("buildingIds") Collection<Long> buildingIds);
 
     @EntityGraph(attributePaths = "resident")
     List<Room> findAllByBuilding_IdAndDeletedAtIsNull(Long buildingId);
