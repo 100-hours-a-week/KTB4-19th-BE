@@ -39,6 +39,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.homes.zipsai.common.config.SseProperties;
+import com.homes.zipsai.common.event.UserAccessRevokedEvent;
 import com.homes.zipsai.global.config.SchedulingConfig;
 import com.homes.zipsai.global.exception.ForbiddenException;
 import com.homes.zipsai.user.service.UserService;
@@ -252,8 +253,8 @@ class SseServiceTest {
     }
 
     @Test
-    @DisplayName("자격 조회 도중 SSE timeout이 지나도 종료 시점 후 이벤트을 보내지 않는다")
-    void rechecksTimeoutImmediatelyBeforeSending() {
+    @DisplayName("heartbeat 자격 조회 도중 SSE timeout이 지나도 종료 시점 후 heartbeat를 보내지 않는다")
+    void rechecksTimeoutImmediatelyBeforeSendingHeartbeat() {
         AtomicReference<Instant> now = new AtomicReference<>(Instant.now());
         try (MockedStatic<Instant> instants = mockStatic(Instant.class, CALLS_REAL_METHODS)) {
             instants.when(Instant::now).thenAnswer(invocation -> now.get());
@@ -262,10 +263,51 @@ class SseServiceTest {
                 now.set(now.get().plus(Duration.ofMinutes(5)));
                 return null;
             }).when(users).requireEligibleUser(1L);
-            service.send(1, SseEmitter.event().name("test").id("11"));
-            assertThat(attempts.get(emitter)).isNull();
+
+            service.sendHeartbeat();
+
+            assertThat(heartbeats.get(emitter)).isNull();
             verify(emitter).complete();
         }
+    }
+
+    @Test
+    @DisplayName("접근이 회수된 사용자의 연결은 모두 종료하고 다른 사용자의 연결은 유지한다")
+    void closesAllConnectionsOfRevokedUser() {
+        SseEmitter firstTab = connect(1);
+        SseEmitter secondTab = connect(1);
+        SseEmitter otherUser = connect(2);
+
+        service.disconnect(new UserAccessRevokedEvent(1));
+        service.send(1, SseEmitter.event().name("test").id("11"));
+        service.send(2, SseEmitter.event().name("test").id("12"));
+
+        verify(firstTab).complete();
+        verify(secondTab).complete();
+        verify(otherUser, never()).complete();
+        assertThat(attempts).containsEntry(otherUser, 1).doesNotContainKeys(firstTab, secondTab);
+    }
+
+    @Test
+    @DisplayName("연결이 없는 사용자의 접근 회수는 무시한다")
+    void ignoresRevokedUserWithoutConnection() {
+        SseEmitter otherUser = connect(2);
+
+        service.disconnect(new UserAccessRevokedEvent(1));
+
+        verify(otherUser, never()).complete();
+    }
+
+    @Test
+    @DisplayName("이벤트를 보낼 때는 사용자 자격을 다시 조회하지 않는다")
+    void sendsEventWithoutCheckingEligibilityAgain() {
+        SseEmitter emitter = connect(1);
+
+        service.send(1, SseEmitter.event().name("test").id("11"));
+        service.send(1, SseEmitter.event().name("test").id("12"));
+
+        verify(users, times(1)).requireEligibleUser(1L);
+        assertThat(attempts).containsEntry(emitter, 2);
     }
 
     private SseEmitter connect(long userId) {

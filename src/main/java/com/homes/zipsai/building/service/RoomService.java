@@ -3,6 +3,7 @@ package com.homes.zipsai.building.service;
 import java.util.HashSet;
 import java.util.List;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,11 +14,13 @@ import com.homes.zipsai.building.dto.RoomBulkCreateResponse;
 import com.homes.zipsai.building.dto.RoomResponse;
 import com.homes.zipsai.building.repository.BuildingRepository;
 import com.homes.zipsai.building.repository.RoomRepository;
+import com.homes.zipsai.common.event.UserAccessRevokedEvent;
 import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.global.exception.ForbiddenException;
 import com.homes.zipsai.global.exception.NotFoundException;
 import com.homes.zipsai.global.exception.ValidationFailedException;
 import com.homes.zipsai.global.exception.ValidationFailedException.Reason;
+import com.homes.zipsai.user.domain.User;
 
 @Service
 public class RoomService {
@@ -25,10 +28,13 @@ public class RoomService {
 
     private final BuildingRepository buildingRepository;
     private final RoomRepository roomRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
-    public RoomService(BuildingRepository buildingRepository, RoomRepository roomRepository) {
+    public RoomService(BuildingRepository buildingRepository, RoomRepository roomRepository,
+                       ApplicationEventPublisher eventPublisher) {
         this.buildingRepository = buildingRepository;
         this.roomRepository = roomRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -79,7 +85,9 @@ public class RoomService {
         if (!room.getBuilding().getManager().getId().equals(managerId)) {
             throw new ForbiddenException();
         }
+        User resident = room.getResident();
         room.moveOutResident();
+        eventPublisher.publishEvent(new UserAccessRevokedEvent(resident.getId()));
     }
 
     private void validateId(Long roomId) {

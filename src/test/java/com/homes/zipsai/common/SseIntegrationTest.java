@@ -63,6 +63,7 @@ import com.homes.zipsai.common.domain.ComplaintNotificationContent;
 import com.homes.zipsai.common.domain.Notification;
 import com.homes.zipsai.common.domain.UserNotification;
 import com.homes.zipsai.common.event.ComplaintNotificationEvent;
+import com.homes.zipsai.common.event.UserAccessRevokedEvent;
 import com.homes.zipsai.common.repository.UserNotificationRepository;
 import com.homes.zipsai.common.service.ComplaintNotificationListener;
 import com.homes.zipsai.common.service.ComplaintNotificationStorageService;
@@ -460,6 +461,34 @@ class SseIntegrationTest {
             .setParameter("id", resident.getId()).getSingleResult().moveOutResident());
         CompletableFuture<String> body = CompletableFuture.supplyAsync(() -> readAll(response.body()));
         assertThat(body.get(1, TimeUnit.SECONDS)).doesNotContain("event:notification", "FORBIDDEN");
+    }
+
+    @Test
+    @DisplayName("접근 회수 이벤트가 커밋되면 heartbeat를 기다리지 않고 연결을 종료한다")
+    void closesStreamRightAfterAccessRevokedEventCommits() throws Exception {
+        HttpResponse<InputStream> response = connect(resident, Instant.now().plusSeconds(60), null);
+        assertThat(response.statusCode()).isEqualTo(200);
+        CompletableFuture<String> body = CompletableFuture.supplyAsync(() -> readAll(response.body()));
+
+        transactions.executeWithoutResult(transaction ->
+            events.publishEvent(new UserAccessRevokedEvent(resident.getId())));
+
+        assertThat(body.get(1, TimeUnit.SECONDS)).doesNotContain("event:notification", "FORBIDDEN");
+    }
+
+    @Test
+    @DisplayName("접근 회수 이벤트가 롤백되면 연결을 유지한다")
+    void keepsStreamWhenAccessRevokedEventRollsBack() throws Exception {
+        HttpResponse<InputStream> response = connect(resident, Instant.now().plusSeconds(60), null);
+        assertThat(response.statusCode()).isEqualTo(200);
+        CompletableFuture<String> body = CompletableFuture.supplyAsync(() -> readAll(response.body()));
+
+        transactions.executeWithoutResult(transaction -> {
+            events.publishEvent(new UserAccessRevokedEvent(resident.getId()));
+            transaction.setRollbackOnly();
+        });
+
+        assertThatThrownBy(() -> body.get(1, TimeUnit.SECONDS)).isInstanceOf(TimeoutException.class);
     }
 
     @Test
