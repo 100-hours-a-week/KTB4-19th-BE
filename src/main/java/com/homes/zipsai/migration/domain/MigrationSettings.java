@@ -39,6 +39,10 @@ public record MigrationSettings(
         return mode.opposite();
     }
 
+    public int v2ReadPercentAt(OffsetDateTime now) {
+        return modeAt(now) == MigrationMode.V2_PRIMARY ? MAX_READ_PERCENT : v2ReadPercent;
+    }
+
     public boolean isWorkerRunning() {
         return workerMode == WorkerMode.RUNNING;
     }
