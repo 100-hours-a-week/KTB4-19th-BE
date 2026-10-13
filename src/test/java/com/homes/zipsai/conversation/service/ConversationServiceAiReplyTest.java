@@ -38,6 +38,7 @@ import com.homes.zipsai.conversation.dto.response.MessageResponse;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
+import com.homes.zipsai.migration.service.OutboxRecorder;
 
 @ExtendWith(MockitoExtension.class)
 class ConversationServiceAiReplyTest {
@@ -67,6 +68,9 @@ class ConversationServiceAiReplyTest {
     @Mock
     S3StorageService s3StorageService;
 
+    @Mock
+    OutboxRecorder outboxRecorder;
+
     ConversationService conversationService;
     Conversation conversation;
 
@@ -74,7 +78,7 @@ class ConversationServiceAiReplyTest {
     void setUp() {
         conversationService = new ConversationService(conversationRepository, messageRepository,
             messageFileGroupRepository, fileRepository, residentRoomService, s3StorageService,
-            new StorageProperties(null, null, null, 300, 0));
+            new StorageProperties(null, null, null, 300, 0), outboxRecorder);
         conversation = Conversation.builder()
             .type(ConversationType.INQUIRY)
             .title("분리수거 요일이 언제인가요?")

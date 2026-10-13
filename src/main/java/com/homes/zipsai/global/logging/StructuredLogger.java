@@ -16,6 +16,7 @@ import tools.jackson.databind.ObjectMapper;
 public class StructuredLogger {
     public static final String ERROR_CODE = "errorCode";
     public static final String STATUS_CODE = "statusCode";
+    public static final String NORMALIZED_ROUTE = "normalizedRoute";
     private static final Logger LOGGER = LoggerFactory.getLogger("structured-events");
     private final ObjectMapper objectMapper;
 
@@ -47,6 +48,7 @@ public class StructuredLogger {
                             long totalMs, String errorCode) {
         Map<String, Object> fields = new LinkedHashMap<>();
         int finalStatusCode = statusCode >= 400 ? statusCode : numberOrDefault(MDC.get(STATUS_CODE), statusCode);
+        fields.put("normalized_route", MDC.get(NORMALIZED_ROUTE));
         fields.put("method", method);
         fields.put("status_code", finalStatusCode);
         fields.put("outcome", finalStatusCode >= 400 ? "fail" : "ok");

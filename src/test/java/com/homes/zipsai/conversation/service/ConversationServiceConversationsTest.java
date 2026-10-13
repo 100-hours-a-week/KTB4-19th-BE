@@ -26,6 +26,7 @@ import com.homes.zipsai.conversation.dto.response.ConversationListResponse;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
+import com.homes.zipsai.migration.service.OutboxRecorder;
 
 @ExtendWith(MockitoExtension.class)
 class ConversationServiceConversationsTest {
@@ -51,13 +52,16 @@ class ConversationServiceConversationsTest {
     @Mock
     S3StorageService s3StorageService;
 
+    @Mock
+    OutboxRecorder outboxRecorder;
+
     ConversationService conversationService;
 
     @BeforeEach
     void setUp() {
         conversationService = new ConversationService(conversationRepository, messageRepository,
             messageFileGroupRepository, fileRepository, residentRoomService, s3StorageService,
-            new StorageProperties(null, null, null, 300, 0));
+            new StorageProperties(null, null, null, 300, 0), outboxRecorder);
     }
 
     @Test
