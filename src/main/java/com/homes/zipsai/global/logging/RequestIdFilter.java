@@ -13,6 +13,7 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.servlet.HandlerMapping;
 
 import lombok.RequiredArgsConstructor;
 
@@ -21,6 +22,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class RequestIdFilter extends OncePerRequestFilter {
     private static final String TRACE_ID = "traceId";
+    private static final String UNMATCHED = "UNMATCHED";
     private final StructuredLogger structuredLogger;
 
     @Override
@@ -46,6 +48,7 @@ public class RequestIdFilter extends OncePerRequestFilter {
             long totalMs = (System.nanoTime() - started) / 1_000_000;
             try {
                 MDC.put("dbMs", Long.toString(databaseMs));
+                MDC.put(StructuredLogger.NORMALIZED_ROUTE, normalizedRoute(request));
                 safelyLog(() -> structuredLogger.stageDone(traceId, request.getRequestURI(), "mysql", databaseMs,
                     database.outcome(), null));
                 safelyLog(() -> structuredLogger.requestDone(traceId, request.getRequestURI(), request.getMethod(),
@@ -59,8 +62,14 @@ public class RequestIdFilter extends OncePerRequestFilter {
                 MDC.remove("aiApiMs");
                 MDC.remove(StructuredLogger.STATUS_CODE);
                 MDC.remove(StructuredLogger.ERROR_CODE);
+                MDC.remove(StructuredLogger.NORMALIZED_ROUTE);
             }
         }
+    }
+
+    private String normalizedRoute(HttpServletRequest request) {
+        Object pattern = request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
+        return pattern == null ? UNMATCHED : pattern.toString();
     }
 
     private void safelyLog(Runnable loggingCall) {
