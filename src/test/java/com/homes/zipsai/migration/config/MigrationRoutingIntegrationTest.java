@@ -1,6 +1,11 @@
 package com.homes.zipsai.migration.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.after;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 
 import java.util.List;
 import java.util.Optional;
@@ -12,14 +17,19 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
+import org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
+import org.springframework.context.annotation.EnableAspectJAutoProxy;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.homes.zipsai.migration.aspect.ShadowReadAspect;
 import com.homes.zipsai.migration.domain.MigrationMode;
 import com.homes.zipsai.migration.domain.MigrationSettings;
 import com.homes.zipsai.migration.domain.WorkerMode;
@@ -30,6 +40,7 @@ import com.homes.zipsai.migration.service.MigrationSettingsProvider;
 import com.homes.zipsai.migration.service.MigrationTestUserService;
 import com.homes.zipsai.migration.service.OutboxEntityTables;
 import com.homes.zipsai.migration.service.OutboxRecorder;
+import com.homes.zipsai.migration.service.ShadowReadComparator;
 import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.repository.UserRepository;
 
@@ -48,9 +59,11 @@ import com.homes.zipsai.user.repository.UserRepository;
     "app.migration.v2-datasource.password=test"
 })
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+@EnableAspectJAutoProxy
+@ImportAutoConfiguration(JacksonAutoConfiguration.class)
 @Import({MigrationConfiguration.class, MigrationRoutingConfiguration.class, MigrationRouting.class,
     MigrationSettingsProvider.class, OutboxEntityListener.class, OutboxRecorder.class, OutboxEntityTables.class,
-    MigrationTestUserService.class})
+    ShadowReadAspect.class, ShadowReadComparator.class, MigrationTestUserService.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class MigrationRoutingIntegrationTest {
 
@@ -68,6 +81,9 @@ class MigrationRoutingIntegrationTest {
     @Autowired
     @Qualifier("migrationDataSources")
     MigrationRoutingConfiguration.MigrationDataSources migrationDataSources;
+
+    @MockitoSpyBean
+    ShadowReadComparator shadowReadComparator;
 
     @MockitoBean(name = "migrationSettingsPoller")
     MigrationSettingsPoller migrationSettingsPoller;
@@ -147,6 +163,29 @@ class MigrationRoutingIntegrationTest {
         Optional<String> userName = migrationTestUserService.findUserName(EMAIL);
 
         assertThat(userName).contains("V1 이름");
+    }
+
+    @Test
+    @DisplayName("Shadow Read가 켜져 있으면 V1 결과로 응답하고 V2 결과와 비교한다")
+    void comparesWithV2WhenShadowReadIsEnabled() {
+        saveUser(v1, "V1 이름");
+        saveUser(v2, "V2 이름");
+        givenSettings(MigrationMode.V1_PRIMARY, 0, true);
+
+        Optional<String> userName = migrationTestUserService.findUserName(EMAIL);
+
+        assertThat(userName).contains("V1 이름");
+        then(shadowReadComparator).should(timeout(3000)).isSame(Optional.of("V1 이름"), Optional.of("V2 이름"));
+    }
+
+    @Test
+    @DisplayName("Shadow Read가 꺼져 있으면 V2와 비교하지 않는다")
+    void skipsComparisonWhenShadowReadIsDisabled() {
+        saveUser(v1, "V1 이름");
+
+        migrationTestUserService.findUserName(EMAIL);
+
+        then(shadowReadComparator).should(after(500).never()).isSame(any(), any());
     }
 
     private void givenSettings(MigrationMode mode, int v2ReadPercent, boolean shadowReadEnabled) {

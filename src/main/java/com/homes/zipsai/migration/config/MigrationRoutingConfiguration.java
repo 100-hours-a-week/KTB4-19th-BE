@@ -12,7 +12,11 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.DependsOn;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.env.Environment;
+import org.springframework.core.task.AsyncTaskExecutor;
+import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.jdbc.datasource.LazyConnectionDataSourceProxy;
+import org.springframework.scheduling.TaskScheduler;
+import org.springframework.scheduling.concurrent.SimpleAsyncTaskScheduler;
 
 import com.homes.zipsai.migration.service.MigrationRouting;
 import com.zaxxer.hikari.HikariDataSource;
@@ -22,6 +26,7 @@ import com.zaxxer.hikari.HikariDataSource;
 public class MigrationRoutingConfiguration {
 
     private static final String HIKARI_PROPERTIES = "spring.datasource.hikari";
+    private static final int SHADOW_READ_CONCURRENCY = 4;
 
     @Bean(defaultCandidate = false)
     MigrationDataSources migrationDataSources(DataSourceProperties dataSourceProperties,
@@ -55,6 +60,21 @@ public class MigrationRoutingConfiguration {
         dataSource.setReadOnlyDataSource(new MigrationRoutingDataSource(
             migrationDataSources.v1(), migrationDataSources.v2(), migrationRouting::determineReadDatabase));
         return dataSource;
+    }
+
+    @Bean(defaultCandidate = false)
+    AsyncTaskExecutor shadowReadExecutor() {
+        SimpleAsyncTaskExecutor executor = new SimpleAsyncTaskExecutor("shadow-read-");
+        executor.setConcurrencyLimit(SHADOW_READ_CONCURRENCY);
+        executor.setRejectTasksWhenLimitReached(true);
+        return executor;
+    }
+
+    @Bean(defaultCandidate = false)
+    TaskScheduler shadowReadScheduler() {
+        SimpleAsyncTaskScheduler scheduler = new SimpleAsyncTaskScheduler();
+        scheduler.setThreadNamePrefix("shadow-read-recompare-");
+        return scheduler;
     }
 
     public record MigrationDataSources(HikariDataSource v1, HikariDataSource v2) implements AutoCloseable {
