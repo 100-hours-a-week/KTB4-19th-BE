@@ -42,10 +42,12 @@ public class NotificationController {
 
     @Operation(summary = "SSE 연결")
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter subscribe(
+    public ResponseEntity<SseEmitter> subscribe(
             @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal
     ) {
-        return sseService.subscribe(principal.userId());
+        return ResponseEntity.ok()
+            .header("X-Accel-Buffering", "no")
+            .body(sseService.subscribe(principal.userId()));
     }
 
     @Operation(summary = "알림 목록 조회")
