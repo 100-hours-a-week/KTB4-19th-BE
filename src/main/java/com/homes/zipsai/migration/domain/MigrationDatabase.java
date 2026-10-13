@@ -10,4 +10,8 @@ public enum MigrationDatabase {
     V2(OutboxDirection.V2_TO_V1);
 
     private final OutboxDirection outboxDirection;
+
+    public MigrationDatabase other() {
+        return this == V1 ? V2 : V1;
+    }
 }

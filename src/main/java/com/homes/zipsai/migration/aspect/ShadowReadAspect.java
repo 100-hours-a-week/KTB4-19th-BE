@@ -24,7 +24,6 @@ import com.homes.zipsai.migration.domain.ShadowReadResult;
 import com.homes.zipsai.migration.service.MigrationEventLogger;
 import com.homes.zipsai.migration.service.MigrationMetrics;
 import com.homes.zipsai.migration.service.MigrationRouting;
-import com.homes.zipsai.migration.service.MigrationSettingsProvider;
 import com.homes.zipsai.migration.service.ShadowReadComparator;
 
 @Aspect
@@ -37,20 +36,17 @@ public class ShadowReadAspect {
     private static final Duration RECOMPARE_DELAY = Duration.ofSeconds(5);
 
     private final MigrationRouting migrationRouting;
-    private final MigrationSettingsProvider migrationSettingsProvider;
     private final ShadowReadComparator shadowReadComparator;
     private final AsyncTaskExecutor shadowReadExecutor;
     private final TaskScheduler shadowReadScheduler;
     private final MigrationMetrics migrationMetrics;
     private final MigrationEventLogger migrationEventLogger;
 
-    public ShadowReadAspect(MigrationRouting migrationRouting, MigrationSettingsProvider migrationSettingsProvider,
-                            ShadowReadComparator shadowReadComparator,
+    public ShadowReadAspect(MigrationRouting migrationRouting, ShadowReadComparator shadowReadComparator,
                             @Qualifier("shadowReadExecutor") AsyncTaskExecutor shadowReadExecutor,
                             @Qualifier("shadowReadScheduler") TaskScheduler shadowReadScheduler,
                             MigrationMetrics migrationMetrics, MigrationEventLogger migrationEventLogger) {
         this.migrationRouting = migrationRouting;
-        this.migrationSettingsProvider = migrationSettingsProvider;
         this.shadowReadComparator = shadowReadComparator;
         this.shadowReadExecutor = shadowReadExecutor;
         this.shadowReadScheduler = shadowReadScheduler;
@@ -65,27 +61,28 @@ public class ShadowReadAspect {
         }
         MigrationDatabase database = migrationRouting.chooseReadDatabase();
         Object result = migrationRouting.useReadDatabase(database, joinPoint::proceed);
-        if (database == MigrationDatabase.V1 && migrationSettingsProvider.getSettings().shadowReadEnabled()) {
-            compareV2Result(joinPoint, result);
+        if (migrationRouting.shouldShadowRead()) {
+            compareWithOtherDatabase(joinPoint, database, result);
         }
         return result;
     }
 
-    private void compareV2Result(ProceedingJoinPoint joinPoint, Object v1Result) {
+    private void compareWithOtherDatabase(ProceedingJoinPoint joinPoint, MigrationDatabase database, Object result) {
         String method = joinPoint.getSignature().toShortString();
         try {
             shadowReadExecutor.execute(() -> {
                 try {
-                    Object v2Result = migrationRouting.useReadDatabase(MigrationDatabase.V2, joinPoint::proceed);
-                    if (shadowReadComparator.isSame(v1Result, v2Result)) {
+                    Object otherResult = migrationRouting.useReadDatabase(database.other(), joinPoint::proceed);
+                    if (shadowReadComparator.isSame(result, otherResult)) {
                         migrationMetrics.recordShadowRead(ShadowReadResult.MATCH);
                         return;
                     }
-                    shadowReadScheduler.schedule(() -> recompare(joinPoint, method),
+                    migrationMetrics.recordShadowRead(ShadowReadResult.MISMATCH_INITIAL);
+                    shadowReadScheduler.schedule(() -> recompare(joinPoint, method, database),
                         Instant.now().plus(RECOMPARE_DELAY));
                 } catch (Throwable throwable) {
                     migrationMetrics.recordShadowRead(ShadowReadResult.ERROR);
-                    LOGGER.warn("Shadow Read V2 조회에 실패했습니다. method={}", method, throwable);
+                    LOGGER.warn("Shadow Read 비교 조회에 실패했습니다. method={}", method, throwable);
                 }
             });
         } catch (TaskRejectedException exception) {
@@ -93,19 +90,19 @@ public class ShadowReadAspect {
         }
     }
 
-    private void recompare(ProceedingJoinPoint joinPoint, String method) {
+    private void recompare(ProceedingJoinPoint joinPoint, String method, MigrationDatabase database) {
         try {
             shadowReadExecutor.execute(() -> {
                 try {
-                    Object v1Result = migrationRouting.useReadDatabase(MigrationDatabase.V1, joinPoint::proceed);
-                    Object v2Result = migrationRouting.useReadDatabase(MigrationDatabase.V2, joinPoint::proceed);
-                    if (shadowReadComparator.isSame(v1Result, v2Result)) {
-                        migrationMetrics.recordShadowRead(ShadowReadResult.MISMATCH_TRANSIENT);
+                    Object result = migrationRouting.useReadDatabase(database, joinPoint::proceed);
+                    Object otherResult = migrationRouting.useReadDatabase(database.other(), joinPoint::proceed);
+                    if (shadowReadComparator.isSame(result, otherResult)) {
                         return;
                     }
                     migrationMetrics.recordShadowRead(ShadowReadResult.MISMATCH_PERSISTENT);
                     migrationEventLogger.shadowReadMismatch(method, ShadowReadResult.MISMATCH_PERSISTENT.getTag());
-                    LOGGER.warn("Shadow Read 결과가 다시 비교해도 V1과 다릅니다. method={}", method);
+                    LOGGER.warn("Shadow Read 결과가 다시 비교해도 다릅니다. method={}, responseDatabase={}", method,
+                        database);
                 } catch (Throwable throwable) {
                     migrationMetrics.recordShadowRead(ShadowReadResult.ERROR);
                     LOGGER.warn("Shadow Read 재비교 조회에 실패했습니다. method={}", method, throwable);

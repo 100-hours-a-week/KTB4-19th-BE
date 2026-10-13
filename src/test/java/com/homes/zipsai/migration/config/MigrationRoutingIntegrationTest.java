@@ -105,7 +105,7 @@ class MigrationRoutingIntegrationTest {
         Flyway.configure().dataSource(migrationDataSources.v2()).load().migrate();
         v1 = JdbcClient.create(migrationDataSources.v1());
         v2 = JdbcClient.create(migrationDataSources.v2());
-        givenSettings(MigrationMode.V1_PRIMARY, 0, false);
+        givenSettings(MigrationMode.V1_PRIMARY, 0, 0);
     }
 
     @AfterEach
@@ -130,7 +130,7 @@ class MigrationRoutingIntegrationTest {
     @Test
     @DisplayName("V2_PRIMARY면 V2에 저장하고 V2 Outbox에 V2에서 V1으로 가는 이벤트를 남긴다")
     void writesToV2WhenV2IsPrimary() {
-        givenSettings(MigrationMode.V2_PRIMARY, 0, false);
+        givenSettings(MigrationMode.V2_PRIMARY, 0, 0);
 
         userRepository.save(resident("V2 사용자"));
 
@@ -143,7 +143,7 @@ class MigrationRoutingIntegrationTest {
     @DisplayName("트랜잭션 중에 V2_PRIMARY로 바뀌어도 그 트랜잭션은 V1에 쓰고 V1 기준으로 기록한다")
     void keepsWritingToV1WhenModeChangesDuringTransaction() {
         migrationTestUserService.saveAndRenameAfter(resident("처음 이름"),
-            () -> givenSettings(MigrationMode.V2_PRIMARY, 0, false), "바뀐 이름");
+            () -> givenSettings(MigrationMode.V2_PRIMARY, 0, 0), "바뀐 이름");
 
         assertThat(userNames(v1)).containsExactly("바뀐 이름");
         assertThat(userNames(v2)).isEmpty();
@@ -155,7 +155,7 @@ class MigrationRoutingIntegrationTest {
     void readsFromV2WhenReadPercentIsHundred() {
         saveUser(v1, "V1 이름");
         saveUser(v2, "V2 이름");
-        givenSettings(MigrationMode.V1_PRIMARY, 100, false);
+        givenSettings(MigrationMode.V1_PRIMARY, 100, 0);
 
         Optional<String> userName = migrationTestUserService.findUserName(EMAIL);
 
@@ -178,7 +178,7 @@ class MigrationRoutingIntegrationTest {
     void comparesWithV2WhenShadowReadIsEnabled() {
         saveUser(v1, "V1 이름");
         saveUser(v2, "V2 이름");
-        givenSettings(MigrationMode.V1_PRIMARY, 0, true);
+        givenSettings(MigrationMode.V1_PRIMARY, 0, 100);
 
         Optional<String> userName = migrationTestUserService.findUserName(EMAIL);
 
@@ -196,9 +196,9 @@ class MigrationRoutingIntegrationTest {
         then(shadowReadComparator).should(after(500).never()).isSame(any(), any());
     }
 
-    private void givenSettings(MigrationMode mode, int v2ReadPercent, boolean shadowReadEnabled) {
+    private void givenSettings(MigrationMode mode, int v2ReadPercent, int shadowReadPercent) {
         migrationSettingsProvider.update(
-            new MigrationSettings(mode, null, WorkerMode.PAUSED, true, true, v2ReadPercent, shadowReadEnabled));
+            new MigrationSettings(mode, null, WorkerMode.PAUSED, true, true, v2ReadPercent, shadowReadPercent));
     }
 
     private User resident(String userName) {

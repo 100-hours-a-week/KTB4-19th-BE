@@ -32,7 +32,7 @@ class MigrationSettingsPollerTest {
 
     private static final String APP_CONFIG_PATH = "/applications/zipsai/environments/prod/configurations/db-migration";
     private static final MigrationSettings RUNNING =
-        new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.RUNNING, true, true, 0, false);
+        new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.RUNNING, true, true, 0, 0);
 
     HttpServer appConfigAgent;
 
@@ -75,7 +75,7 @@ class MigrationSettingsPollerTest {
             .usingRecursiveComparison()
             .withComparatorForType(OffsetDateTime.timeLineOrder(), OffsetDateTime.class)
             .isEqualTo(new MigrationSettings(MigrationMode.V2_PRIMARY,
-                OffsetDateTime.parse("2026-10-20T14:00:00+09:00"), WorkerMode.DRAINING, true, false, 0, false));
+                OffsetDateTime.parse("2026-10-20T14:00:00+09:00"), WorkerMode.DRAINING, true, false, 0, 0));
     }
 
     @Test
@@ -83,14 +83,14 @@ class MigrationSettingsPollerTest {
     void appliesReadSettings() {
         givenConfiguration("""
             {"migration": {"mode": "V1_PRIMARY", "workerMode": "RUNNING",
-                "v2ReadPercent": 10, "shadowReadEnabled": true}}
+                "v2ReadPercent": 10, "shadowReadPercent": 30}}
             """);
 
         migrationSettingsPoller.pollSettings();
 
         assertThat(migrationSettingsProvider.getSettings())
             .isEqualTo(
-                new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.RUNNING, false, false, 10, true));
+                new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.RUNNING, false, false, 10, 30));
     }
 
     @Test

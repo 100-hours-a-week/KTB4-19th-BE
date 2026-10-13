@@ -57,6 +57,11 @@ public class MigrationRouting {
         return readsFromV2 ? MigrationDatabase.V2 : MigrationDatabase.V1;
     }
 
+    public boolean shouldShadowRead() {
+        int shadowReadPercent = migrationSettingsProvider.getSettings().shadowReadPercent();
+        return ThreadLocalRandom.current().nextInt(PERCENT) < shadowReadPercent;
+    }
+
     public <T> T useReadDatabase(MigrationDatabase database, ReadQuery<T> query) throws Throwable {
         MigrationDatabase previousDatabase = FIXED_READ_DATABASE.get();
         FIXED_READ_DATABASE.set(database);

@@ -81,7 +81,7 @@ class OutboxWorkerMetricsTest {
     @DisplayName("워커가 실행 중이고 그 방향이 켜져 있을 때만 활성으로 보인다")
     void showsWorkerActiveByDirection() {
         migrationSettingsProvider.update(
-            new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.RUNNING, true, false, 0, false));
+            new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.RUNNING, true, false, 0, 0));
 
         assertThat(workerActive("V1_TO_V2")).isEqualTo(1);
         assertThat(workerActive("V2_TO_V1")).isZero();
@@ -91,7 +91,7 @@ class OutboxWorkerMetricsTest {
     @DisplayName("워커가 멈춰 있으면 방향이 켜져 있어도 비활성으로 보인다")
     void showsWorkerInactiveWhenPaused() {
         migrationSettingsProvider.update(
-            new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.PAUSED, true, true, 0, false));
+            new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.PAUSED, true, true, 0, 0));
 
         assertThat(workerActive("V1_TO_V2")).isZero();
     }
