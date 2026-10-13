@@ -23,9 +23,6 @@ import org.springframework.scheduling.TaskScheduler;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.homes.zipsai.migration.domain.MigrationDatabase;
-import com.homes.zipsai.migration.domain.MigrationMode;
-import com.homes.zipsai.migration.domain.MigrationSettings;
-import com.homes.zipsai.migration.domain.WorkerMode;
 import com.homes.zipsai.migration.service.MigrationEventLogger;
 import com.homes.zipsai.migration.service.MigrationMetrics;
 import com.homes.zipsai.migration.service.MigrationRouting;
@@ -63,42 +60,71 @@ class ShadowReadAspectTest {
 
     @BeforeEach
     void setUp() {
-        MigrationSettingsProvider migrationSettingsProvider = new MigrationSettingsProvider();
-        migrationSettingsProvider.update(
-            new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.PAUSED, false, false, 0, true));
         meterRegistry = new SimpleMeterRegistry();
-        shadowReadAspect = new ShadowReadAspect(migrationRouting, migrationSettingsProvider,
+        shadowReadAspect = new ShadowReadAspect(migrationRouting,
             new ShadowReadComparator(JsonMapper.builder().build()), new TaskExecutorAdapter(Runnable::run),
-            shadowReadScheduler, new MigrationMetrics(meterRegistry, migrationSettingsProvider), migrationEventLogger);
-        given(joinPoint.getSignature()).willReturn(signature);
-        given(signature.toShortString()).willReturn(METHOD);
+            shadowReadScheduler, new MigrationMetrics(meterRegistry, new MigrationSettingsProvider()),
+            migrationEventLogger);
+    }
+
+    @Test
+    @DisplayName("비교 대상으로 뽑히지 않으면 다른 DB를 조회하지 않는다")
+    void skipsComparisonWhenNotSampled() throws Throwable {
         given(migrationRouting.chooseReadDatabase()).willReturn(MigrationDatabase.V1);
-    }
-
-    @Test
-    @DisplayName("V1과 V2 결과가 다르면 5초 뒤 재비교를 예약한다")
-    void schedulesRecompareWhenResultsDiffer() throws Throwable {
-        givenReadResults("세탁기", "건조기");
+        given(migrationRouting.useReadDatabase(eq(MigrationDatabase.V1), any())).willReturn("세탁기");
+        given(migrationRouting.shouldShadowRead()).willReturn(false);
 
         shadowReadAspect.routeRead(joinPoint, readOnly());
 
-        then(shadowReadScheduler).should().schedule(any(Runnable.class), any(Instant.class));
+        then(migrationRouting).should(never()).useReadDatabase(eq(MigrationDatabase.V2), any());
     }
 
     @Test
-    @DisplayName("V1과 V2 결과가 같으면 재비교하지 않는다")
-    void skipsRecompareWhenResultsAreSame() throws Throwable {
-        givenReadResults("세탁기", "세탁기");
+    @DisplayName("비교 결과와 관계없이 응답 DB의 결과로 응답한다")
+    void returnsResultOfResponseDatabase() throws Throwable {
+        givenComparedReads(MigrationDatabase.V1, "세탁기", "건조기");
+
+        Object result = shadowReadAspect.routeRead(joinPoint, readOnly());
+
+        assertThat(result).isEqualTo("세탁기");
+    }
+
+    @Test
+    @DisplayName("V2에서 응답했으면 V1과 비교한다")
+    void comparesWithV1WhenRespondingFromV2() throws Throwable {
+        givenComparedReads(MigrationDatabase.V2, "세탁기", "세탁기");
 
         shadowReadAspect.routeRead(joinPoint, readOnly());
 
+        then(migrationRouting).should().useReadDatabase(eq(MigrationDatabase.V1), any());
+    }
+
+    @Test
+    @DisplayName("결과가 같으면 일치로 세고 재비교하지 않는다")
+    void countsMatchWithoutRecompare() throws Throwable {
+        givenComparedReads(MigrationDatabase.V1, "세탁기", "세탁기");
+
+        shadowReadAspect.routeRead(joinPoint, readOnly());
+
+        assertThat(shadowReads("match")).isEqualTo(1);
         then(shadowReadScheduler).should(never()).schedule(any(Runnable.class), any(Instant.class));
     }
 
     @Test
-    @DisplayName("재비교할 때는 V1과 V2를 둘 다 다시 읽는다")
+    @DisplayName("결과가 다르면 최초 불일치로 세고 5초 뒤 재비교를 예약한다")
+    void countsInitialMismatchAndSchedulesRecompare() throws Throwable {
+        givenComparedReads(MigrationDatabase.V1, "세탁기", "건조기");
+
+        shadowReadAspect.routeRead(joinPoint, readOnly());
+
+        assertThat(shadowReads("mismatch_initial")).isEqualTo(1);
+        then(shadowReadScheduler).should().schedule(any(Runnable.class), any(Instant.class));
+    }
+
+    @Test
+    @DisplayName("재비교할 때는 두 DB를 모두 다시 읽는다")
     void rereadsBothDatabasesWhenRecomparing() throws Throwable {
-        givenReadResults("세탁기", "건조기", "세탁기");
+        givenComparedReads(MigrationDatabase.V1, "세탁기", "건조기", "세탁기");
         givenRecompareRunsImmediately();
 
         shadowReadAspect.routeRead(joinPoint, readOnly());
@@ -108,31 +134,20 @@ class ShadowReadAspectTest {
     }
 
     @Test
-    @DisplayName("V1과 V2 결과가 같으면 일치로 센다")
-    void countsMatchWhenResultsAreSame() throws Throwable {
-        givenReadResults("세탁기", "세탁기");
-
-        shadowReadAspect.routeRead(joinPoint, readOnly());
-
-        assertThat(shadowReads("match")).isEqualTo(1);
-    }
-
-    @Test
-    @DisplayName("다시 비교했을 때 같아졌으면 일시 불일치로 센다")
-    void countsTransientMismatchWhenRecomparisonMatches() throws Throwable {
-        givenReadResults("세탁기", "건조기", "세탁기");
+    @DisplayName("재비교에서 같아졌으면 지속 불일치로 세지 않는다")
+    void skipsPersistentMismatchWhenRecomparisonMatches() throws Throwable {
+        givenComparedReads(MigrationDatabase.V1, "세탁기", "건조기", "세탁기");
         givenRecompareRunsImmediately();
 
         shadowReadAspect.routeRead(joinPoint, readOnly());
 
-        assertThat(shadowReads("mismatch_transient")).isEqualTo(1);
         assertThat(shadowReads("mismatch_persistent")).isZero();
     }
 
     @Test
-    @DisplayName("다시 비교해도 다르면 지속 불일치로 세고 로그를 남긴다")
+    @DisplayName("재비교해도 다르면 지속 불일치로 세고 로그를 남긴다")
     void countsPersistentMismatchAndLogs() throws Throwable {
-        givenReadResults("세탁기", "건조기", "건조기");
+        givenComparedReads(MigrationDatabase.V1, "세탁기", "건조기", "건조기");
         givenRecompareRunsImmediately();
 
         shadowReadAspect.routeRead(joinPoint, readOnly());
@@ -142,8 +157,9 @@ class ShadowReadAspectTest {
     }
 
     @Test
-    @DisplayName("V2 조회에 실패하면 오류로 센다")
-    void countsErrorWhenV2ReadFails() throws Throwable {
+    @DisplayName("비교 조회에 실패하면 오류로 센다")
+    void countsErrorWhenComparisonReadFails() throws Throwable {
+        givenShadowRead(MigrationDatabase.V1);
         given(migrationRouting.useReadDatabase(eq(MigrationDatabase.V1), any())).willReturn("세탁기");
         given(migrationRouting.useReadDatabase(eq(MigrationDatabase.V2), any()))
             .willThrow(new IllegalStateException("V2 down"));
@@ -153,25 +169,26 @@ class ShadowReadAspectTest {
         assertThat(shadowReads("error")).isEqualTo(1);
     }
 
-    @Test
-    @DisplayName("비교 결과와 관계없이 V1 결과로 응답한다")
-    void returnsV1Result() throws Throwable {
-        givenReadResults("세탁기", "건조기");
-
-        Object result = shadowReadAspect.routeRead(joinPoint, readOnly());
-
-        assertThat(result).isEqualTo("세탁기");
+    private void givenShadowRead(MigrationDatabase responseDatabase) {
+        given(joinPoint.getSignature()).willReturn(signature);
+        given(signature.toShortString()).willReturn(METHOD);
+        given(migrationRouting.chooseReadDatabase()).willReturn(responseDatabase);
+        given(migrationRouting.shouldShadowRead()).willReturn(true);
     }
 
-    private void givenReadResults(Object v1Result, Object v2Result) throws Throwable {
-        given(migrationRouting.useReadDatabase(eq(MigrationDatabase.V1), any())).willReturn(v1Result);
-        given(migrationRouting.useReadDatabase(eq(MigrationDatabase.V2), any())).willReturn(v2Result);
+    private void givenComparedReads(MigrationDatabase responseDatabase, Object result, Object otherResult)
+        throws Throwable {
+        givenShadowRead(responseDatabase);
+        given(migrationRouting.useReadDatabase(eq(responseDatabase), any())).willReturn(result);
+        given(migrationRouting.useReadDatabase(eq(responseDatabase.other()), any())).willReturn(otherResult);
     }
 
-    private void givenReadResults(Object v1Result, Object v2Result, Object recomparedV2Result) throws Throwable {
-        given(migrationRouting.useReadDatabase(eq(MigrationDatabase.V1), any())).willReturn(v1Result);
-        given(migrationRouting.useReadDatabase(eq(MigrationDatabase.V2), any()))
-            .willReturn(v2Result, recomparedV2Result);
+    private void givenComparedReads(MigrationDatabase responseDatabase, Object result, Object otherResult,
+                                    Object recomparedOtherResult) throws Throwable {
+        givenShadowRead(responseDatabase);
+        given(migrationRouting.useReadDatabase(eq(responseDatabase), any())).willReturn(result);
+        given(migrationRouting.useReadDatabase(eq(responseDatabase.other()), any()))
+            .willReturn(otherResult, recomparedOtherResult);
     }
 
     private void givenRecompareRunsImmediately() {

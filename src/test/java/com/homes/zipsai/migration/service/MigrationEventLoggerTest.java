@@ -68,7 +68,7 @@ class MigrationEventLoggerTest {
     @DisplayName("설정 변경은 mode와 전환 시각, 워커 설정을 JSON으로 남긴다")
     void logsSettingsChanged(CapturedOutput output) {
         migrationEventLogger.settingsChanged(new MigrationSettings(MigrationMode.V2_PRIMARY,
-            OffsetDateTime.parse("2026-10-20T14:00:00+09:00"), WorkerMode.RUNNING, true, false, 30, true));
+            OffsetDateTime.parse("2026-10-20T14:00:00+09:00"), WorkerMode.RUNNING, true, false, 30, 100));
 
         assertThat(output.getOut()).contains("\"event\":\"migration_settings_changed\"", "\"mode\":\"V2_PRIMARY\"",
             "\"switch_at\":\"2026-10-20T14:00+09:00\"", "\"forward_worker_enabled\":true", "\"v2_read_percent\":30");

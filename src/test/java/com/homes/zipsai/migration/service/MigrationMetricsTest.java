@@ -74,12 +74,48 @@ class MigrationMetricsTest {
             .isEqualTo(1);
     }
 
+    @Test
+    @DisplayName("현재 mode만 1로 보인다")
+    void showsCurrentMode() {
+        givenSettings(MigrationMode.V2_PRIMARY, null, 0);
+
+        assertThat(mode("V2_PRIMARY")).isEqualTo(1);
+        assertThat(mode("V1_PRIMARY")).isZero();
+    }
+
+    @Test
+    @DisplayName("현재 workerMode만 1로 보인다")
+    void showsCurrentWorkerMode() {
+        migrationSettingsProvider.update(
+            new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.DRAINING, false, false, 0, 0));
+
+        assertThat(workerMode("DRAINING")).isEqualTo(1);
+        assertThat(workerMode("RUNNING")).isZero();
+    }
+
+    @Test
+    @DisplayName("설정한 Shadow Read 비율을 보인다")
+    void showsShadowReadPercent() {
+        migrationSettingsProvider.update(
+            new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.PAUSED, false, false, 0, 10));
+
+        assertThat(meterRegistry.get("migration.shadow.read.percent").gauge().value()).isEqualTo(10);
+    }
+
     private void givenSettings(MigrationMode mode, OffsetDateTime switchAt, int v2ReadPercent) {
         migrationSettingsProvider.update(
-            new MigrationSettings(mode, switchAt, WorkerMode.PAUSED, false, false, v2ReadPercent, false));
+            new MigrationSettings(mode, switchAt, WorkerMode.PAUSED, false, false, v2ReadPercent, 0));
     }
 
     private double writer(String database) {
         return meterRegistry.get("migration.writer").tag("database", database).gauge().value();
+    }
+
+    private double workerMode(String mode) {
+        return meterRegistry.get("migration.worker.mode").tag("mode", mode).gauge().value();
+    }
+
+    private double mode(String mode) {
+        return meterRegistry.get("migration.mode").tag("mode", mode).gauge().value();
     }
 }

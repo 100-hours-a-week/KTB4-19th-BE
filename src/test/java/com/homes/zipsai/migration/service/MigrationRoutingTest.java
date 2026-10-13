@@ -59,7 +59,7 @@ class MigrationRoutingTest {
     @DisplayName("전환 시각 전에는 이전 mode의 DB에 쓴다")
     void writesToPreviousDatabaseBeforeSwitchTime() {
         migrationSettingsProvider.update(new MigrationSettings(MigrationMode.V2_PRIMARY,
-            OffsetDateTime.now().plusDays(1), WorkerMode.PAUSED, false, false, 0, false));
+            OffsetDateTime.now().plusDays(1), WorkerMode.PAUSED, false, false, 0, 0));
 
         MigrationDatabase database = migrationRouting.determineWriteDatabase();
 
@@ -70,7 +70,7 @@ class MigrationRoutingTest {
     @DisplayName("전환 시각이 지나면 지정한 mode의 DB에 쓴다")
     void writesToNewDatabaseAfterSwitchTime() {
         migrationSettingsProvider.update(new MigrationSettings(MigrationMode.V2_PRIMARY,
-            OffsetDateTime.now().minusDays(1), WorkerMode.PAUSED, false, false, 0, false));
+            OffsetDateTime.now().minusDays(1), WorkerMode.PAUSED, false, false, 0, 0));
 
         MigrationDatabase database = migrationRouting.determineWriteDatabase();
 
@@ -146,9 +146,34 @@ class MigrationRoutingTest {
         assertThat(database).isEqualTo(MigrationDatabase.V1);
     }
 
+    @Test
+    @DisplayName("Shadow Read 비율이 0이면 비교하지 않는다")
+    void skipsShadowReadWhenPercentIsZero() {
+        givenShadowReadPercent(0);
+
+        boolean shadowRead = migrationRouting.shouldShadowRead();
+
+        assertThat(shadowRead).isFalse();
+    }
+
+    @Test
+    @DisplayName("Shadow Read 비율이 100이면 모든 조회를 비교한다")
+    void comparesEveryReadWhenPercentIsHundred() {
+        givenShadowReadPercent(100);
+
+        boolean shadowRead = migrationRouting.shouldShadowRead();
+
+        assertThat(shadowRead).isTrue();
+    }
+
     private void givenSettings(MigrationMode mode, int v2ReadPercent) {
         migrationSettingsProvider.update(
-            new MigrationSettings(mode, null, WorkerMode.PAUSED, true, true, v2ReadPercent, false));
+            new MigrationSettings(mode, null, WorkerMode.PAUSED, true, true, v2ReadPercent, 0));
+    }
+
+    private void givenShadowReadPercent(int shadowReadPercent) {
+        migrationSettingsProvider.update(
+            new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.PAUSED, true, true, 0, shadowReadPercent));
     }
 
     private void completeTransaction() {

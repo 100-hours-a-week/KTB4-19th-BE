@@ -7,7 +7,9 @@ import org.springframework.stereotype.Component;
 import com.homes.zipsai.global.util.TimeUtils;
 import com.homes.zipsai.migration.config.ConditionalOnMigrationEnabled;
 import com.homes.zipsai.migration.domain.MigrationDatabase;
+import com.homes.zipsai.migration.domain.MigrationMode;
 import com.homes.zipsai.migration.domain.ShadowReadResult;
+import com.homes.zipsai.migration.domain.WorkerMode;
 
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -27,7 +29,20 @@ public class MigrationMetrics {
                 .tag("database", database.name())
                 .register(meterRegistry);
         }
+        for (MigrationMode mode : MigrationMode.values()) {
+            Gauge.builder("migration.mode", () -> currentMode() == mode ? 1 : 0)
+                .tag("mode", mode.name())
+                .register(meterRegistry);
+        }
+        for (WorkerMode workerMode : WorkerMode.values()) {
+            Gauge.builder("migration.worker.mode", () -> isWorkerMode(workerMode) ? 1 : 0)
+                .tag("mode", workerMode.name())
+                .register(meterRegistry);
+        }
         Gauge.builder("migration.v2.read.percent", () -> migrationSettingsProvider.getSettings().v2ReadPercentAt(now()))
+            .register(meterRegistry);
+        Gauge.builder("migration.shadow.read.percent",
+                () -> migrationSettingsProvider.getSettings().shadowReadPercent())
             .register(meterRegistry);
     }
 
@@ -36,7 +51,15 @@ public class MigrationMetrics {
     }
 
     private boolean isWriter(MigrationDatabase database) {
-        return migrationSettingsProvider.getSettings().modeAt(now()).getPrimaryDatabase() == database;
+        return currentMode().getPrimaryDatabase() == database;
+    }
+
+    private MigrationMode currentMode() {
+        return migrationSettingsProvider.getSettings().modeAt(now());
+    }
+
+    private boolean isWorkerMode(WorkerMode workerMode) {
+        return migrationSettingsProvider.getSettings().workerMode() == workerMode;
     }
 
     private OffsetDateTime now() {

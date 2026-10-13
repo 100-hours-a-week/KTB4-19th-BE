@@ -64,7 +64,7 @@ class OutboxRelayServiceTest {
 
     private static final LocalDateTime NOON = LocalDateTime.of(2026, 10, 13, 12, 0);
     private static final MigrationSettings V1_PRIMARY_RUNNING =
-        new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.RUNNING, true, true, 0, false);
+        new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.RUNNING, true, true, 0, 0);
 
     @Configuration
     @EnableTransactionManagement
@@ -277,7 +277,7 @@ class OutboxRelayServiceTest {
     @DisplayName("V2가 기준 DB면 V2의 이벤트를 읽어 V1에 반영한다")
     void relaysV2EventsToV1WhenV2IsPrimary() {
         migrationSettingsProvider.update(
-            new MigrationSettings(MigrationMode.V2_PRIMARY, null, WorkerMode.RUNNING, true, true, 0, false));
+            new MigrationSettings(MigrationMode.V2_PRIMARY, null, WorkerMode.RUNNING, true, true, 0, 0));
         saveItem(v2, 1L, "세탁기");
         saveEvent(v2, 10L, "V2_TO_V1", "Items", "1");
 
@@ -290,7 +290,7 @@ class OutboxRelayServiceTest {
     @DisplayName("V2_PRIMARY로 바뀌면 V1에 남은 이벤트부터 V2에 반영한다")
     void relaysLeftoverV1EventsFirstAfterSwitchingToV2() {
         migrationSettingsProvider.update(
-            new MigrationSettings(MigrationMode.V2_PRIMARY, null, WorkerMode.RUNNING, true, true, 0, false));
+            new MigrationSettings(MigrationMode.V2_PRIMARY, null, WorkerMode.RUNNING, true, true, 0, 0));
         saveItem(v1, 1L, "세탁기");
         saveEvent(v1, 10L, "V1_TO_V2", "Items", "1");
 
@@ -303,7 +303,7 @@ class OutboxRelayServiceTest {
     @DisplayName("V1에 남은 이벤트가 있으면 V2의 이벤트는 다음 차례로 미룬다")
     void waitsV2EventsWhileV1EventsRemain() {
         migrationSettingsProvider.update(
-            new MigrationSettings(MigrationMode.V2_PRIMARY, null, WorkerMode.RUNNING, true, true, 0, false));
+            new MigrationSettings(MigrationMode.V2_PRIMARY, null, WorkerMode.RUNNING, true, true, 0, 0));
         saveItem(v1, 1L, "세탁기");
         saveEvent(v1, 10L, "V1_TO_V2", "Items", "1");
         saveItem(v2, 2L, "건조기");
@@ -330,7 +330,7 @@ class OutboxRelayServiceTest {
     @DisplayName("워커가 PAUSED면 이벤트를 처리하지 않는다")
     void doesNothingWhenWorkerIsPaused() {
         migrationSettingsProvider.update(
-            new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.PAUSED, true, true, 0, false));
+            new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.PAUSED, true, true, 0, 0));
         saveItem(v1, 1L, "세탁기");
         saveEvent(v1, 10L, "V1_TO_V2", "Items", "1");
 
@@ -344,7 +344,7 @@ class OutboxRelayServiceTest {
     void finishesCurrentEventAndStopsWhenDraining() {
         given(outboxEntityTables.getIdColumn("Items")).willAnswer(invocation -> {
             migrationSettingsProvider.update(
-                new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.DRAINING, true, true, 0, false));
+                new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.DRAINING, true, true, 0, 0));
             return "item_id";
         });
         saveItem(v1, 1L, "세탁기");
@@ -438,7 +438,7 @@ class OutboxRelayServiceTest {
     @DisplayName("전환 시각 전에는 이전 mode 기준으로 처리한다")
     void relaysByPreviousModeBeforeSwitchTime() {
         migrationSettingsProvider.update(new MigrationSettings(MigrationMode.V2_PRIMARY,
-            TimeUtils.toOffsetDateTime(NOON.plusMinutes(1)), WorkerMode.RUNNING, true, false, 0, false));
+            TimeUtils.toOffsetDateTime(NOON.plusMinutes(1)), WorkerMode.RUNNING, true, false, 0, 0));
         saveItem(v1, 1L, "세탁기");
         saveEvent(v1, 10L, "V1_TO_V2", "Items", "1");
 
@@ -711,7 +711,7 @@ class OutboxRelayServiceTest {
 
     private MigrationSettings settings(MigrationMode mode, boolean forwardWorkerEnabled, boolean reverseWorkerEnabled) {
         return new MigrationSettings(mode, null, WorkerMode.RUNNING, forwardWorkerEnabled, reverseWorkerEnabled, 0,
-            false);
+            0);
     }
 
     private List<String> itemName(JdbcClient database, Long itemId) {

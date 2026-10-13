@@ -20,6 +20,6 @@ class MigrationSettingsProviderTest {
 
         assertThat(settings)
             .isEqualTo(
-                new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.PAUSED, false, false, 0, false));
+                new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.PAUSED, false, false, 0, 0));
     }
 }

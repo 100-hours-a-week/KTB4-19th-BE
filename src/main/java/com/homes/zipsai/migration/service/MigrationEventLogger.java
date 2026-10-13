@@ -59,7 +59,7 @@ public class MigrationEventLogger {
         fields.put("forward_worker_enabled", settings.forwardWorkerEnabled());
         fields.put("reverse_worker_enabled", settings.reverseWorkerEnabled());
         fields.put("v2_read_percent", settings.v2ReadPercent());
-        fields.put("shadow_read_enabled", settings.shadowReadEnabled());
+        fields.put("shadow_read_percent", settings.shadowReadPercent());
         log("migration_settings_changed", "INFO", fields);
     }
 

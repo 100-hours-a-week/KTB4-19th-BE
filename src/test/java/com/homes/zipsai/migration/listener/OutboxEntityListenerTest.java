@@ -47,7 +47,7 @@ class OutboxEntityListenerTest {
 
     private static final String RESIDENT_EMAIL = "outbox-resident@example.com";
     private static final MigrationSettings OUTBOX_ON =
-        new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.PAUSED, true, true, 0, false);
+        new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.PAUSED, true, true, 0, 0);
 
     @Autowired
     UserRepository userRepository;
@@ -123,7 +123,7 @@ class OutboxEntityListenerTest {
     @DisplayName("V2를 기준 DB로 쓰는 동안에는 V2에서 V1으로 가는 이벤트로 기록한다")
     void recordsReverseDirectionWhenV2IsPrimary() {
         migrationSettingsProvider.update(
-            new MigrationSettings(MigrationMode.V2_PRIMARY, null, WorkerMode.PAUSED, true, true, 0, false));
+            new MigrationSettings(MigrationMode.V2_PRIMARY, null, WorkerMode.PAUSED, true, true, 0, 0));
 
         userRepository.save(resident());
 
