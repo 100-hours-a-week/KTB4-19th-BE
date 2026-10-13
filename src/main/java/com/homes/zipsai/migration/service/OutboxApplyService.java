@@ -7,6 +7,8 @@ import java.util.stream.Collectors;
 
 import javax.sql.DataSource;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBooleanProperty;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -19,6 +21,7 @@ import com.homes.zipsai.migration.domain.OutboxEvent;
 @ConditionalOnBooleanProperty("app.migration.worker-enabled")
 public class OutboxApplyService {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(OutboxApplyService.class);
     private static final String COUNT_APPLIED_EVENT = """
         SELECT (SELECT COUNT(*) FROM Migration_applied_events WHERE direction = :direction AND event_id = :eventId)
             + (SELECT COUNT(*) FROM Migration_outbox_events WHERE direction = :direction AND event_id = :eventId)
@@ -27,6 +30,9 @@ public class OutboxApplyService {
         INSERT INTO Migration_applied_events (direction, event_id, applied_at) VALUES (:direction, :eventId, :now)
         """;
     private static final String NEW_ROW_ALIAS = "new_row";
+    private static final String UPDATED_AT_COLUMN = "updated_at";
+    private static final String REFRESH_SESSIONS_TABLE = "Refresh_sessions";
+    private static final String REVOKED_COLUMN = "revoked";
 
     private final JdbcClient v1JdbcClient;
     private final JdbcClient v2JdbcClient;
@@ -61,6 +67,9 @@ public class OutboxApplyService {
             target.sql("DELETE FROM " + quote(tableName) + " WHERE " + quote(idColumn) + " = :entityId")
                 .param("entityId", event.entityId())
                 .update();
+        } else if (keepsTargetRow(tableName, sourceRow, findRow(target, tableName, idColumn, event.entityId()))) {
+            LOGGER.warn("대상 DB의 행이 더 최신이라 덮어쓰지 않습니다. eventId={}, direction={}, table={}, id={}",
+                event.eventId(), event.direction(), tableName, event.entityId());
         } else {
             upsert(target, tableName, sourceRow);
         }
@@ -87,6 +96,27 @@ public class OutboxApplyService {
             .query()
             .listOfRows();
         return rows.isEmpty() ? null : rows.getFirst();
+    }
+
+    private boolean keepsTargetRow(String tableName, Map<String, Object> sourceRow, Map<String, Object> targetRow) {
+        if (targetRow == null) {
+            return false;
+        }
+        if (REFRESH_SESSIONS_TABLE.equals(tableName)) {
+            return isRevoked(targetRow) && !isRevoked(sourceRow);
+        }
+        return isNewer(targetRow.get(UPDATED_AT_COLUMN), sourceRow.get(UPDATED_AT_COLUMN));
+    }
+
+    private static boolean isRevoked(Map<String, Object> row) {
+        Object revoked = row.get(REVOKED_COLUMN);
+        return Boolean.TRUE.equals(revoked) || revoked instanceof Number number && number.intValue() == 1;
+    }
+
+    private static boolean isNewer(Object targetUpdatedAt, Object sourceUpdatedAt) {
+        return targetUpdatedAt instanceof LocalDateTime targetTime
+            && sourceUpdatedAt instanceof LocalDateTime sourceTime
+            && targetTime.isAfter(sourceTime);
     }
 
     private void upsert(JdbcClient target, String tableName, Map<String, Object> row) {

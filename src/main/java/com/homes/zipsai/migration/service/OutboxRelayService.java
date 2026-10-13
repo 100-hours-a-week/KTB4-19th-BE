@@ -1,8 +1,14 @@
 package com.homes.zipsai.migration.service;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 
 import javax.sql.DataSource;
 
@@ -38,6 +44,13 @@ public class OutboxRelayService {
         ORDER BY event_id
         LIMIT :limit
         """;
+    private static final String COUNT_UNPROCESSED_EVENTS = """
+        SELECT COUNT(*) FROM Migration_outbox_events
+        WHERE direction = :direction AND processed_at IS NULL AND status = :status
+        """;
+    private static final String ACQUIRE_LOCK = "SELECT GET_LOCK(?, 0)";
+    private static final String RELEASE_LOCK = "SELECT RELEASE_LOCK(?)";
+    private static final String LOCK_NAME = "migration_outbox_worker";
     private static final String MARK_COMPLETED = """
         UPDATE Migration_outbox_events SET status = 'COMPLETED', processed_at = :now WHERE event_id = :eventId
         """;
@@ -47,15 +60,18 @@ public class OutboxRelayService {
         WHERE event_id = :eventId
         """;
 
+    private final DataSource lockDataSource;
     private final JdbcClient v1JdbcClient;
     private final JdbcClient v2JdbcClient;
     private final OutboxApplyService outboxApplyService;
     private final MigrationSettingsProvider migrationSettingsProvider;
+    private final Map<OutboxDirection, Long> lastUnprocessedCounts = new EnumMap<>(OutboxDirection.class);
 
     public OutboxRelayService(@Qualifier("outboxWorkerV1DataSource") DataSource outboxWorkerV1DataSource,
                               @Qualifier("outboxWorkerV2DataSource") DataSource outboxWorkerV2DataSource,
                               OutboxApplyService outboxApplyService,
                               MigrationSettingsProvider migrationSettingsProvider) {
+        this.lockDataSource = outboxWorkerV1DataSource;
         this.v1JdbcClient = JdbcClient.create(outboxWorkerV1DataSource);
         this.v2JdbcClient = JdbcClient.create(outboxWorkerV2DataSource);
         this.outboxApplyService = outboxApplyService;
@@ -66,7 +82,47 @@ public class OutboxRelayService {
         if (!migrationSettingsProvider.getSettings().isWorkerRunning()) {
             return;
         }
-        relayEventsOfOneDirection(now);
+        try (Connection lockConnection = lockDataSource.getConnection()) {
+            if (!acquireLock(lockConnection)) {
+                return;
+            }
+            try {
+                relayEventsOfOneDirection(now);
+            } finally {
+                releaseLock(lockConnection);
+            }
+        } catch (SQLException exception) {
+            LOGGER.warn("워커 락을 잡지 못해 이번 회차를 건너뜁니다.", exception);
+        }
+    }
+
+    public void logUnprocessedCounts() {
+        for (OutboxDirection direction : OutboxDirection.values()) {
+            long pendingCount = countUnprocessedEvents(direction, OutboxStatus.PENDING);
+            long failedCount = countUnprocessedEvents(direction, OutboxStatus.FAILED);
+            LOGGER.info("처리되지 않은 이전 이벤트 건수입니다. direction={}, pending={}, failed={}", direction,
+                pendingCount, failedCount);
+            Long lastCount = lastUnprocessedCounts.put(direction, pendingCount + failedCount);
+            if (pendingCount + failedCount == 0 && lastCount != null && lastCount > 0) {
+                LOGGER.info("처리되지 않은 이전 이벤트가 0건이 됐습니다. direction={}", direction);
+            }
+        }
+    }
+
+    private boolean acquireLock(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(ACQUIRE_LOCK)) {
+            statement.setString(1, LOCK_NAME);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() && resultSet.getInt(1) == 1;
+            }
+        }
+    }
+
+    private void releaseLock(Connection connection) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(RELEASE_LOCK)) {
+            statement.setString(1, LOCK_NAME);
+            statement.execute();
+        }
     }
 
     private void relayEventsOfOneDirection(LocalDateTime now) {
@@ -83,6 +139,14 @@ public class OutboxRelayService {
                 return;
             }
         }
+    }
+
+    private long countUnprocessedEvents(OutboxDirection direction, OutboxStatus status) {
+        return sourceOf(direction).sql(COUNT_UNPROCESSED_EVENTS)
+            .param("direction", direction.name())
+            .param("status", status.name())
+            .query(Long.class)
+            .single();
     }
 
     private List<OutboxEvent> findUnprocessedEvents(OutboxDirection direction) {

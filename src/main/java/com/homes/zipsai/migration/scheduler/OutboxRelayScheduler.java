@@ -22,4 +22,9 @@ public class OutboxRelayScheduler {
     public void relayPendingEvents() {
         outboxRelayService.relayPendingEvents(TimeUtils.now());
     }
+
+    @Scheduled(fixedDelay = 1, timeUnit = TimeUnit.MINUTES, scheduler = "migrationTaskScheduler")
+    public void logUnprocessedCounts() {
+        outboxRelayService.logUnprocessedCounts();
+    }
 }
