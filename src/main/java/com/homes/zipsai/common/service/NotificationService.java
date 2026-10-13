@@ -16,6 +16,8 @@ import com.homes.zipsai.common.dto.NotificationUnreadCountResponse;
 import com.homes.zipsai.common.repository.UserNotificationRepository;
 import com.homes.zipsai.global.exception.NotFoundException;
 import com.homes.zipsai.global.util.TimeUtils;
+import com.homes.zipsai.migration.domain.OutboxOperation;
+import com.homes.zipsai.migration.service.OutboxRecorder;
 import com.homes.zipsai.user.service.UserService;
 
 import lombok.RequiredArgsConstructor;
@@ -29,6 +31,7 @@ public class NotificationService {
     private final ObjectMapper objectMapper;
     private final UserService userService;
     private final EntityManager entityManager;
+    private final OutboxRecorder outboxRecorder;
 
     @Transactional(readOnly = true)
     public NotificationListResponse getNotifications(Long userId, int page, int size) {
@@ -58,6 +61,7 @@ public class NotificationService {
                     throw new NotFoundException(NotFoundException.Resource.NOTIFICATION);
                 }
             } else {
+                outboxRecorder.record(UserNotification.class, userNotiId, OutboxOperation.UPDATE);
                 entityManager.refresh(notification);
             }
         }

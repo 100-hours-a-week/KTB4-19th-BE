@@ -107,7 +107,7 @@ class ConversationRepositoryTest {
     void closesActiveConversationIdleForFiveMinutes() {
         Conversation conversation = saveConversation(resident, "분리수거 요일", NOON);
 
-        conversationRepository.closeIdleConversations(NOON, NOON.plusMinutes(5));
+        closeIdleConversations();
 
         assertThat(statusOf(conversation)).isEqualTo(ConversationStatus.CLOSED);
     }
@@ -117,7 +117,7 @@ class ConversationRepositoryTest {
     void keepsRecentConversationActive() {
         Conversation conversation = saveConversation(resident, "분리수거 요일", NOON.plusSeconds(1));
 
-        conversationRepository.closeIdleConversations(NOON, NOON.plusMinutes(5));
+        closeIdleConversations();
 
         assertThat(statusOf(conversation)).isEqualTo(ConversationStatus.ACTIVE);
     }
@@ -128,7 +128,7 @@ class ConversationRepositoryTest {
         Conversation conversation = saveConversation(resident, "천장 누수", NOON);
         ReflectionTestUtils.setField(conversation, "complaintState", AiComplaintState.READY_TO_CONFIRM);
 
-        conversationRepository.closeIdleConversations(NOON, NOON.plusMinutes(5));
+        closeIdleConversations();
 
         assertThat(statusOf(conversation)).isEqualTo(ConversationStatus.ACTIVE);
     }
@@ -139,9 +139,16 @@ class ConversationRepositoryTest {
         Conversation conversation = saveConversation(resident, "천장 누수", NOON);
         conversation.markComplaintCreated("천장 누수", new AiComplaintDraft("안방", "천장 누수", null));
 
-        conversationRepository.closeIdleConversations(NOON, NOON.plusMinutes(5));
+        closeIdleConversations();
 
         assertThat(statusOf(conversation)).isEqualTo(ConversationStatus.COMPLAINT_CREATED);
+    }
+
+    private void closeIdleConversations() {
+        List<Long> conversationIds = conversationRepository.findIdleConversationIds(NOON);
+        if (!conversationIds.isEmpty()) {
+            conversationRepository.closeIdleConversations(conversationIds, NOON, NOON.plusMinutes(5));
+        }
     }
 
     private ConversationStatus statusOf(Conversation conversation) {

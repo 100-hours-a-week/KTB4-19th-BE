@@ -32,6 +32,7 @@ import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
 import com.homes.zipsai.global.exception.ForbiddenException;
 import com.homes.zipsai.global.exception.NotFoundException;
+import com.homes.zipsai.migration.service.OutboxRecorder;
 import com.homes.zipsai.user.domain.User;
 
 @ExtendWith(MockitoExtension.class)
@@ -59,6 +60,9 @@ class ConversationServiceMessagesTest {
     @Mock
     S3StorageService s3StorageService;
 
+    @Mock
+    OutboxRecorder outboxRecorder;
+
     ConversationService conversationService;
     Conversation conversation;
 
@@ -66,7 +70,7 @@ class ConversationServiceMessagesTest {
     void setUp() {
         conversationService = new ConversationService(conversationRepository, messageRepository,
             messageFileGroupRepository, fileRepository, residentRoomService, s3StorageService,
-            new StorageProperties(null, null, null, 300, 0));
+            new StorageProperties(null, null, null, 300, 0), outboxRecorder);
         conversation = withId(Conversation.builder()
             .user(withId(new User("resident@example.com", "password", "입주민", null), RESIDENT_ID))
             .type(ConversationType.INQUIRY)

@@ -51,6 +51,8 @@ import com.homes.zipsai.global.exception.ForbiddenException;
 import com.homes.zipsai.global.exception.NotFoundException;
 import com.homes.zipsai.global.exception.ValidationFailedException;
 import com.homes.zipsai.global.util.TextUtils;
+import com.homes.zipsai.migration.domain.OutboxOperation;
+import com.homes.zipsai.migration.service.OutboxRecorder;
 
 import lombok.RequiredArgsConstructor;
 
@@ -69,6 +71,7 @@ public class ConversationService {
     private final ResidentRoomService residentRoomService;
     private final S3StorageService s3StorageService;
     private final StorageProperties storageProperties;
+    private final OutboxRecorder outboxRecorder;
 
     @Transactional(readOnly = true)
     public ConversationListResponse getConversations(Long userId, String keyword, String cursor, int size) {
@@ -198,7 +201,13 @@ public class ConversationService {
 
     @Transactional
     public void closeIdleConversations(LocalDateTime now) {
-        conversationRepository.closeIdleConversations(now.minus(Conversation.IDLE_TIME_TO_CLOSE), now);
+        LocalDateTime lastMessagedBefore = now.minus(Conversation.IDLE_TIME_TO_CLOSE);
+        List<Long> conversationIds = conversationRepository.findIdleConversationIds(lastMessagedBefore);
+        if (conversationIds.isEmpty()) {
+            return;
+        }
+        conversationRepository.closeIdleConversations(conversationIds, lastMessagedBefore, now);
+        outboxRecorder.recordAll(Conversation.class, conversationIds, OutboxOperation.UPDATE);
     }
 
     @Transactional

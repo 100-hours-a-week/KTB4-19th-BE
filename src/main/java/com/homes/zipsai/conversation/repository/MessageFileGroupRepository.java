@@ -4,7 +4,6 @@ import java.util.List;
 
 import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -34,7 +33,5 @@ public interface MessageFileGroupRepository extends JpaRepository<MessageFileGro
         """)
     long countByConversationId(@Param("conversationId") Long conversationId);
 
-    @Modifying
-    @Query("delete from MessageFileGroup g where g.message.id = :messageId")
-    void deleteAllByMessageId(@Param("messageId") Long messageId);
+    void deleteAllByMessageId(Long messageId);
 }

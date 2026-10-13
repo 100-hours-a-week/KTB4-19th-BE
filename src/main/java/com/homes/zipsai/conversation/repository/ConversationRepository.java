@@ -36,16 +36,27 @@ public interface ConversationRepository extends JpaRepository<Conversation, Long
                                                 @Param("cursorAt") LocalDateTime cursorAt,
                                                 @Param("cursorId") Long cursorId, Limit limit);
 
-    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""
-        update Conversation c
-        set c.status = com.homes.zipsai.conversation.domain.ConversationStatus.CLOSED, c.updatedAt = :now
+        select c.id from Conversation c
         where c.status = com.homes.zipsai.conversation.domain.ConversationStatus.ACTIVE
             and (c.complaintState is null
                 or c.complaintState <> com.homes.zipsai.conversation.ai.AiComplaintState.READY_TO_CONFIRM)
             and c.lastMessageAt <= :lastMessagedBefore
         """)
-    int closeIdleConversations(@Param("lastMessagedBefore") LocalDateTime lastMessagedBefore,
+    List<Long> findIdleConversationIds(@Param("lastMessagedBefore") LocalDateTime lastMessagedBefore);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+        update Conversation c
+        set c.status = com.homes.zipsai.conversation.domain.ConversationStatus.CLOSED, c.updatedAt = :now
+        where c.id in :conversationIds
+            and c.status = com.homes.zipsai.conversation.domain.ConversationStatus.ACTIVE
+            and (c.complaintState is null
+                or c.complaintState <> com.homes.zipsai.conversation.ai.AiComplaintState.READY_TO_CONFIRM)
+            and c.lastMessageAt <= :lastMessagedBefore
+        """)
+    int closeIdleConversations(@Param("conversationIds") List<Long> conversationIds,
+                               @Param("lastMessagedBefore") LocalDateTime lastMessagedBefore,
                                @Param("now") LocalDateTime now);
 
     @Query("select c from Complaint c where c.conversation.id = :conversationId and c.deletedAt is null")
