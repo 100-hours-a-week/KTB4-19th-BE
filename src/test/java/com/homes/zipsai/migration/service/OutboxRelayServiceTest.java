@@ -3,6 +3,9 @@ package com.homes.zipsai.migration.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
 
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -12,10 +15,13 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.jdbc.autoconfigure.DataSourceProperties;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.io.ClassPathResource;
@@ -34,6 +40,7 @@ import com.homes.zipsai.migration.domain.MigrationSettings;
 import com.homes.zipsai.migration.domain.WorkerMode;
 
 @SpringJUnitConfig(OutboxRelayServiceTest.WorkerTestConfiguration.class)
+@ExtendWith(OutputCaptureExtension.class)
 @TestPropertySource(properties = {
     "spring.datasource.url=jdbc:tc:mysql:8.4.11:///migration_v1?TC_DAEMON=true",
     "spring.datasource.username=test",
@@ -83,6 +90,8 @@ class OutboxRelayServiceTest {
         v1 = resetDatabase(outboxWorkerV1DataSource);
         v2 = resetDatabase(outboxWorkerV2DataSource);
         given(outboxEntityTables.getIdColumn("Items")).willReturn("item_id");
+        given(outboxEntityTables.getIdColumn("Notices")).willReturn("notice_id");
+        given(outboxEntityTables.getIdColumn("Refresh_sessions")).willReturn("session_id");
         migrationSettingsProvider.update(V1_PRIMARY_RUNNING);
     }
 
@@ -325,6 +334,55 @@ class OutboxRelayServiceTest {
     }
 
     @Test
+    @DisplayName("대상 DB 행의 updated_at이 더 최신이면 덮어쓰지 않는다")
+    void keepsTargetRowWhenTargetIsNewer() {
+        saveNotice(v1, 1L, "점검 안내", NOON.minusMinutes(2));
+        saveNotice(v2, 1L, "점검 완료", NOON.minusMinutes(1));
+        saveEvent(v1, 10L, "V1_TO_V2", "Notices", "1");
+
+        outboxRelayService.relayPendingEvents(NOON);
+
+        assertThat(noticeTitle(v2, 1L)).containsExactly("점검 완료");
+        assertThat(eventStatus(v1, 10L)).isEqualTo("COMPLETED");
+    }
+
+    @Test
+    @DisplayName("원본 행의 updated_at이 더 최신이면 덮어쓴다")
+    void overwritesTargetRowWhenSourceIsNewer() {
+        saveNotice(v1, 1L, "점검 완료", NOON.minusMinutes(1));
+        saveNotice(v2, 1L, "점검 안내", NOON.minusMinutes(2));
+        saveEvent(v1, 10L, "V1_TO_V2", "Notices", "1");
+
+        outboxRelayService.relayPendingEvents(NOON);
+
+        assertThat(noticeTitle(v2, 1L)).containsExactly("점검 완료");
+    }
+
+    @Test
+    @DisplayName("대상 DB에서 로그아웃한 세션은 원본 값으로 되살리지 않는다")
+    void keepsRevokedSessionInTarget() {
+        saveSession(v1, "session-1", false);
+        saveSession(v2, "session-1", true);
+        saveEvent(v1, 10L, "V1_TO_V2", "Refresh_sessions", "session-1");
+
+        outboxRelayService.relayPendingEvents(NOON);
+
+        assertThat(sessionRevoked(v2, "session-1")).containsExactly(true);
+    }
+
+    @Test
+    @DisplayName("원본에서 로그아웃한 세션은 대상 DB에도 반영한다")
+    void appliesRevokedSessionFromSource() {
+        saveSession(v1, "session-1", true);
+        saveSession(v2, "session-1", false);
+        saveEvent(v1, 10L, "V1_TO_V2", "Refresh_sessions", "session-1");
+
+        outboxRelayService.relayPendingEvents(NOON);
+
+        assertThat(sessionRevoked(v2, "session-1")).containsExactly(true);
+    }
+
+    @Test
     @DisplayName("정방향 워커가 꺼져 있으면 V1 이벤트를 처리하지 않는다")
     void skipsForwardEventsWhenForwardWorkerIsDisabled() {
         migrationSettingsProvider.update(settings(MigrationMode.V1_PRIMARY, false, true));
@@ -365,6 +423,24 @@ class OutboxRelayServiceTest {
     }
 
     @Test
+    @DisplayName("다른 워커가 락을 잡고 있으면 이벤트를 처리하지 않는다")
+    void skipsWhileAnotherWorkerHoldsLock() throws SQLException {
+        saveItem(v1, 1L, "세탁기");
+        saveEvent(v1, 10L, "V1_TO_V2", "Items", "1");
+
+        try (Connection otherWorker = outboxWorkerV1DataSource.getConnection();
+             Statement statement = otherWorker.createStatement()) {
+            statement.execute("SELECT GET_LOCK('migration_outbox_worker', 0)");
+
+            outboxRelayService.relayPendingEvents(NOON);
+
+            statement.execute("SELECT RELEASE_LOCK('migration_outbox_worker')");
+        }
+
+        assertThat(eventStatus(v1, 10L)).isEqualTo("PENDING");
+    }
+
+    @Test
     @DisplayName("FAILED 이벤트를 PENDING으로 되돌리면 다음 회차에 다시 처리한다")
     void relaysFailedEventAfterResetToPending() {
         saveItem(v1, 1L, "세탁기");
@@ -379,6 +455,20 @@ class OutboxRelayServiceTest {
         outboxRelayService.relayPendingEvents(NOON);
 
         assertThat(itemName(v2, 1L)).containsExactly("세탁기");
+    }
+
+    @Test
+    @DisplayName("처리되지 않은 이벤트가 0건이 되면 한 번만 알린다")
+    void logsOnceWhenUnprocessedEventsReachZero(CapturedOutput output) {
+        saveEvent(v1, 10L, "V1_TO_V2", "Items", "1");
+        outboxRelayService.logUnprocessedCounts();
+        markProcessed(v1, 10L);
+
+        outboxRelayService.logUnprocessedCounts();
+        outboxRelayService.logUnprocessedCounts();
+
+        assertThat(output.getOut().split("처리되지 않은 이전 이벤트가 0건이 됐습니다. direction=V1_TO_V2", -1))
+            .hasSize(2);
     }
 
     @Test
@@ -425,7 +515,7 @@ class OutboxRelayServiceTest {
     private JdbcClient resetDatabase(DataSource dataSource) {
         JdbcClient jdbcClient = JdbcClient.create(dataSource);
         for (String table : List.of("Migration_outbox_events", "Migration_applied_events", "Item_parts", "Items",
-            "Item_keys", "Item_locations")) {
+            "Item_keys", "Item_locations", "Notices", "Refresh_sessions")) {
             jdbcClient.sql("DROP TABLE IF EXISTS " + table).update();
         }
         new ResourceDatabasePopulator(new ClassPathResource("db/migration/V19__migration_outbox_events.sql"))
@@ -448,6 +538,16 @@ class OutboxRelayServiceTest {
                     location POINT NOT NULL SRID 4326
                 )
                 """)
+            .update();
+        jdbcClient.sql("""
+                CREATE TABLE Notices (
+                    notice_id BIGINT NOT NULL PRIMARY KEY,
+                    title VARCHAR(20) NOT NULL,
+                    updated_at DATETIME(6) NOT NULL
+                )
+                """)
+            .update();
+        jdbcClient.sql("CREATE TABLE Refresh_sessions (session_id VARCHAR(36) NOT NULL PRIMARY KEY, revoked BOOLEAN)")
             .update();
         return jdbcClient;
     }
@@ -477,6 +577,32 @@ class OutboxRelayServiceTest {
         database.sql("UPDATE Migration_outbox_events SET processed_at = ? WHERE event_id = ?")
             .params(NOON.minusMinutes(1), eventId)
             .update();
+    }
+
+    private void saveNotice(JdbcClient database, Long noticeId, String title, LocalDateTime updatedAt) {
+        database.sql("INSERT INTO Notices (notice_id, title, updated_at) VALUES (?, ?, ?)")
+            .params(noticeId, title, updatedAt)
+            .update();
+    }
+
+    private void saveSession(JdbcClient database, String sessionId, boolean revoked) {
+        database.sql("INSERT INTO Refresh_sessions (session_id, revoked) VALUES (?, ?)")
+            .params(sessionId, revoked)
+            .update();
+    }
+
+    private List<String> noticeTitle(JdbcClient database, Long noticeId) {
+        return database.sql("SELECT title FROM Notices WHERE notice_id = ?")
+            .param(noticeId)
+            .query(String.class)
+            .list();
+    }
+
+    private List<Boolean> sessionRevoked(JdbcClient database, String sessionId) {
+        return database.sql("SELECT revoked FROM Refresh_sessions WHERE session_id = ?")
+            .param(sessionId)
+            .query(Boolean.class)
+            .list();
     }
 
     private MigrationSettings settings(MigrationMode mode, boolean forwardWorkerEnabled, boolean reverseWorkerEnabled) {

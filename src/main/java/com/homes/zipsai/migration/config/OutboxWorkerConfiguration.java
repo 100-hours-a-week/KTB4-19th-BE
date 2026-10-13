@@ -19,7 +19,7 @@ import com.zaxxer.hikari.HikariDataSource;
 @ConditionalOnBooleanProperty("app.migration.worker-enabled")
 public class OutboxWorkerConfiguration {
 
-    private static final int POOL_SIZE = 2;
+    private static final int POOL_SIZE = 3;
     private static final String DISABLE_FOREIGN_KEY_CHECKS = "SET SESSION foreign_key_checks = 0";
 
     @Bean(defaultCandidate = false)
