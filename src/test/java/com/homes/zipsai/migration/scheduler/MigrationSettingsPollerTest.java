@@ -62,6 +62,21 @@ class MigrationSettingsPollerTest {
     }
 
     @Test
+    @DisplayName("Cloud가 정한 AppConfig 최종 형식을 그대로 읽는다")
+    void readsFinalAppConfigFormat() {
+        migrationSettingsProvider.update(RUNNING);
+        givenConfiguration("""
+            {"migration": {"mode": "V1_PRIMARY", "switchAt": null, "workerMode": "PAUSED",
+                "forwardWorkerEnabled": false, "reverseWorkerEnabled": false,
+                "v2ReadPercent": 0, "shadowReadPercent": 0}}
+            """);
+
+        migrationSettingsPoller.pollSettings();
+
+        assertThat(migrationSettingsProvider.getSettings()).isEqualTo(MigrationSettings.DEFAULT);
+    }
+
+    @Test
     @DisplayName("AppConfig의 mode와 전환 시각, workerMode, 방향별 워커 여부를 적용한다")
     void appliesSettingsFromAppConfig() {
         givenConfiguration("""

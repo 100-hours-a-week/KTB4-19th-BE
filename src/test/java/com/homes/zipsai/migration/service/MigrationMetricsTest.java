@@ -75,6 +75,15 @@ class MigrationMetricsTest {
     }
 
     @Test
+    @DisplayName("현재 mode만 1로 보인다")
+    void showsCurrentMode() {
+        givenSettings(MigrationMode.V2_PRIMARY, null, 0);
+
+        assertThat(mode("V2_PRIMARY")).isEqualTo(1);
+        assertThat(mode("V1_PRIMARY")).isZero();
+    }
+
+    @Test
     @DisplayName("현재 workerMode만 1로 보인다")
     void showsCurrentWorkerMode() {
         migrationSettingsProvider.update(
@@ -104,5 +113,9 @@ class MigrationMetricsTest {
 
     private double workerMode(String mode) {
         return meterRegistry.get("migration.worker.mode").tag("mode", mode).gauge().value();
+    }
+
+    private double mode(String mode) {
+        return meterRegistry.get("migration.mode").tag("mode", mode).gauge().value();
     }
 }
