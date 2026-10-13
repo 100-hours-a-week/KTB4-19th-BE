@@ -105,6 +105,47 @@ class MigrationRoutingTest {
         assertThat(database).isEqualTo(MigrationDatabase.V2);
     }
 
+    @Test
+    @DisplayName("V2 읽기 비율이 0이면 V1에서 읽는다")
+    void readsFromV1WhenReadPercentIsZero() {
+        givenSettings(MigrationMode.V1_PRIMARY, 0);
+
+        MigrationDatabase database = migrationRouting.determineReadDatabase();
+
+        assertThat(database).isEqualTo(MigrationDatabase.V1);
+    }
+
+    @Test
+    @DisplayName("V2 읽기 비율이 100이면 V2에서 읽는다")
+    void readsFromV2WhenReadPercentIsHundred() {
+        givenSettings(MigrationMode.V1_PRIMARY, 100);
+
+        MigrationDatabase database = migrationRouting.determineReadDatabase();
+
+        assertThat(database).isEqualTo(MigrationDatabase.V2);
+    }
+
+    @Test
+    @DisplayName("V2_PRIMARY면 읽기 비율과 관계없이 V2에서 읽는다")
+    void readsFromV2WhenV2IsPrimary() {
+        givenSettings(MigrationMode.V2_PRIMARY, 0);
+
+        MigrationDatabase database = migrationRouting.determineReadDatabase();
+
+        assertThat(database).isEqualTo(MigrationDatabase.V2);
+    }
+
+    @Test
+    @DisplayName("읽을 DB를 정해 두면 그 안의 조회는 그 DB에서 읽는다")
+    void readsFromFixedDatabase() throws Throwable {
+        givenSettings(MigrationMode.V1_PRIMARY, 100);
+
+        MigrationDatabase database = migrationRouting.useReadDatabase(MigrationDatabase.V1,
+            migrationRouting::determineReadDatabase);
+
+        assertThat(database).isEqualTo(MigrationDatabase.V1);
+    }
+
     private void givenSettings(MigrationMode mode, int v2ReadPercent) {
         migrationSettingsProvider.update(
             new MigrationSettings(mode, null, WorkerMode.PAUSED, true, true, v2ReadPercent, false));

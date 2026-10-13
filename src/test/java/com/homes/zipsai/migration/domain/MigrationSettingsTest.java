@@ -45,6 +45,24 @@ class MigrationSettingsTest {
         assertThat(settings.isWorkerEnabled(OutboxDirection.V2_TO_V1)).isFalse();
     }
 
+    @Test
+    @DisplayName("V1_PRIMARY면 설정한 V2 읽기 비율을 그대로 쓴다")
+    void usesReadPercentWhenV1IsPrimary() {
+        MigrationSettings settings = new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.PAUSED, false,
+            false, 30, false);
+
+        assertThat(settings.v2ReadPercentAt(SWITCH_AT)).isEqualTo(30);
+    }
+
+    @Test
+    @DisplayName("V2_PRIMARY면 V2 읽기 비율은 100이다")
+    void readsAllFromV2WhenV2IsPrimary() {
+        MigrationSettings settings = new MigrationSettings(MigrationMode.V2_PRIMARY, null, WorkerMode.PAUSED, false,
+            false, 30, false);
+
+        assertThat(settings.v2ReadPercentAt(SWITCH_AT)).isEqualTo(100);
+    }
+
     private MigrationSettings settings(MigrationMode mode, OffsetDateTime switchAt) {
         return new MigrationSettings(mode, switchAt, WorkerMode.PAUSED, false, false, 0, false);
     }
