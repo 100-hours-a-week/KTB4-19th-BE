@@ -35,6 +35,8 @@ import com.homes.zipsai.migration.domain.MigrationSettings;
 import com.homes.zipsai.migration.domain.WorkerMode;
 import com.homes.zipsai.migration.listener.OutboxEntityListener;
 import com.homes.zipsai.migration.scheduler.MigrationSettingsPoller;
+import com.homes.zipsai.migration.service.MigrationEventLogger;
+import com.homes.zipsai.migration.service.MigrationMetrics;
 import com.homes.zipsai.migration.service.MigrationRouting;
 import com.homes.zipsai.migration.service.MigrationSettingsProvider;
 import com.homes.zipsai.migration.service.MigrationTestUserService;
@@ -87,6 +89,12 @@ class MigrationRoutingIntegrationTest {
 
     @MockitoBean(name = "migrationSettingsPoller")
     MigrationSettingsPoller migrationSettingsPoller;
+
+    @MockitoBean
+    MigrationMetrics migrationMetrics;
+
+    @MockitoBean
+    MigrationEventLogger migrationEventLogger;
 
     JdbcClient v1;
 

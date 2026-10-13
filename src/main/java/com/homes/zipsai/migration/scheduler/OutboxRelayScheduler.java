@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 
 import com.homes.zipsai.global.util.TimeUtils;
 import com.homes.zipsai.migration.service.OutboxRelayService;
+import com.homes.zipsai.migration.service.OutboxWorkerMetrics;
 
 import lombok.RequiredArgsConstructor;
 
@@ -17,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 public class OutboxRelayScheduler {
 
     private final OutboxRelayService outboxRelayService;
+    private final OutboxWorkerMetrics outboxWorkerMetrics;
 
     @Scheduled(fixedDelay = 1, timeUnit = TimeUnit.SECONDS, scheduler = "migrationTaskScheduler")
     public void relayPendingEvents() {
@@ -26,5 +28,10 @@ public class OutboxRelayScheduler {
     @Scheduled(fixedDelay = 1, timeUnit = TimeUnit.MINUTES, scheduler = "migrationTaskScheduler")
     public void logUnprocessedCounts() {
         outboxRelayService.logUnprocessedCounts();
+    }
+
+    @Scheduled(fixedDelay = 15, timeUnit = TimeUnit.SECONDS, scheduler = "migrationTaskScheduler")
+    public void refreshMetrics() {
+        outboxWorkerMetrics.refresh(TimeUtils.now());
     }
 }

@@ -38,7 +38,7 @@ public class OutboxRelayService {
     private static final int LAST_ERROR_MAX_LENGTH = 1000;
 
     private static final String SELECT_UNPROCESSED_EVENTS = """
-        SELECT event_id, direction, entity_type, entity_id, status, retry_count, next_retry_at
+        SELECT event_id, direction, entity_type, entity_id, status, retry_count, next_retry_at, created_at
         FROM Migration_outbox_events
         WHERE direction = :direction AND processed_at IS NULL
         ORDER BY event_id
@@ -65,17 +65,23 @@ public class OutboxRelayService {
     private final JdbcClient v2JdbcClient;
     private final OutboxApplyService outboxApplyService;
     private final MigrationSettingsProvider migrationSettingsProvider;
+    private final OutboxWorkerMetrics outboxWorkerMetrics;
+    private final MigrationEventLogger migrationEventLogger;
     private final Map<OutboxDirection, Long> lastUnprocessedCounts = new EnumMap<>(OutboxDirection.class);
 
     public OutboxRelayService(@Qualifier("outboxWorkerV1DataSource") DataSource outboxWorkerV1DataSource,
                               @Qualifier("outboxWorkerV2DataSource") DataSource outboxWorkerV2DataSource,
                               OutboxApplyService outboxApplyService,
-                              MigrationSettingsProvider migrationSettingsProvider) {
+                              MigrationSettingsProvider migrationSettingsProvider,
+                              OutboxWorkerMetrics outboxWorkerMetrics,
+                              MigrationEventLogger migrationEventLogger) {
         this.lockDataSource = outboxWorkerV1DataSource;
         this.v1JdbcClient = JdbcClient.create(outboxWorkerV1DataSource);
         this.v2JdbcClient = JdbcClient.create(outboxWorkerV2DataSource);
         this.outboxApplyService = outboxApplyService;
         this.migrationSettingsProvider = migrationSettingsProvider;
+        this.outboxWorkerMetrics = outboxWorkerMetrics;
+        this.migrationEventLogger = migrationEventLogger;
     }
 
     public void relayPendingEvents(LocalDateTime now) {
@@ -192,6 +198,7 @@ public class OutboxRelayService {
             return false;
         }
         JdbcClient source = sourceOf(event.direction());
+        long started = System.nanoTime();
         try {
             if (event.direction() == OutboxDirection.V1_TO_V2) {
                 outboxApplyService.applyV1Event(event, now);
@@ -202,6 +209,9 @@ public class OutboxRelayService {
                 .param("now", now)
                 .param("eventId", event.eventId())
                 .update();
+            outboxWorkerMetrics.recordApplied(event, now);
+            migrationEventLogger.outboxApplied(event, Duration.ofNanos(System.nanoTime() - started).toMillis(),
+                Duration.between(event.createdAt(), now).toMillis());
             return true;
         } catch (RuntimeException exception) {
             markRetry(event, source, now, exception);
@@ -221,9 +231,13 @@ public class OutboxRelayService {
             .param("eventId", event.eventId())
             .update();
         if (status == OutboxStatus.FAILED) {
+            outboxWorkerMetrics.recordFailure(event.direction());
+            migrationEventLogger.outboxFailed(event, retryCount, lastError);
             LOGGER.error("이전 이벤트가 {}번 실패해 워커를 멈춥니다. eventId={}", MAX_RETRY_COUNT, event.eventId(), exception);
             return;
         }
+        outboxWorkerMetrics.recordRetry(event.direction());
+        migrationEventLogger.outboxRetry(event, retryCount, lastError);
         LOGGER.warn("이전 이벤트 반영에 실패해 {}초 뒤 다시 시도합니다. eventId={}, retryCount={}",
             RETRY_DELAY.toSeconds(), event.eventId(), retryCount, exception);
     }
