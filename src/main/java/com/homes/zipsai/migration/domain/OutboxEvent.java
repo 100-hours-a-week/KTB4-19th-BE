@@ -9,7 +9,8 @@ public record OutboxEvent(
     String entityId,
     OutboxStatus status,
     int retryCount,
-    LocalDateTime nextRetryAt
+    LocalDateTime nextRetryAt,
+    LocalDateTime createdAt
 ) {
     public boolean isFailed() {
         return status == OutboxStatus.FAILED;

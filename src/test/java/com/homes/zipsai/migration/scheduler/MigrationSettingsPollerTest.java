@@ -2,6 +2,10 @@ package com.homes.zipsai.migration.scheduler;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -19,6 +23,7 @@ import com.homes.zipsai.migration.config.MigrationProperties;
 import com.homes.zipsai.migration.domain.MigrationMode;
 import com.homes.zipsai.migration.domain.MigrationSettings;
 import com.homes.zipsai.migration.domain.WorkerMode;
+import com.homes.zipsai.migration.service.MigrationEventLogger;
 import com.homes.zipsai.migration.service.MigrationSettingsProvider;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -37,6 +42,8 @@ class MigrationSettingsPollerTest {
 
     MigrationSettingsProvider migrationSettingsProvider;
 
+    MigrationEventLogger migrationEventLogger;
+
     MigrationSettingsPoller migrationSettingsPoller;
 
     @BeforeEach
@@ -45,6 +52,7 @@ class MigrationSettingsPollerTest {
         appConfigAgent.createContext(APP_CONFIG_PATH, this::respond);
         appConfigAgent.start();
         migrationSettingsProvider = new MigrationSettingsProvider();
+        migrationEventLogger = mock(MigrationEventLogger.class);
         migrationSettingsPoller = poller();
     }
 
@@ -83,6 +91,33 @@ class MigrationSettingsPollerTest {
         assertThat(migrationSettingsProvider.getSettings())
             .isEqualTo(
                 new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.RUNNING, false, false, 10, true));
+    }
+
+    @Test
+    @DisplayName("설정이 바뀌면 바뀐 설정을 구조화 로그로 남긴다")
+    void logsChangedSettings() {
+        migrationSettingsProvider.update(RUNNING);
+        givenConfiguration("""
+            {"migration": {"mode": "V2_PRIMARY", "workerMode": "RUNNING"}}
+            """);
+
+        migrationSettingsPoller.pollSettings();
+
+        then(migrationEventLogger).should().settingsChanged(migrationSettingsProvider.getSettings());
+    }
+
+    @Test
+    @DisplayName("설정이 그대로면 구조화 로그를 남기지 않는다")
+    void skipsLoggingUnchangedSettings() {
+        migrationSettingsProvider.update(RUNNING);
+        givenConfiguration("""
+            {"migration": {"mode": "V1_PRIMARY", "workerMode": "RUNNING",
+                "forwardWorkerEnabled": true, "reverseWorkerEnabled": true}}
+            """);
+
+        migrationSettingsPoller.pollSettings();
+
+        then(migrationEventLogger).should(never()).settingsChanged(any());
     }
 
     @Test
@@ -172,7 +207,7 @@ class MigrationSettingsPollerTest {
     private MigrationSettingsPoller poller() {
         String appConfigUrl = "http://localhost:" + appConfigAgent.getAddress().getPort() + APP_CONFIG_PATH;
         return new MigrationSettingsPoller(RestClient.builder(), new MigrationProperties(appConfigUrl, null),
-            migrationSettingsProvider);
+            migrationSettingsProvider, migrationEventLogger);
     }
 
     private void givenConfiguration(String json) {

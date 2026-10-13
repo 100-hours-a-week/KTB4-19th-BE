@@ -1,7 +1,12 @@
 package com.homes.zipsai.migration.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -22,6 +27,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.jdbc.autoconfigure.DataSourceProperties;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.io.ClassPathResource;
@@ -38,6 +44,10 @@ import com.homes.zipsai.migration.config.OutboxWorkerConfiguration;
 import com.homes.zipsai.migration.domain.MigrationMode;
 import com.homes.zipsai.migration.domain.MigrationSettings;
 import com.homes.zipsai.migration.domain.WorkerMode;
+
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 @SpringJUnitConfig(OutboxRelayServiceTest.WorkerTestConfiguration.class)
 @ExtendWith(OutputCaptureExtension.class)
@@ -60,18 +70,32 @@ class OutboxRelayServiceTest {
     @EnableTransactionManagement
     @EnableConfigurationProperties({DataSourceProperties.class, MigrationProperties.class})
     @Import({OutboxWorkerConfiguration.class, OutboxApplyService.class, OutboxRelayService.class,
-        MigrationSettingsProvider.class})
+        MigrationSettingsProvider.class, OutboxWorkerMetrics.class})
     static class WorkerTestConfiguration {
+
+        @Bean
+        MeterRegistry meterRegistry() {
+            return new SimpleMeterRegistry();
+        }
     }
 
     @MockitoBean
     OutboxEntityTables outboxEntityTables;
+
+    @MockitoBean
+    MigrationEventLogger migrationEventLogger;
 
     @Autowired
     OutboxRelayService outboxRelayService;
 
     @Autowired
     MigrationSettingsProvider migrationSettingsProvider;
+
+    @Autowired
+    OutboxWorkerMetrics outboxWorkerMetrics;
+
+    @Autowired
+    MeterRegistry meterRegistry;
 
     @Autowired
     @Qualifier("outboxWorkerV1DataSource")
@@ -93,6 +117,7 @@ class OutboxRelayServiceTest {
         given(outboxEntityTables.getIdColumn("Notices")).willReturn("notice_id");
         given(outboxEntityTables.getIdColumn("Refresh_sessions")).willReturn("session_id");
         migrationSettingsProvider.update(V1_PRIMARY_RUNNING);
+        meterRegistry.find("migration.worker.events").counters().forEach(meterRegistry::remove);
     }
 
     @AfterEach
@@ -512,6 +537,68 @@ class OutboxRelayServiceTest {
             .list()).containsExactly("POINT(37.5 127)");
     }
 
+
+    @Test
+    @DisplayName("반영에 성공하면 성공 지표와 반영 로그를 남긴다")
+    void recordsSuccessWhenEventIsApplied() {
+        saveItem(v1, 1L, "세탁기");
+        saveEvent(v1, 10L, "V1_TO_V2", "Items", "1");
+
+        outboxRelayService.relayPendingEvents(NOON);
+
+        assertThat(workerEvents("V1_TO_V2", "success")).isEqualTo(1);
+        then(migrationEventLogger).should().outboxApplied(any(), anyLong(), eq(60_000L));
+    }
+
+    @Test
+    @DisplayName("반영에 실패하면 재시도 지표와 재시도 로그를 남긴다")
+    void recordsRetryMetricAndLogWhenRelayFails() {
+        given(outboxEntityTables.getIdColumn("Unknown")).willThrow(new IllegalArgumentException("unknown"));
+        saveEvent(v1, 10L, "V1_TO_V2", "Unknown", "1");
+
+        outboxRelayService.relayPendingEvents(NOON);
+
+        assertThat(workerEvents("V1_TO_V2", "retry")).isEqualTo(1);
+        then(migrationEventLogger).should().outboxRetry(any(), eq(1), anyString());
+    }
+
+    @Test
+    @DisplayName("다섯 번째로 실패하면 최종 실패 지표와 실패 로그를 남긴다")
+    void recordsFailureMetricAndLog() {
+        given(outboxEntityTables.getIdColumn("Unknown")).willThrow(new IllegalArgumentException("unknown"));
+        saveEvent(v1, 10L, "V1_TO_V2", "Unknown", "1", "PENDING", 4, null);
+
+        outboxRelayService.relayPendingEvents(NOON);
+
+        assertThat(workerEvents("V1_TO_V2", "failure")).isEqualTo(1);
+        assertThat(workerEvents("V1_TO_V2", "retry")).isZero();
+        then(migrationEventLogger).should().outboxFailed(any(), eq(5), anyString());
+    }
+
+    @Test
+    @DisplayName("상태별 이벤트 건수와 가장 오래된 PENDING 이벤트의 대기 시간을 지표로 갱신한다")
+    void refreshesEventCountsAndOldestPendingTime() {
+        saveEvent(v1, 10L, "V1_TO_V2", "Items", "1");
+        saveEvent(v1, 11L, "V1_TO_V2", "Items", "2", "FAILED", 5, null);
+        saveEvent(v1, 12L, "V1_TO_V2", "Items", "3", "COMPLETED", 0, null);
+        markProcessed(v1, 12L);
+
+        outboxWorkerMetrics.refresh(NOON);
+
+        assertThat(outboxEvents("V1_TO_V2", "PENDING")).isEqualTo(1);
+        assertThat(outboxEvents("V1_TO_V2", "FAILED")).isEqualTo(1);
+        assertThat(outboxEvents("V1_TO_V2", "COMPLETED")).isEqualTo(1);
+        assertThat(gauge("migration.outbox.oldest.pending", "V1_TO_V2")).isEqualTo(60);
+    }
+
+    @Test
+    @DisplayName("PENDING 이벤트가 없으면 대기 시간을 0으로 둔다")
+    void setsOldestPendingTimeToZeroWithoutPendingEvents() {
+        outboxWorkerMetrics.refresh(NOON);
+
+        assertThat(gauge("migration.outbox.oldest.pending", "V2_TO_V1")).isZero();
+    }
+
     private JdbcClient resetDatabase(DataSource dataSource) {
         JdbcClient jdbcClient = JdbcClient.create(dataSource);
         for (String table : List.of("Migration_outbox_events", "Migration_applied_events", "Item_parts", "Items",
@@ -556,6 +643,23 @@ class OutboxRelayServiceTest {
         database.sql("INSERT INTO Items (item_id, item_name) VALUES (?, ?)")
             .params(itemId, itemName)
             .update();
+    }
+
+    private double workerEvents(String direction, String outcome) {
+        Counter counter = meterRegistry.find("migration.worker.events")
+            .tag("direction", direction)
+            .tag("outcome", outcome)
+            .counter();
+        return counter == null ? 0 : counter.count();
+    }
+
+    private double gauge(String name, String direction) {
+        return meterRegistry.get(name).tag("direction", direction).gauge().value();
+    }
+
+    private double outboxEvents(String direction, String status) {
+        return meterRegistry.get("migration.outbox.events").tag("direction", direction).tag("status", status).gauge()
+            .value();
     }
 
     private void saveEvent(JdbcClient database, Long eventId, String direction, String entityType, String entityId) {

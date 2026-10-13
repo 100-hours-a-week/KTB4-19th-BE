@@ -20,6 +20,9 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import com.homes.zipsai.migration.config.ConditionalOnMigrationEnabled;
 import com.homes.zipsai.migration.domain.MigrationDatabase;
+import com.homes.zipsai.migration.domain.ShadowReadResult;
+import com.homes.zipsai.migration.service.MigrationEventLogger;
+import com.homes.zipsai.migration.service.MigrationMetrics;
 import com.homes.zipsai.migration.service.MigrationRouting;
 import com.homes.zipsai.migration.service.MigrationSettingsProvider;
 import com.homes.zipsai.migration.service.ShadowReadComparator;
@@ -38,16 +41,21 @@ public class ShadowReadAspect {
     private final ShadowReadComparator shadowReadComparator;
     private final AsyncTaskExecutor shadowReadExecutor;
     private final TaskScheduler shadowReadScheduler;
+    private final MigrationMetrics migrationMetrics;
+    private final MigrationEventLogger migrationEventLogger;
 
     public ShadowReadAspect(MigrationRouting migrationRouting, MigrationSettingsProvider migrationSettingsProvider,
                             ShadowReadComparator shadowReadComparator,
                             @Qualifier("shadowReadExecutor") AsyncTaskExecutor shadowReadExecutor,
-                            @Qualifier("shadowReadScheduler") TaskScheduler shadowReadScheduler) {
+                            @Qualifier("shadowReadScheduler") TaskScheduler shadowReadScheduler,
+                            MigrationMetrics migrationMetrics, MigrationEventLogger migrationEventLogger) {
         this.migrationRouting = migrationRouting;
         this.migrationSettingsProvider = migrationSettingsProvider;
         this.shadowReadComparator = shadowReadComparator;
         this.shadowReadExecutor = shadowReadExecutor;
         this.shadowReadScheduler = shadowReadScheduler;
+        this.migrationMetrics = migrationMetrics;
+        this.migrationEventLogger = migrationEventLogger;
     }
 
     @Around("execution(* com.homes.zipsai..service..*(..)) && @annotation(transactional)")
@@ -69,11 +77,14 @@ public class ShadowReadAspect {
             shadowReadExecutor.execute(() -> {
                 try {
                     Object v2Result = migrationRouting.useReadDatabase(MigrationDatabase.V2, joinPoint::proceed);
-                    if (!shadowReadComparator.isSame(v1Result, v2Result)) {
-                        shadowReadScheduler.schedule(() -> recompare(joinPoint, method),
-                            Instant.now().plus(RECOMPARE_DELAY));
+                    if (shadowReadComparator.isSame(v1Result, v2Result)) {
+                        migrationMetrics.recordShadowRead(ShadowReadResult.MATCH);
+                        return;
                     }
+                    shadowReadScheduler.schedule(() -> recompare(joinPoint, method),
+                        Instant.now().plus(RECOMPARE_DELAY));
                 } catch (Throwable throwable) {
+                    migrationMetrics.recordShadowRead(ShadowReadResult.ERROR);
                     LOGGER.warn("Shadow Read V2 조회에 실패했습니다. method={}", method, throwable);
                 }
             });
@@ -88,10 +99,15 @@ public class ShadowReadAspect {
                 try {
                     Object v1Result = migrationRouting.useReadDatabase(MigrationDatabase.V1, joinPoint::proceed);
                     Object v2Result = migrationRouting.useReadDatabase(MigrationDatabase.V2, joinPoint::proceed);
-                    if (!shadowReadComparator.isSame(v1Result, v2Result)) {
-                        LOGGER.warn("Shadow Read 결과가 다시 비교해도 V1과 다릅니다. method={}", method);
+                    if (shadowReadComparator.isSame(v1Result, v2Result)) {
+                        migrationMetrics.recordShadowRead(ShadowReadResult.MISMATCH_TRANSIENT);
+                        return;
                     }
+                    migrationMetrics.recordShadowRead(ShadowReadResult.MISMATCH_PERSISTENT);
+                    migrationEventLogger.shadowReadMismatch(method, ShadowReadResult.MISMATCH_PERSISTENT.getTag());
+                    LOGGER.warn("Shadow Read 결과가 다시 비교해도 V1과 다릅니다. method={}", method);
                 } catch (Throwable throwable) {
+                    migrationMetrics.recordShadowRead(ShadowReadResult.ERROR);
                     LOGGER.warn("Shadow Read 재비교 조회에 실패했습니다. method={}", method, throwable);
                 }
             });
