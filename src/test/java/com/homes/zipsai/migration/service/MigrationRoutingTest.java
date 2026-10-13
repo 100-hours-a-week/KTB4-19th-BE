@@ -2,6 +2,8 @@ package com.homes.zipsai.migration.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.OffsetDateTime;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -47,6 +49,28 @@ class MigrationRoutingTest {
     @DisplayName("V2_PRIMARY면 V2에 쓴다")
     void writesToV2WhenV2IsPrimary() {
         givenSettings(MigrationMode.V2_PRIMARY, 0);
+
+        MigrationDatabase database = migrationRouting.determineWriteDatabase();
+
+        assertThat(database).isEqualTo(MigrationDatabase.V2);
+    }
+
+    @Test
+    @DisplayName("전환 시각 전에는 이전 mode의 DB에 쓴다")
+    void writesToPreviousDatabaseBeforeSwitchTime() {
+        migrationSettingsProvider.update(new MigrationSettings(MigrationMode.V2_PRIMARY,
+            OffsetDateTime.now().plusDays(1), WorkerMode.PAUSED, false, false, 0, false));
+
+        MigrationDatabase database = migrationRouting.determineWriteDatabase();
+
+        assertThat(database).isEqualTo(MigrationDatabase.V1);
+    }
+
+    @Test
+    @DisplayName("전환 시각이 지나면 지정한 mode의 DB에 쓴다")
+    void writesToNewDatabaseAfterSwitchTime() {
+        migrationSettingsProvider.update(new MigrationSettings(MigrationMode.V2_PRIMARY,
+            OffsetDateTime.now().minusDays(1), WorkerMode.PAUSED, false, false, 0, false));
 
         MigrationDatabase database = migrationRouting.determineWriteDatabase();
 
