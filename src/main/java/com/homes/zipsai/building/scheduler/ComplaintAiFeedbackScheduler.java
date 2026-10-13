@@ -16,7 +16,7 @@ import lombok.RequiredArgsConstructor;
 
 @Component
 @ConditionalOnProperty(name = "app.complaint.ai-feedback-scheduler.enabled", havingValue = "true",
-    matchIfMissing = true)
+    matchIfMissing = false)
 @RequiredArgsConstructor
 public class ComplaintAiFeedbackScheduler {
 
