@@ -86,7 +86,8 @@ public class SecurityConfig {
                         ).permitAll()
                         .requestMatchers(
                                 org.springframework.http.HttpMethod.GET,
-                                "/api/actuator/health"
+                                "/api/actuator/health",
+                                "/api/actuator/prometheus"
                         ).permitAll()
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/api/v1/managers/**").hasRole("MANAGER")
