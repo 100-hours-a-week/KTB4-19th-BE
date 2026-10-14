@@ -2,37 +2,49 @@ package com.homes.zipsai.conversation.ai;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.test.web.client.ResponseCreator;
 import org.springframework.web.client.RestClient;
 
 import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.global.exception.TooManyRequestsException;
+import com.sun.net.httpserver.HttpServer;
 
 import tools.jackson.databind.json.JsonMapper;
 
 class HttpAiConverseClientTest {
 
     private static final String BASE_URL = "http://ai.test";
-    private static final String CONVERSE_PATH = "/api/v3/ai/converse";
-    private static final String CONVERSE_URL = BASE_URL + CONVERSE_PATH;
+    private static final String CONVERSE_STREAM_PATH = "/api/v3/ai/converse/stream";
+    private static final String CONVERSE_STREAM_URL = BASE_URL + CONVERSE_STREAM_PATH;
     private static final String TURN_ID = "6f6d8b2e-0b0b-4a1e-9f2a-3f9d5c1a7e11";
     private static final String TRACE_ID = "request-trace-id";
+    private static final JsonMapper JSON_MAPPER = new JsonMapper();
 
     private MockRestServiceServer mockRestServiceServer;
     private HttpAiConverseClient httpAiConverseClient;
@@ -41,14 +53,16 @@ class HttpAiConverseClientTest {
     void setUp() {
         RestClient.Builder builder = RestClient.builder();
         mockRestServiceServer = MockRestServiceServer.bindTo(builder).build();
-        httpAiConverseClient = new HttpAiConverseClient(builder, BASE_URL, CONVERSE_PATH, new JsonMapper());
+        httpAiConverseClient = new HttpAiConverseClient(builder.baseUrl(BASE_URL).build(), CONVERSE_STREAM_PATH,
+            JSON_MAPPER);
     }
 
     @Test
-    @DisplayName("계약한 필드 이름과 값으로 AI 서버에 요청한다")
+    @DisplayName("계약한 필드 이름과 값으로 AI 서버에 스트림을 요청한다")
     void sendsContractFields() {
-        mockRestServiceServer.expect(requestTo(CONVERSE_URL))
+        mockRestServiceServer.expect(requestTo(CONVERSE_STREAM_URL))
             .andExpect(method(HttpMethod.POST))
+            .andExpect(header(HttpHeaders.ACCEPT, MediaType.TEXT_EVENT_STREAM_VALUE))
             .andExpect(jsonPath("$.building_id").value(1))
             .andExpect(jsonPath("$.room_no").value("302"))
             .andExpect(jsonPath("$.resident_id").value("7"))
@@ -72,7 +86,7 @@ class HttpAiConverseClientTest {
             .andExpect(jsonPath("$.complaint_draft.issue_type").value("leak"))
             .andExpect(jsonPath("$.complaint_draft.symptom").value("천장에서 물이 새요"))
             .andExpect(jsonPath("$.complaint_draft.attachmentIds[0]").value(31))
-            .andRespond(withSuccess(complaintReply(), MediaType.APPLICATION_JSON));
+            .andRespond(withStream(status(), complete(complaintReply()), done()));
 
         httpAiConverseClient.converse(request(), delta -> { });
 
@@ -80,10 +94,24 @@ class HttpAiConverseClientTest {
     }
 
     @Test
-    @DisplayName("AI 서버의 민원 응답을 읽는다")
+    @DisplayName("답변 조각을 받은 순서대로 넘긴다")
+    void passesReplyDeltasInOrder() {
+        mockRestServiceServer.expect(requestTo(CONVERSE_STREAM_URL))
+            .andRespond(withStream(status(), delta("아래 내용으로 "), delta("민원을 "), delta("접수할까요?"),
+                complete(complaintReply()), done()));
+        List<String> deltas = new ArrayList<>();
+
+        httpAiConverseClient.converse(request(), deltas::add);
+
+        assertThat(deltas).containsExactly("아래 내용으로 ", "민원을 ", "접수할까요?");
+    }
+
+    @Test
+    @DisplayName("최종 응답 이벤트의 민원 응답을 읽는다")
     void readsComplaintReply() {
-        mockRestServiceServer.expect(requestTo(CONVERSE_URL))
-            .andRespond(withSuccess(complaintReply(), MediaType.APPLICATION_JSON));
+        mockRestServiceServer.expect(requestTo(CONVERSE_STREAM_URL))
+            .andRespond(withStream(status(), delta("아래 내용으로 민원을 접수할까요?"), complete(complaintReply()),
+                done()));
 
         AiConverseResponse response = httpAiConverseClient.converse(request(), delta -> { });
 
@@ -99,10 +127,61 @@ class HttpAiConverseClientTest {
     }
 
     @Test
+    @DisplayName("AI 서버가 답변 도중 오류 이벤트를 보내면 AI 사용 불가 예외로 바꾼다")
+    void mapsErrorEventToAiUnavailable() {
+        mockRestServiceServer.expect(requestTo(CONVERSE_STREAM_URL))
+            .andRespond(withStream(status(), delta("관리비는 "),
+                "{\"type\":\"error\",\"message\":\"응답 생성에 실패했습니다.\"}", done()));
+
+        assertThatThrownBy(() -> httpAiConverseClient.converse(request(), delta -> { }))
+            .isInstanceOf(AiUnavailableException.class);
+    }
+
+    @Test
+    @DisplayName("최종 응답 없이 스트림이 끝나면 AI 사용 불가 예외로 바꾼다")
+    void mapsStreamWithoutCompleteToAiUnavailable() {
+        mockRestServiceServer.expect(requestTo(CONVERSE_STREAM_URL))
+            .andRespond(withStream(status(), delta("관리비는 "), done()));
+
+        assertThatThrownBy(() -> httpAiConverseClient.converse(request(), delta -> { }))
+            .isInstanceOf(AiUnavailableException.class);
+    }
+
+    @Test
+    @DisplayName("답변 조각이 읽기 제한 시간 넘게 오지 않으면 AI 사용 불가 예외로 바꾼다")
+    void mapsStalledStreamToAiUnavailable() throws Exception {
+        CountDownLatch testFinished = new CountDownLatch(1);
+        HttpServer stalledServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        stalledServer.createContext(CONVERSE_STREAM_PATH, exchange -> {
+            exchange.getResponseHeaders().set(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_EVENT_STREAM_VALUE);
+            exchange.sendResponseHeaders(HttpStatus.OK.value(), 0);
+            OutputStream responseBody = exchange.getResponseBody();
+            responseBody.write(("data: " + status() + "\n\n").getBytes(StandardCharsets.UTF_8));
+            responseBody.flush();
+            awaitQuietly(testFinished);
+            exchange.close();
+        });
+        stalledServer.start();
+        HttpAiConverseClient client = new HttpAiConverseClient(RestClient.builder(),
+            "http://127.0.0.1:" + stalledServer.getAddress().getPort(), CONVERSE_STREAM_PATH, Duration.ofSeconds(1),
+            Duration.ofMillis(300), JSON_MAPPER);
+        long startedNanos = System.nanoTime();
+
+        try {
+            assertThatThrownBy(() -> client.converse(request(), delta -> { }))
+                .isInstanceOf(AiUnavailableException.class);
+            assertThat(Duration.ofNanos(System.nanoTime() - startedNanos)).isLessThan(Duration.ofSeconds(3));
+        } finally {
+            testFinished.countDown();
+            stalledServer.stop(0);
+        }
+    }
+
+    @Test
     @DisplayName("AI 서버의 사진 분석 결과와 민원 초안 사진 필드를 읽는다")
     void readsImageAnalysisAndDraftAttachments() {
-        mockRestServiceServer.expect(requestTo(CONVERSE_URL))
-            .andRespond(withSuccess("""
+        mockRestServiceServer.expect(requestTo(CONVERSE_STREAM_URL))
+            .andRespond(withStream(complete("""
                 {
                   "code": "ai_response_success",
                   "turn_id": "%s",
@@ -127,7 +206,7 @@ class HttpAiConverseClientTest {
                     }
                   }
                 }
-                """.formatted(TURN_ID), MediaType.APPLICATION_JSON));
+                """.formatted(TURN_ID)), done()));
 
         AiConverseResponse response = httpAiConverseClient.converse(request(), delta -> { });
 
@@ -142,8 +221,8 @@ class HttpAiConverseClientTest {
     @Test
     @DisplayName("오프셋 없는 발생 시각이 담긴 응답도 읽는다")
     void readsResponseWithoutOffsetOnOccurredAt() {
-        mockRestServiceServer.expect(requestTo(CONVERSE_URL))
-            .andRespond(withSuccess("""
+        mockRestServiceServer.expect(requestTo(CONVERSE_STREAM_URL))
+            .andRespond(withStream(complete("""
                 {
                   "code": "ai_response_success",
                   "turn_id": "%s",
@@ -162,7 +241,7 @@ class HttpAiConverseClientTest {
                     }
                   }
                 }
-                """.formatted(TURN_ID), MediaType.APPLICATION_JSON));
+                """.formatted(TURN_ID)), done()));
 
         AiConverseResponse response = httpAiConverseClient.converse(request(), delta -> { });
 
@@ -173,7 +252,7 @@ class HttpAiConverseClientTest {
     }
 
     @Test
-    @DisplayName("AI 호출이 실패하면 응답 원문을 로그에 남기지 않는다")
+    @DisplayName("AI 응답을 읽지 못하면 응답 원문을 로그에 남기지 않는다")
     void doesNotLogRawBodyWhenResponseIsUnreadable() {
         ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
             org.slf4j.LoggerFactory.getLogger(HttpAiConverseClient.class);
@@ -181,9 +260,8 @@ class HttpAiConverseClientTest {
             new ch.qos.logback.core.read.ListAppender<>();
         appender.start();
         logger.addAppender(appender);
-        mockRestServiceServer.expect(requestTo(CONVERSE_URL))
-            .andRespond(withSuccess("{\"code\": \"ai_response_success\", \"data\": 12345}",
-                MediaType.APPLICATION_JSON));
+        mockRestServiceServer.expect(requestTo(CONVERSE_STREAM_URL))
+            .andRespond(withStream(complete("{\"code\": \"ai_response_success\", \"data\": 12345}"), done()));
 
         try {
             assertThatThrownBy(() -> httpAiConverseClient.converse(request(), delta -> { }))
@@ -197,7 +275,7 @@ class HttpAiConverseClientTest {
     }
 
     @Test
-    @DisplayName("AI 요청과 응답 원문을 traceId, turnId와 함께 로그에 남긴다")
+    @DisplayName("AI 요청과 최종 응답 원문을 traceId, turnId와 함께 로그에 남긴다")
     void logsRawRequestAndResponseBodies() {
         ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
             org.slf4j.LoggerFactory.getLogger(HttpAiConverseClient.class);
@@ -206,8 +284,8 @@ class HttpAiConverseClientTest {
         appender.start();
         logger.addAppender(appender);
         MDC.put("traceId", TRACE_ID);
-        mockRestServiceServer.expect(requestTo(CONVERSE_URL))
-            .andRespond(withSuccess(complaintReply(), MediaType.APPLICATION_JSON));
+        mockRestServiceServer.expect(requestTo(CONVERSE_STREAM_URL))
+            .andRespond(withStream(complete(complaintReply()), done()));
 
         try {
             httpAiConverseClient.converse(request(), delta -> { });
@@ -229,8 +307,8 @@ class HttpAiConverseClientTest {
     @Test
     @DisplayName("근거가 없는 질의 응답에서 질문 카드를 읽는다")
     void readsQaCardDraftWhenEvidenceIsMissing() {
-        mockRestServiceServer.expect(requestTo(CONVERSE_URL))
-            .andRespond(withSuccess("""
+        mockRestServiceServer.expect(requestTo(CONVERSE_STREAM_URL))
+            .andRespond(withStream(complete("""
                 {
                   "code": "ai_response_success",
                   "turn_id": "%s",
@@ -246,7 +324,7 @@ class HttpAiConverseClientTest {
                     }
                   }
                 }
-                """.formatted(TURN_ID), MediaType.APPLICATION_JSON));
+                """.formatted(TURN_ID)), done()));
 
         AiConverseResponse response = httpAiConverseClient.converse(request(), delta -> { });
 
@@ -259,7 +337,8 @@ class HttpAiConverseClientTest {
     @Test
     @DisplayName("AI 서버가 요청 제한으로 거절하면 요청 과다 예외로 바꾼다")
     void mapsRateLimitToTooManyRequests() {
-        mockRestServiceServer.expect(requestTo(CONVERSE_URL)).andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
+        mockRestServiceServer.expect(requestTo(CONVERSE_STREAM_URL))
+            .andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
 
         assertThatThrownBy(() -> httpAiConverseClient.converse(request(), delta -> { }))
             .isInstanceOf(TooManyRequestsException.class);
@@ -268,10 +347,43 @@ class HttpAiConverseClientTest {
     @Test
     @DisplayName("AI 서버가 응답하지 못하면 AI 사용 불가 예외로 바꾼다")
     void mapsGatewayTimeoutToAiUnavailable() {
-        mockRestServiceServer.expect(requestTo(CONVERSE_URL)).andRespond(withStatus(HttpStatus.GATEWAY_TIMEOUT));
+        mockRestServiceServer.expect(requestTo(CONVERSE_STREAM_URL))
+            .andRespond(withStatus(HttpStatus.GATEWAY_TIMEOUT));
 
         assertThatThrownBy(() -> httpAiConverseClient.converse(request(), delta -> { }))
             .isInstanceOf(AiUnavailableException.class);
+    }
+
+    private static ResponseCreator withStream(String... events) {
+        StringBuilder body = new StringBuilder();
+        for (String event : events) {
+            body.append("data: ").append(event).append("\n\n");
+        }
+        return withSuccess(body.toString(), MediaType.TEXT_EVENT_STREAM);
+    }
+
+    private static String status() {
+        return "{\"type\":\"status\",\"status\":\"응답을 준비하고 있습니다.\"}";
+    }
+
+    private static String delta(String text) {
+        return "{\"type\":\"delta\",\"field\":\"reply\",\"text\":\"" + text + "\"}";
+    }
+
+    private static String complete(String response) {
+        return "{\"type\":\"complete\",\"response\":" + JSON_MAPPER.readTree(response) + "}";
+    }
+
+    private static String done() {
+        return "{\"type\":\"done\"}";
+    }
+
+    private static void awaitQuietly(CountDownLatch latch) {
+        try {
+            latch.await(10, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private static String complaintReply() {
