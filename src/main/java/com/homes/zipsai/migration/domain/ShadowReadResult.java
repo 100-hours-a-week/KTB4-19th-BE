@@ -8,8 +8,10 @@ import lombok.RequiredArgsConstructor;
 public enum ShadowReadResult {
     MATCH("match"),
     MISMATCH_INITIAL("mismatch_initial"),
+    MISMATCH_RESOLVED("mismatch_resolved"),
     MISMATCH_PERSISTENT("mismatch_persistent"),
-    ERROR("error");
+    ERROR("error"),
+    SKIPPED("skipped");
 
     private final String tag;
 }
