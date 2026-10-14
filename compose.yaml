@@ -43,6 +43,7 @@ services:
       REDIS_CONNECT_TIMEOUT: ${REDIS_CONNECT_TIMEOUT:-1s}
       REDIS_TIMEOUT: ${REDIS_TIMEOUT:-1s}
       REDIS_SHUTDOWN_TIMEOUT: ${REDIS_SHUTDOWN_TIMEOUT:-1s}
+      REDIS_NOTIFICATION_PUBSUB_CHANNEL: ${REDIS_NOTIFICATION_PUBSUB_CHANNEL:-notification-events}
       JWT_SECRET: ${JWT_SECRET:-local-development-only-jwt-secret-change-before-deployment-2026}
       AUTH_SECURE_COOKIE: "false"
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
