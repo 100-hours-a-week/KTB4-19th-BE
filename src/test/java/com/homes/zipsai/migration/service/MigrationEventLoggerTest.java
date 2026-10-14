@@ -25,6 +25,7 @@ import com.homes.zipsai.migration.domain.ShadowReadPhase;
 import com.homes.zipsai.migration.domain.ShadowReadQuery;
 import com.homes.zipsai.migration.domain.ShadowReadRequest;
 import com.homes.zipsai.migration.domain.ShadowReadResult;
+import com.homes.zipsai.migration.domain.ShadowReadRowCheck;
 import com.homes.zipsai.migration.domain.WorkerMode;
 
 import tools.jackson.databind.json.JsonMapper;
@@ -83,7 +84,8 @@ class MigrationEventLoggerTest {
     @Test
     @DisplayName("Shadow Read 불일치는 단계, DB별 조회 시각, 차이를 JSON으로 남긴다")
     void logsShadowReadMismatch(CapturedOutput output) {
-        ShadowReadComparison comparison = ShadowReadComparison.of(V1_QUERY, V2_QUERY, List.of("3"), List.of(), false,
+        ShadowReadComparison comparison = ShadowReadComparison.of(V1_QUERY, V2_QUERY, "conversationId", List.of("3"),
+            List.of(), false,
             List.of(new FieldDifference("1", "lastMessageAt", "2026-10-14T12:00:05", "2026-10-14T12:00:02")));
 
         migrationEventLogger.shadowReadMismatch(REQUEST, ShadowReadPhase.RECOMPARE,
@@ -95,6 +97,22 @@ class MigrationEventLoggerTest {
             "\"v2_finished_at\":\"2026-10-14T12:00:02Z\"", "\"only_in_v1_ids\":[\"3\"]", "\"only_in_v1_count\":1",
             "\"order_differs\":false", "\"field\":\"lastMessageAt\"", "\"v1\":\"2026-10-14T12:00:05\"",
             "\"field_difference_count\":1");
+    }
+
+    @Test
+    @DisplayName("PK 재확인 결과는 테이블과 ID별 판정, 컬럼 차이를 JSON으로 남긴다")
+    void logsShadowReadRowCheck(CapturedOutput output) {
+        ShadowReadRowCheck rowCheck = ShadowReadRowCheck.of("Conversations", Instant.parse("2026-10-14T12:00:30Z"),
+            Instant.parse("2026-10-14T12:00:31Z"), List.of("111783"), List.of("2"), List.of("3"),
+            List.of(new FieldDifference("3", "last_message_at", "2026-10-14T12:00:05", "2026-10-14T12:00:02")));
+
+        migrationEventLogger.shadowReadRowChecked(REQUEST, rowCheck);
+
+        assertThat(output.getOut()).contains("\"event\":\"shadow_read_mismatch\"", "\"phase\":\"recompare\"",
+            "\"outcome\":\"mismatch_persistent\"", "\"recheck\":\"primary_key\"", "\"table\":\"Conversations\"",
+            "\"rows_started_at\":\"2026-10-14T12:00:30Z\"", "\"resolved_ids\":[\"111783\"]",
+            "\"lagging_ids\":[\"2\"]", "\"persistent_ids\":[\"3\"]", "\"field\":\"last_message_at\"",
+            "\"column_difference_count\":1");
     }
 
     @Test

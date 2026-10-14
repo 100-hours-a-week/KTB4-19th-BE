@@ -155,6 +155,50 @@ class ShadowReadComparatorTest {
         assertThat(comparison.fieldDifferences().getFirst().v1()).isEqualTo(sha256("\"보일러 고장\""));
     }
 
+    @Test
+    @DisplayName("목록 항목의 첫 ID 필드 이름을 남긴다")
+    void keepsIdFieldOfListItems() {
+        ShadowReadComparison comparison = compare(page(item(1L, "2026-10-14T12:00:01")),
+            page(item(2L, "2026-10-14T12:00:01")));
+
+        assertThat(comparison.idField()).isEqualTo("conversationId");
+    }
+
+    @Test
+    @DisplayName("재확인 대상 ID는 한쪽에만 있는 ID와 값이 다른 ID를 모두 담는다")
+    void collectsAllDifferingEntityIds() {
+        ShadowReadComparison comparison = compare(
+            page(item(111783L, "2026-10-14T22:31:15"), item(1L, "2026-10-14T12:00:05")),
+            page(item(1L, "2026-10-14T12:00:02"), item(2L, "2026-10-14T12:00:00")));
+
+        assertThat(comparison.differingEntityIds()).containsExactly("111783", "2", "1");
+    }
+
+    @Test
+    @DisplayName("재확인 대상 ID는 로그 개수 제한과 관계없이 모두 담는다")
+    void collectsDifferingEntityIdsBeyondLogLimit() {
+        List<ConversationItem> v1Items = new ArrayList<>();
+        List<ConversationItem> v2Items = new ArrayList<>();
+        for (long id = 1; id <= 25; id++) {
+            v1Items.add(new ConversationItem(id, "제목", "ACTIVE", "2026-10-14T12:00:05"));
+            v2Items.add(new ConversationItem(id, "제목", "CLOSED", "2026-10-14T12:00:02"));
+        }
+
+        ShadowReadComparison comparison = compare(new Page(false, v1Items), new Page(false, v2Items));
+
+        assertThat(comparison.fieldDifferences()).hasSize(20);
+        assertThat(comparison.differingEntityIds()).hasSize(25);
+    }
+
+    @Test
+    @DisplayName("목록이 아닌 결과는 재확인할 ID가 없다")
+    void hasNoEntityIdsForSingleValue() {
+        ShadowReadComparison comparison = compare("세탁기", "건조기");
+
+        assertThat(comparison.isSame()).isFalse();
+        assertThat(comparison.differingEntityIds()).isEmpty();
+    }
+
     private ShadowReadComparison compare(Object v1Result, Object v2Result) {
         return shadowReadComparator.compare(query(MigrationDatabase.V1, v1Result),
             query(MigrationDatabase.V2, v2Result));

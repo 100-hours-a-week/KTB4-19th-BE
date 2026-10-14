@@ -2,6 +2,7 @@ package com.homes.zipsai.migration.aspect;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Optional;
 
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
@@ -26,10 +27,12 @@ import com.homes.zipsai.migration.domain.ShadowReadPhase;
 import com.homes.zipsai.migration.domain.ShadowReadQuery;
 import com.homes.zipsai.migration.domain.ShadowReadRequest;
 import com.homes.zipsai.migration.domain.ShadowReadResult;
+import com.homes.zipsai.migration.domain.ShadowReadRowCheck;
 import com.homes.zipsai.migration.service.MigrationEventLogger;
 import com.homes.zipsai.migration.service.MigrationMetrics;
 import com.homes.zipsai.migration.service.MigrationRouting;
 import com.homes.zipsai.migration.service.ShadowReadComparator;
+import com.homes.zipsai.migration.service.ShadowReadRowVerifier;
 
 @Aspect
 @Component
@@ -43,17 +46,20 @@ public class ShadowReadAspect {
 
     private final MigrationRouting migrationRouting;
     private final ShadowReadComparator shadowReadComparator;
+    private final ShadowReadRowVerifier shadowReadRowVerifier;
     private final AsyncTaskExecutor shadowReadExecutor;
     private final TaskScheduler shadowReadScheduler;
     private final MigrationMetrics migrationMetrics;
     private final MigrationEventLogger migrationEventLogger;
 
     public ShadowReadAspect(MigrationRouting migrationRouting, ShadowReadComparator shadowReadComparator,
+                            ShadowReadRowVerifier shadowReadRowVerifier,
                             @Qualifier("shadowReadExecutor") AsyncTaskExecutor shadowReadExecutor,
                             @Qualifier("shadowReadScheduler") TaskScheduler shadowReadScheduler,
                             MigrationMetrics migrationMetrics, MigrationEventLogger migrationEventLogger) {
         this.migrationRouting = migrationRouting;
         this.shadowReadComparator = shadowReadComparator;
+        this.shadowReadRowVerifier = shadowReadRowVerifier;
         this.shadowReadExecutor = shadowReadExecutor;
         this.shadowReadScheduler = shadowReadScheduler;
         this.migrationMetrics = migrationMetrics;
@@ -92,12 +98,20 @@ public class ShadowReadAspect {
                 return;
             }
             recordMismatch(request, ShadowReadPhase.INITIAL, ShadowReadResult.MISMATCH_INITIAL, comparison);
-            shadowReadScheduler.schedule(() -> recompare(joinPoint, request), Instant.now().plus(RECOMPARE_DELAY));
+            shadowReadScheduler.schedule(() -> recompare(joinPoint, request, comparison),
+                Instant.now().plus(RECOMPARE_DELAY));
         });
     }
 
-    private void recompare(ProceedingJoinPoint joinPoint, ShadowReadRequest request) {
+    private void recompare(ProceedingJoinPoint joinPoint, ShadowReadRequest request,
+                           ShadowReadComparison initialComparison) {
         runShadowRead(request, ShadowReadPhase.RECOMPARE, () -> {
+            Optional<ShadowReadRowCheck> rowCheck = shadowReadRowVerifier.verify(initialComparison);
+            if (rowCheck.isPresent()) {
+                migrationMetrics.recordShadowRead(rowCheck.get().result());
+                migrationEventLogger.shadowReadRowChecked(request, rowCheck.get());
+                return;
+            }
             ShadowReadQuery responseQuery = read(joinPoint, request.responseDatabase());
             ShadowReadQuery otherQuery = read(joinPoint, request.responseDatabase().other());
             ShadowReadComparison comparison = shadowReadComparator.compare(responseQuery, otherQuery);
