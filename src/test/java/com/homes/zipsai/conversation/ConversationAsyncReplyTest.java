@@ -73,7 +73,7 @@ class ConversationAsyncReplyTest {
             conversationTestFixture.authenticatedAs(conversationTestFixture.livingResident("302"));
         CompletableFuture<Thread> aiThread = new CompletableFuture<>();
         CompletableFuture<String> aiTraceId = new CompletableFuture<>();
-        given(aiConverseClient.converse(any())).willAnswer(invocation -> {
+        given(aiConverseClient.converse(any(), any())).willAnswer(invocation -> {
             aiThread.complete(Thread.currentThread());
             aiTraceId.complete(MDC.get("traceId"));
             return collectingReply(invocation);
@@ -97,7 +97,7 @@ class ConversationAsyncReplyTest {
     void logsReplyTaskWithRequestTraceId() throws Exception {
         RequestPostProcessor resident =
             conversationTestFixture.authenticatedAs(conversationTestFixture.livingResident("302"));
-        given(aiConverseClient.converse(any())).willAnswer(ConversationAsyncReplyTest::collectingReply);
+        given(aiConverseClient.converse(any(), any())).willAnswer(ConversationAsyncReplyTest::collectingReply);
 
         MvcTestResult result = mockMvcTester.post().uri(CONVERSATIONS).with(resident)
             .contentType(MediaType.APPLICATION_JSON)

@@ -8,9 +8,11 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 
 import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +38,7 @@ import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.conversation.domain.MessageType;
 import com.homes.zipsai.conversation.domain.SenderType;
+import com.homes.zipsai.conversation.dto.response.ConversationReplyDeltaResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyFailedResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyResponse;
 import com.homes.zipsai.conversation.dto.response.MessageResponse;
@@ -77,7 +80,7 @@ class ConversationReplyServiceTest {
         PendingAiReply pendingAiReply = pendingAiReply();
         AiConverseResponse aiResponse = aiResponse(TURN_ID);
         ConversationReplyResponse reply = new ConversationReplyResponse(CONVERSATION_ID, assistantMessage(), null);
-        given(aiConverseClient.converse(pendingAiReply.aiRequest())).willReturn(aiResponse);
+        given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willReturn(aiResponse);
         given(conversationService.saveAiReply(pendingAiReply, aiResponse)).willReturn(reply);
 
         conversationReplyService.reply(RESIDENT_ID, pendingAiReply);
@@ -89,10 +92,35 @@ class ConversationReplyServiceTest {
     }
 
     @Test
+    @DisplayName("AI가 보낸 답변 조각을 순서 번호와 함께 chat-delta 이벤트로 보낸 뒤 chat-done을 보낸다")
+    void sendsReplyDeltasInOrderBeforeDoneEvent() {
+        PendingAiReply pendingAiReply = pendingAiReply();
+        AiConverseResponse aiResponse = aiResponse(TURN_ID);
+        given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willAnswer(invocation -> {
+            Consumer<String> onReplyDelta = invocation.getArgument(1);
+            onReplyDelta.accept("위치");
+            onReplyDelta.accept("가 ");
+            return aiResponse;
+        });
+        given(conversationService.saveAiReply(pendingAiReply, aiResponse))
+            .willReturn(new ConversationReplyResponse(CONVERSATION_ID, assistantMessage(), null));
+
+        conversationReplyService.reply(RESIDENT_ID, pendingAiReply);
+
+        List<Set<DataWithMediaType>> events = sentEvents(3);
+        assertThat(events).extracting(ConversationReplyServiceTest::eventName).containsExactly(
+            ConversationReplyService.REPLY_DELTA_EVENT, ConversationReplyService.REPLY_DELTA_EVENT,
+            ConversationReplyService.REPLY_EVENT);
+        assertThat(events.subList(0, 2)).extracting(ConversationReplyServiceTest::eventData).containsExactly(
+            new ConversationReplyDeltaResponse(CONVERSATION_ID, 1, "위치"),
+            new ConversationReplyDeltaResponse(CONVERSATION_ID, 2, "가 "));
+    }
+
+    @Test
     @DisplayName("AI 호출이 실패하면 답변받지 못한 메시지를 지우고 오류 코드를 chat-error 이벤트로 보낸다")
     void discardsUnansweredMessageAndSendsErrorEventWhenAiFails() {
         PendingAiReply pendingAiReply = pendingAiReply();
-        given(aiConverseClient.converse(pendingAiReply.aiRequest())).willThrow(new AiUnavailableException());
+        given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willThrow(new AiUnavailableException());
 
         conversationReplyService.reply(RESIDENT_ID, pendingAiReply);
 
@@ -109,7 +137,7 @@ class ConversationReplyServiceTest {
     @DisplayName("AI 답변 처리가 실패하면 작업 로그에 남길 오류 코드를 기록한다")
     void recordsErrorCodeForTaskLogWhenReplyFails() {
         PendingAiReply pendingAiReply = pendingAiReply();
-        given(aiConverseClient.converse(pendingAiReply.aiRequest())).willThrow(new AiUnavailableException());
+        given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willThrow(new AiUnavailableException());
 
         conversationReplyService.reply(RESIDENT_ID, pendingAiReply);
 
@@ -120,7 +148,7 @@ class ConversationReplyServiceTest {
     @DisplayName("요청과 다른 turn ID로 온 AI 응답은 저장하지 않고 서버 오류로 알린다")
     void rejectsReplyWithAnotherTurnId() {
         PendingAiReply pendingAiReply = pendingAiReply();
-        given(aiConverseClient.converse(pendingAiReply.aiRequest())).willReturn(aiResponse("other-turn"));
+        given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willReturn(aiResponse("other-turn"));
 
         conversationReplyService.reply(RESIDENT_ID, pendingAiReply);
 
@@ -133,7 +161,8 @@ class ConversationReplyServiceTest {
     @DisplayName("예상하지 못한 예외도 메시지를 지우고 서버 오류로 알린다")
     void sendsInternalServerErrorForUnexpectedFailure() {
         PendingAiReply pendingAiReply = pendingAiReply();
-        given(aiConverseClient.converse(pendingAiReply.aiRequest())).willThrow(new IllegalStateException("AI timeout"));
+        given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any()))
+            .willThrow(new IllegalStateException("AI timeout"));
 
         conversationReplyService.reply(RESIDENT_ID, pendingAiReply);
 
@@ -157,7 +186,7 @@ class ConversationReplyServiceTest {
     @DisplayName("AI 답변이 끝나면 같은 대화에 다시 보낼 수 있다")
     void allowsNextMessageAfterReply() {
         PendingAiReply pendingAiReply = pendingAiReply();
-        given(aiConverseClient.converse(pendingAiReply.aiRequest())).willThrow(new AiUnavailableException());
+        given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willThrow(new AiUnavailableException());
         conversationReplyService.startReplying(CONVERSATION_ID);
         conversationReplyService.reply(RESIDENT_ID, pendingAiReply);
 
@@ -169,6 +198,15 @@ class ConversationReplyServiceTest {
             ArgumentCaptor.forClass(SseEmitter.SseEventBuilder.class);
         then(sseService).should().send(eq(RESIDENT_ID), eventCaptor.capture());
         return eventCaptor.getValue().build();
+    }
+
+    private List<Set<DataWithMediaType>> sentEvents(int count) {
+        ArgumentCaptor<SseEmitter.SseEventBuilder> eventCaptor =
+            ArgumentCaptor.forClass(SseEmitter.SseEventBuilder.class);
+        then(sseService).should(times(count)).send(eq(RESIDENT_ID), eventCaptor.capture());
+        return eventCaptor.getAllValues().stream()
+            .map(SseEmitter.SseEventBuilder::build)
+            .toList();
     }
 
     private static String eventName(Set<DataWithMediaType> event) {
