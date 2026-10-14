@@ -1,15 +1,19 @@
 package com.homes.zipsai.migration.service;
 
 import java.time.Instant;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonUnwrapped;
 import com.homes.zipsai.global.util.TextUtils;
+import com.homes.zipsai.migration.domain.MigrationDatabase;
+import com.homes.zipsai.migration.domain.MigrationMode;
 import com.homes.zipsai.migration.domain.MigrationSettings;
+import com.homes.zipsai.migration.domain.OutboxDirection;
 import com.homes.zipsai.migration.domain.OutboxEvent;
 import com.homes.zipsai.migration.domain.ShadowReadComparison;
 import com.homes.zipsai.migration.domain.ShadowReadComparison.FieldDifference;
@@ -17,139 +21,139 @@ import com.homes.zipsai.migration.domain.ShadowReadPhase;
 import com.homes.zipsai.migration.domain.ShadowReadQuery;
 import com.homes.zipsai.migration.domain.ShadowReadRequest;
 import com.homes.zipsai.migration.domain.ShadowReadResult;
+import com.homes.zipsai.migration.domain.WorkerMode;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.PropertyNamingStrategies;
 
 @Component
 public class MigrationEventLogger {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("structured-events");
+    private static final String SERVICE = "backend";
     private static final int ERROR_MAX_LENGTH = 500;
 
     private final ObjectMapper objectMapper;
 
     public MigrationEventLogger(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
+        this.objectMapper = objectMapper.rebuild()
+            .propertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
+            .build();
     }
 
     public void outboxApplied(OutboxEvent event, long durationMs, long lagMs) {
-        Map<String, Object> fields = outboxFields(event, "success", event.retryCount());
-        fields.put("duration_ms", durationMs);
-        fields.put("lag_ms", lagMs);
-        log("outbox_applied", "INFO", fields);
+        log("outbox_applied", "INFO", OutboxLog.of(event, "success", event.retryCount())
+            .withTimes(durationMs, lagMs));
     }
 
     public void outboxRetry(OutboxEvent event, int retryCount, String error) {
-        Map<String, Object> fields = outboxFields(event, "retry", retryCount);
-        fields.put("error", error);
-        log("outbox_retry", "WARN", fields);
+        log("outbox_retry", "WARN", OutboxLog.of(event, "retry", retryCount).withError(error));
     }
 
     public void outboxFailed(OutboxEvent event, int retryCount, String error) {
-        Map<String, Object> fields = outboxFields(event, "failure", retryCount);
-        fields.put("error", error);
-        log("outbox_failed", "ERROR", fields);
+        log("outbox_failed", "ERROR", OutboxLog.of(event, "failure", retryCount).withError(error));
     }
 
     public void readServed(String traceId, String method, ShadowReadQuery query) {
-        Map<String, Object> fields = new LinkedHashMap<>();
-        fields.put("trace_id", traceId);
-        fields.put("method", method);
-        fields.put("response_database", query.database());
-        fields.put("started_at", query.startedAt().toString());
-        fields.put("finished_at", query.finishedAt().toString());
-        log("migration_read", "INFO", fields);
+        log("migration_read", "INFO", new ReadLog(traceId, method, query.database(), query.startedAt(),
+            query.finishedAt()));
     }
 
     public void shadowReadMismatch(ShadowReadRequest request, ShadowReadPhase phase, ShadowReadResult result,
                                    ShadowReadComparison comparison) {
-        Map<String, Object> fields = shadowReadFields(request, phase, result);
-        putQueryTimes(fields, "v1", comparison.v1Query());
-        putQueryTimes(fields, "v2", comparison.v2Query());
-        fields.put("only_in_v1_ids", comparison.onlyInV1Ids());
-        fields.put("only_in_v1_count", comparison.onlyInV1Count());
-        fields.put("only_in_v2_ids", comparison.onlyInV2Ids());
-        fields.put("only_in_v2_count", comparison.onlyInV2Count());
-        fields.put("order_differs", comparison.orderDiffers());
-        fields.put("field_differences", comparison.fieldDifferences().stream()
-            .map(MigrationEventLogger::fieldDifferenceFields)
-            .toList());
-        fields.put("field_difference_count", comparison.fieldDifferenceCount());
-        log("shadow_read_mismatch", result == ShadowReadResult.MISMATCH_RESOLVED ? "INFO" : "WARN", fields);
+        String level = result == ShadowReadResult.MISMATCH_RESOLVED ? "INFO" : "WARN";
+        log("shadow_read_mismatch", level, ComparisonLog.of(ShadowReadContext.of(request, phase, result),
+            comparison));
     }
 
     public void shadowReadError(ShadowReadRequest request, ShadowReadPhase phase, Throwable throwable) {
-        Map<String, Object> fields = shadowReadFields(request, phase, ShadowReadResult.ERROR);
-        fields.put("error", TextUtils.truncate(String.valueOf(throwable), ERROR_MAX_LENGTH));
-        log("shadow_read_error", "WARN", fields);
+        String error = TextUtils.truncate(String.valueOf(throwable), ERROR_MAX_LENGTH);
+        log("shadow_read_error", "WARN", new FailureLog(
+            ShadowReadContext.of(request, phase, ShadowReadResult.ERROR), error, null));
     }
 
     public void shadowReadSkipped(ShadowReadRequest request, ShadowReadPhase phase) {
-        Map<String, Object> fields = shadowReadFields(request, phase, ShadowReadResult.SKIPPED);
-        fields.put("reason", "queue_full");
-        log("shadow_read_skipped", "WARN", fields);
+        log("shadow_read_skipped", "WARN", new FailureLog(
+            ShadowReadContext.of(request, phase, ShadowReadResult.SKIPPED), null, "queue_full"));
     }
 
     public void settingsChanged(MigrationSettings settings) {
-        Map<String, Object> fields = new LinkedHashMap<>();
-        fields.put("mode", settings.mode());
-        fields.put("switch_at", settings.switchAt() == null ? null : settings.switchAt().toString());
-        fields.put("worker_mode", settings.workerMode());
-        fields.put("forward_worker_enabled", settings.forwardWorkerEnabled());
-        fields.put("reverse_worker_enabled", settings.reverseWorkerEnabled());
-        fields.put("v2_read_percent", settings.v2ReadPercent());
-        fields.put("shadow_read_percent", settings.shadowReadPercent());
-        log("migration_settings_changed", "INFO", fields);
+        log("migration_settings_changed", "INFO", SettingsLog.from(settings));
     }
 
-    private static Map<String, Object> shadowReadFields(ShadowReadRequest request, ShadowReadPhase phase,
-                                                        ShadowReadResult result) {
-        Map<String, Object> fields = new LinkedHashMap<>();
-        fields.put("trace_id", request.traceId());
-        fields.put("method", request.method());
-        fields.put("phase", phase.getTag());
-        fields.put("response_database", request.responseDatabase());
-        fields.put("outcome", result.getTag());
-        return fields;
-    }
-
-    private static void putQueryTimes(Map<String, Object> fields, String prefix, ShadowReadQuery query) {
-        fields.put(prefix + "_started_at", query.startedAt().toString());
-        fields.put(prefix + "_finished_at", query.finishedAt().toString());
-    }
-
-    private static Map<String, Object> fieldDifferenceFields(FieldDifference difference) {
-        Map<String, Object> fields = new LinkedHashMap<>();
-        fields.put("id", difference.id());
-        fields.put("field", difference.field());
-        fields.put("v1", difference.v1Value());
-        fields.put("v2", difference.v2Value());
-        return fields;
-    }
-
-    private Map<String, Object> outboxFields(OutboxEvent event, String outcome, int retryCount) {
-        Map<String, Object> fields = new LinkedHashMap<>();
-        fields.put("event_id", event.eventId());
-        fields.put("direction", event.direction());
-        fields.put("entity_type", event.entityType());
-        fields.put("entity_id", event.entityId());
-        fields.put("outcome", outcome);
-        fields.put("retry_count", retryCount);
-        return fields;
-    }
-
-    private void log(String eventName, String level, Map<String, Object> fields) {
-        Map<String, Object> event = new LinkedHashMap<>();
-        event.put("timestamp", Instant.now().toString());
-        event.put("level", level);
-        event.put("service", "backend");
-        event.put("event", eventName);
-        event.putAll(fields);
+    private void log(String event, String level, Object fields) {
         try {
-            LOGGER.info(objectMapper.writeValueAsString(event));
+            LOGGER.info(objectMapper.writeValueAsString(new LogLine(Instant.now(), level, SERVICE, event, fields)));
         } catch (JacksonException exception) {
-            LOGGER.info("structured_event_serialization_failed event={}", eventName);
+            LOGGER.info("structured_event_serialization_failed event={}", event);
+        }
+    }
+
+    private record LogLine(Instant timestamp, String level, String service, String event,
+                           @JsonUnwrapped Object fields) {
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private record OutboxLog(Long eventId, OutboxDirection direction, String entityType, String entityId,
+                             String outcome, int retryCount, Long durationMs, Long lagMs, String error) {
+
+        static OutboxLog of(OutboxEvent event, String outcome, int retryCount) {
+            return new OutboxLog(event.eventId(), event.direction(), event.entityType(), event.entityId(), outcome,
+                retryCount, null, null, null);
+        }
+
+        OutboxLog withTimes(long durationMs, long lagMs) {
+            return new OutboxLog(eventId, direction, entityType, entityId, outcome, retryCount, durationMs, lagMs,
+                null);
+        }
+
+        OutboxLog withError(String error) {
+            return new OutboxLog(eventId, direction, entityType, entityId, outcome, retryCount, null, null, error);
+        }
+    }
+
+    private record ReadLog(String traceId, String method, MigrationDatabase responseDatabase, Instant startedAt,
+                           Instant finishedAt) {
+    }
+
+    private record ShadowReadContext(String traceId, String method, String phase, MigrationDatabase responseDatabase,
+                                     String outcome) {
+
+        static ShadowReadContext of(ShadowReadRequest request, ShadowReadPhase phase, ShadowReadResult result) {
+            return new ShadowReadContext(request.traceId(), request.method(), phase.getTag(),
+                request.responseDatabase(), result.getTag());
+        }
+    }
+
+    private record ComparisonLog(@JsonUnwrapped ShadowReadContext context, Instant v1StartedAt,
+                                 Instant v1FinishedAt, Instant v2StartedAt, Instant v2FinishedAt,
+                                 List<String> onlyInV1Ids, int onlyInV1Count, List<String> onlyInV2Ids,
+                                 int onlyInV2Count, boolean orderDiffers, List<FieldDifference> fieldDifferences,
+                                 int fieldDifferenceCount) {
+
+        static ComparisonLog of(ShadowReadContext context, ShadowReadComparison comparison) {
+            return new ComparisonLog(context, comparison.v1Query().startedAt(),
+                comparison.v1Query().finishedAt(), comparison.v2Query().startedAt(),
+                comparison.v2Query().finishedAt(), comparison.onlyInV1Ids(), comparison.onlyInV1Count(),
+                comparison.onlyInV2Ids(), comparison.onlyInV2Count(), comparison.orderDiffers(),
+                comparison.fieldDifferences(), comparison.fieldDifferenceCount());
+        }
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private record FailureLog(@JsonUnwrapped ShadowReadContext context, String error, String reason) {
+    }
+
+    private record SettingsLog(MigrationMode mode, String switchAt, WorkerMode workerMode,
+                               boolean forwardWorkerEnabled, boolean reverseWorkerEnabled, int v2ReadPercent,
+                               int shadowReadPercent) {
+
+        static SettingsLog from(MigrationSettings settings) {
+            String switchAt = settings.switchAt() == null ? null : settings.switchAt().toString();
+            return new SettingsLog(settings.mode(), switchAt, settings.workerMode(),
+                settings.forwardWorkerEnabled(), settings.reverseWorkerEnabled(), settings.v2ReadPercent(),
+                settings.shadowReadPercent());
         }
     }
 }

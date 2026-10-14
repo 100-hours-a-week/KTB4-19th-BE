@@ -1,20 +1,20 @@
 package com.homes.zipsai.migration.service;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
+import java.lang.reflect.RecordComponent;
+import java.time.temporal.TemporalAccessor;
 import java.util.ArrayList;
-import java.util.HexFormat;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
 
-import com.homes.zipsai.global.util.TextUtils;
 import com.homes.zipsai.migration.config.ConditionalOnMigrationEnabled;
 import com.homes.zipsai.migration.domain.MigrationDatabase;
 import com.homes.zipsai.migration.domain.ShadowReadComparison;
@@ -22,156 +22,172 @@ import com.homes.zipsai.migration.domain.ShadowReadComparison.FieldDifference;
 import com.homes.zipsai.migration.domain.ShadowReadQuery;
 
 import lombok.RequiredArgsConstructor;
-import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.node.ObjectNode;
 
 @Component
 @ConditionalOnMigrationEnabled
 @RequiredArgsConstructor
 public class ShadowReadComparator {
 
-    private static final Pattern URL_QUERY = Pattern.compile("(https?://[^\"?]+)\\?[^\"]*");
-    private static final Pattern PLAIN_VALUE_FIELD = Pattern.compile(".*(Id|At|Code|Status|Type|Label|Count)|hasNext");
+    private static final Pattern URL_QUERY = Pattern.compile("(https?://[^\"?\\s]+)\\?[^\"\\s]*");
     private static final String ID_SUFFIX = "Id";
-    private static final String ROOT_KEY = "$";
-    private static final String INDEX_KEY_PREFIX = "#";
-    private static final String HASH_PREFIX = "sha256:";
-    private static final int HASH_LENGTH = 16;
-    private static final int VALUE_MAX_LENGTH = 100;
 
     private final ObjectMapper objectMapper;
 
     public ShadowReadComparison compare(ShadowReadQuery firstQuery, ShadowReadQuery secondQuery) {
         ShadowReadQuery v1Query = firstQuery.database() == MigrationDatabase.V1 ? firstQuery : secondQuery;
         ShadowReadQuery v2Query = firstQuery.database() == MigrationDatabase.V1 ? secondQuery : firstQuery;
-        Map<String, JsonNode> v1Items = itemsByKey(toTree(v1Query.result()));
-        Map<String, JsonNode> v2Items = itemsByKey(toTree(v2Query.result()));
+        Object v1Value = normalize(v1Query.result());
+        Object v2Value = normalize(v2Query.result());
+        Map<String, Object> v1Items = itemsByKey(v1Value);
+        Map<String, Object> v2Items = itemsByKey(v2Value);
 
-        List<String> onlyInV1Ids = keysMissingFrom(v1Items, v2Items);
-        List<String> onlyInV2Ids = keysMissingFrom(v2Items, v1Items);
         List<String> v1CommonKeys = commonKeys(v1Items, v2Items);
         List<String> v2CommonKeys = commonKeys(v2Items, v1Items);
         List<FieldDifference> fieldDifferences = new ArrayList<>();
         for (String key : v1CommonKeys) {
             addFieldDifferences(fieldDifferences, key, v1Items.get(key), v2Items.get(key));
         }
-        return ShadowReadComparison.of(v1Query, v2Query, onlyInV1Ids, onlyInV2Ids,
-            !v1CommonKeys.equals(v2CommonKeys), fieldDifferences);
+        return ShadowReadComparison.of(v1Query, v2Query, keysMissingFrom(v1Items, v2Items),
+            keysMissingFrom(v2Items, v1Items), !v1CommonKeys.equals(v2CommonKeys), fieldDifferences);
     }
 
-    private JsonNode toTree(Object result) {
-        String json = URL_QUERY.matcher(objectMapper.writeValueAsString(result)).replaceAll("$1");
-        return objectMapper.readTree(json);
+    private Object normalize(Object value) {
+        return switch (value) {
+            case null -> null;
+            case String text -> URL_QUERY.matcher(text).replaceAll("$1");
+            case Number _, Boolean _, Enum<?> _, TemporalAccessor _ -> value;
+            case Optional<?> optional -> normalize(optional.orElse(null));
+            case Collection<?> values -> values.stream().map(this::normalize).toList();
+            case Record record -> componentsOf(record);
+            default -> URL_QUERY.matcher(objectMapper.writeValueAsString(value)).replaceAll("$1");
+        };
     }
 
-    private static Map<String, JsonNode> itemsByKey(JsonNode tree) {
-        Map<String, JsonNode> items = new LinkedHashMap<>();
-        if (tree.isArray()) {
-            addListItems(items, tree);
-            return items;
+    private Map<String, Object> componentsOf(Record record) {
+        Map<String, Object> components = new LinkedHashMap<>();
+        for (RecordComponent component : record.getClass().getRecordComponents()) {
+            components.put(component.getName(), normalize(valueOf(record, component)));
         }
-        String listField = findListField(tree);
-        if (listField == null) {
-            items.put(ROOT_KEY, tree);
-            return items;
+        return components;
+    }
+
+    private static Object valueOf(Record record, RecordComponent component) {
+        try {
+            return component.getAccessor().invoke(record);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException(exception);
         }
-        ObjectNode root = ((ObjectNode) tree).deepCopy();
-        root.remove(listField);
-        items.put(ROOT_KEY, root);
-        addListItems(items, tree.get(listField));
+    }
+
+    private static Map<String, Object> itemsByKey(Object value) {
+        Map<String, Object> items = new LinkedHashMap<>();
+        if (!(value instanceof List<?>)) {
+            items.put(ShadowReadComparison.ROOT_KEY, withoutList(value));
+        }
+        List<?> list = listOf(value);
+        if (list != null) {
+            for (int index = 0; index < list.size(); index++) {
+                items.put(keyOf(list.get(index), index), list.get(index));
+            }
+        }
         return items;
     }
 
-    private static String findListField(JsonNode tree) {
-        if (!tree.isObject()) {
+    private static List<?> listOf(Object value) {
+        return switch (value) {
+            case List<?> list -> list;
+            case Map<?, ?> fields -> fields.values().stream()
+                .filter(field -> field instanceof List<?>)
+                .map(field -> (List<?>) field)
+                .findFirst()
+                .orElse(null);
+            case null, default -> null;
+        };
+    }
+
+    private static Object withoutList(Object value) {
+        if (!(value instanceof Map<?, ?> fields)) {
+            return value;
+        }
+        Map<Object, Object> root = new LinkedHashMap<>(fields);
+        fields.entrySet().stream()
+            .filter(field -> field.getValue() instanceof List<?>)
+            .findFirst()
+            .ifPresent(field -> root.remove(field.getKey()));
+        return root;
+    }
+
+    private static String keyOf(Object item, int index) {
+        String idField = idFieldOf(item);
+        if (idField == null) {
+            return ShadowReadComparison.INDEX_KEY_PREFIX + index;
+        }
+        return String.valueOf(((Map<?, ?>) item).get(idField));
+    }
+
+    private static String idFieldOf(Object item) {
+        if (!(item instanceof Map<?, ?> fields)) {
             return null;
         }
-        for (Map.Entry<String, JsonNode> property : tree.properties()) {
-            if (property.getValue().isArray()) {
-                return property.getKey();
+        for (Map.Entry<?, ?> field : fields.entrySet()) {
+            if (field.getKey() instanceof String name && name.endsWith(ID_SUFFIX) && isScalar(field.getValue())) {
+                return name;
             }
         }
         return null;
     }
 
-    private static void addListItems(Map<String, JsonNode> items, JsonNode list) {
-        for (int index = 0; index < list.size(); index++) {
-            JsonNode item = list.get(index);
-            items.put(keyOf(item, index), item);
-        }
+    private static boolean isScalar(Object value) {
+        return value != null && !(value instanceof Map<?, ?>) && !(value instanceof List<?>);
     }
 
-    private static String keyOf(JsonNode item, int index) {
-        if (item.isObject()) {
-            for (Map.Entry<String, JsonNode> property : item.properties()) {
-                if (property.getKey().endsWith(ID_SUFFIX) && property.getValue().isValueNode()
-                    && !property.getValue().isNull()) {
-                    return property.getValue().asString();
-                }
-            }
-        }
-        return INDEX_KEY_PREFIX + index;
+    private static List<String> keysMissingFrom(Map<String, Object> items, Map<String, Object> otherItems) {
+        return items.keySet().stream()
+            .filter(key -> !otherItems.containsKey(key))
+            .toList();
     }
 
-    private static List<String> keysMissingFrom(Map<String, JsonNode> items, Map<String, JsonNode> otherItems) {
-        List<String> keys = new ArrayList<>();
-        for (String key : items.keySet()) {
-            if (!otherItems.containsKey(key)) {
-                keys.add(key);
-            }
-        }
-        return keys;
+    private static List<String> commonKeys(Map<String, Object> items, Map<String, Object> otherItems) {
+        return items.keySet().stream()
+            .filter(otherItems::containsKey)
+            .toList();
     }
 
-    private static List<String> commonKeys(Map<String, JsonNode> items, Map<String, JsonNode> otherItems) {
-        List<String> keys = new ArrayList<>();
-        for (String key : items.keySet()) {
-            if (otherItems.containsKey(key)) {
-                keys.add(key);
-            }
-        }
-        return keys;
-    }
-
-    private static void addFieldDifferences(List<FieldDifference> differences, String key, JsonNode v1Item,
-                                            JsonNode v2Item) {
-        if (v1Item.equals(v2Item)) {
+    private void addFieldDifferences(List<FieldDifference> differences, String key, Object v1Item,
+                                     Object v2Item) {
+        if (Objects.equals(v1Item, v2Item)) {
             return;
         }
-        if (!v1Item.isObject() || !v2Item.isObject()) {
-            differences.add(new FieldDifference(key, ROOT_KEY, hash(v1Item), hash(v2Item)));
+        if (!(v1Item instanceof Map<?, ?> v1Fields) || !(v2Item instanceof Map<?, ?> v2Fields)) {
+            differences.add(new FieldDifference(key, ShadowReadComparison.ROOT_KEY,
+                loggedValue(ShadowReadComparison.ROOT_KEY, v1Item),
+                loggedValue(ShadowReadComparison.ROOT_KEY, v2Item)));
             return;
         }
-        Set<String> fields = new LinkedHashSet<>(v1Item.propertyNames());
-        fields.addAll(v2Item.propertyNames());
-        for (String field : fields) {
-            JsonNode v1Value = v1Item.get(field);
-            JsonNode v2Value = v2Item.get(field);
-            if (v1Value == null || !v1Value.equals(v2Value)) {
-                differences.add(new FieldDifference(key, field, loggedValue(field, v1Value),
-                    loggedValue(field, v2Value)));
+        Set<Object> fields = new LinkedHashSet<>(v1Fields.keySet());
+        fields.addAll(v2Fields.keySet());
+        for (Object field : fields) {
+            Object v1Value = v1Fields.get(field);
+            Object v2Value = v2Fields.get(field);
+            if (!Objects.equals(v1Value, v2Value)) {
+                String name = String.valueOf(field);
+                differences.add(new FieldDifference(key, name, loggedValue(name, v1Value),
+                    loggedValue(name, v2Value)));
             }
         }
     }
 
-    private static String loggedValue(String field, JsonNode value) {
-        if (value == null || value.isNull()) {
+    private String loggedValue(String field, Object value) {
+        if (value == null) {
             return null;
         }
-        if (PLAIN_VALUE_FIELD.matcher(field).matches() && value.isValueNode()) {
-            return TextUtils.truncate(value.asString(), VALUE_MAX_LENGTH);
-        }
-        return hash(value);
+        String json = objectMapper.writeValueAsString(value);
+        String plainText = isScalar(value) ? textOf(json) : null;
+        return ShadowReadValues.mask(field, plainText, json);
     }
 
-    private static String hash(JsonNode value) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                .digest(value.toString().getBytes(StandardCharsets.UTF_8));
-            return HASH_PREFIX + HexFormat.of().formatHex(digest).substring(0, HASH_LENGTH);
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException(exception);
-        }
+    private String textOf(String json) {
+        return json.startsWith("\"") ? objectMapper.readValue(json, String.class) : json;
     }
 }

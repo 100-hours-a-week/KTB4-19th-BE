@@ -2,8 +2,13 @@ package com.homes.zipsai.migration.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 
 import org.junit.jupiter.api.DisplayName;
@@ -102,8 +107,8 @@ class ShadowReadComparatorTest {
 
         FieldDifference difference = comparison.fieldDifferences().getFirst();
         assertThat(difference.field()).isEqualTo("conversationTitle");
-        assertThat(difference.v1Value()).startsWith("sha256:").doesNotContain("보일러");
-        assertThat(difference.v2Value()).startsWith("sha256:").isNotEqualTo(difference.v1Value());
+        assertThat(difference.v1()).startsWith("sha256:").doesNotContain("보일러");
+        assertThat(difference.v2()).startsWith("sha256:").isNotEqualTo(difference.v1());
     }
 
     @Test
@@ -130,6 +135,26 @@ class ShadowReadComparatorTest {
         assertThat(comparison.fieldDifferenceCount()).isEqualTo(25);
     }
 
+    @Test
+    @DisplayName("시각 값은 응답 JSON과 같은 표기로 남긴다")
+    void logsTimeInJsonForm() {
+        ShadowReadComparison comparison = compare(new Visit(1L, LocalDateTime.of(2026, 10, 14, 12, 0)),
+            new Visit(1L, LocalDateTime.of(2026, 10, 14, 12, 1)));
+
+        assertThat(comparison.fieldDifferences()).containsExactly(
+            new FieldDifference("$", "visitedAt", "2026-10-14T12:00:00", "2026-10-14T12:01:00"));
+    }
+
+    @Test
+    @DisplayName("해시는 응답 JSON 값 기준으로 만든다")
+    void hashesJsonValue() throws NoSuchAlgorithmException {
+        ShadowReadComparison comparison = compare(
+            page(new ConversationItem(1L, "보일러 고장", "ACTIVE", "2026-10-14T12:00:00")),
+            page(new ConversationItem(1L, "누수 문의", "ACTIVE", "2026-10-14T12:00:00")));
+
+        assertThat(comparison.fieldDifferences().getFirst().v1()).isEqualTo(sha256("\"보일러 고장\""));
+    }
+
     private ShadowReadComparison compare(Object v1Result, Object v2Result) {
         return shadowReadComparator.compare(query(MigrationDatabase.V1, v1Result),
             query(MigrationDatabase.V2, v2Result));
@@ -147,7 +172,15 @@ class ShadowReadComparatorTest {
         return new ConversationItem(id, "제목", "ACTIVE", lastMessageAt);
     }
 
+    private static String sha256(String value) throws NoSuchAlgorithmException {
+        byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+        return "sha256:" + HexFormat.of().formatHex(digest).substring(0, 16);
+    }
+
     record Photo(Long id, String url) {
+    }
+
+    record Visit(Long visitId, LocalDateTime visitedAt) {
     }
 
     record Page(boolean hasNext, List<ConversationItem> items) {
