@@ -8,6 +8,7 @@ import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 
+import java.time.Duration;
 import java.time.Instant;
 
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.task.support.TaskExecutorAdapter;
@@ -111,7 +113,7 @@ class ShadowReadAspectTest {
     }
 
     @Test
-    @DisplayName("결과가 다르면 최초 불일치로 세고 5초 뒤 재비교를 예약한다")
+    @DisplayName("결과가 다르면 최초 불일치로 세고 재비교를 예약한다")
     void countsInitialMismatchAndSchedulesRecompare() throws Throwable {
         givenComparedReads(MigrationDatabase.V1, "세탁기", "건조기");
 
@@ -119,6 +121,21 @@ class ShadowReadAspectTest {
 
         assertThat(shadowReads("mismatch_initial")).isEqualTo(1);
         then(shadowReadScheduler).should().schedule(any(Runnable.class), any(Instant.class));
+    }
+
+    @Test
+    @DisplayName("재비교는 30초 뒤로 예약한다")
+    void schedulesRecompareThirtySecondsLater() throws Throwable {
+        givenComparedReads(MigrationDatabase.V1, "세탁기", "건조기");
+        ArgumentCaptor<Instant> scheduledAt = ArgumentCaptor.forClass(Instant.class);
+        Instant before = Instant.now();
+
+        shadowReadAspect.routeRead(joinPoint, readOnly());
+
+        Instant after = Instant.now();
+        then(shadowReadScheduler).should().schedule(any(Runnable.class), scheduledAt.capture());
+        assertThat(scheduledAt.getValue())
+            .isBetween(before.plus(Duration.ofSeconds(30)), after.plus(Duration.ofSeconds(30)));
     }
 
     @Test

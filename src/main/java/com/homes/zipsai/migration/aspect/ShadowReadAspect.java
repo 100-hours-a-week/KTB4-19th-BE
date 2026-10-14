@@ -33,7 +33,7 @@ import com.homes.zipsai.migration.service.ShadowReadComparator;
 public class ShadowReadAspect {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ShadowReadAspect.class);
-    private static final Duration RECOMPARE_DELAY = Duration.ofSeconds(5);
+    private static final Duration RECOMPARE_DELAY = Duration.ofSeconds(30);
 
     private final MigrationRouting migrationRouting;
     private final ShadowReadComparator shadowReadComparator;
