@@ -48,6 +48,17 @@ class TaskLoggingDecoratorTest {
     }
 
     @Test
+    @DisplayName("작업을 맡긴 쪽에 MDC가 없으면 작업을 감싸지 않는다")
+    void returnsTaskAsIsWhenCallerHasNoMdc() {
+        Runnable task = () -> { };
+        MDC.clear();
+
+        Runnable decoratedTask = taskLoggingDecorator.decorate(task);
+
+        assertThat(decoratedTask).isSameAs(task);
+    }
+
+    @Test
     @DisplayName("작업이 끝나면 요청의 traceId로 작업 중 DB 시간을 mysql 단계로 남긴다")
     void logsDatabaseTimeOfTaskWithCallerTraceId() {
         Runnable task = taskLoggingDecorator.decorate(() -> JdbcTimingContext.record(5_000_000L, false));
