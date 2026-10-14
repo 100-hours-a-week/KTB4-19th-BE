@@ -15,10 +15,11 @@ public final class TaskLoggingDecorator implements TaskDecorator {
     @Override
     public Runnable decorate(Runnable task) {
         Map<String, String> callerMdc = MDC.getCopyOfContextMap();
+        if (callerMdc == null || callerMdc.isEmpty()) {
+            return task;
+        }
         return () -> {
-            if (callerMdc != null) {
-                MDC.setContextMap(callerMdc);
-            }
+            MDC.setContextMap(callerMdc);
             long started = System.nanoTime();
             JdbcTimingContext.begin(structuredLogger, MDC.get("traceId"), MDC.get("route"));
             try {
