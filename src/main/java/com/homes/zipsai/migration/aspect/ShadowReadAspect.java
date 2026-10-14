@@ -20,9 +20,11 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import com.homes.zipsai.global.exception.ApiException;
 import com.homes.zipsai.migration.config.ConditionalOnMigrationEnabled;
 import com.homes.zipsai.migration.domain.MigrationDatabase;
 import com.homes.zipsai.migration.domain.ShadowReadComparison;
+import com.homes.zipsai.migration.domain.ShadowReadFailure;
 import com.homes.zipsai.migration.domain.ShadowReadPhase;
 import com.homes.zipsai.migration.domain.ShadowReadQuery;
 import com.homes.zipsai.migration.domain.ShadowReadRequest;
@@ -88,10 +90,21 @@ public class ShadowReadAspect {
         return new ShadowReadQuery(database, startedAt, Instant.now(), result);
     }
 
+    private ShadowReadQuery readForComparison(ProceedingJoinPoint joinPoint, MigrationDatabase database)
+        throws Throwable {
+        Instant startedAt = Instant.now();
+        try {
+            Object result = migrationRouting.useReadDatabase(database, joinPoint::proceed);
+            return new ShadowReadQuery(database, startedAt, Instant.now(), result);
+        } catch (ApiException exception) {
+            return new ShadowReadQuery(database, startedAt, Instant.now(), new ShadowReadFailure(exception.code));
+        }
+    }
+
     private void compareWithOtherDatabase(ProceedingJoinPoint joinPoint, ShadowReadRequest request,
                                           ShadowReadQuery responseQuery) {
         runShadowRead(request, ShadowReadPhase.INITIAL, () -> {
-            ShadowReadQuery otherQuery = read(joinPoint, request.responseDatabase().other());
+            ShadowReadQuery otherQuery = readForComparison(joinPoint, request.responseDatabase().other());
             ShadowReadComparison comparison = shadowReadComparator.compare(responseQuery, otherQuery);
             if (comparison.isSame()) {
                 migrationMetrics.recordShadowRead(ShadowReadResult.MATCH);
@@ -112,8 +125,8 @@ public class ShadowReadAspect {
                 migrationEventLogger.shadowReadRowChecked(request, rowCheck.get());
                 return;
             }
-            ShadowReadQuery responseQuery = read(joinPoint, request.responseDatabase());
-            ShadowReadQuery otherQuery = read(joinPoint, request.responseDatabase().other());
+            ShadowReadQuery responseQuery = readForComparison(joinPoint, request.responseDatabase());
+            ShadowReadQuery otherQuery = readForComparison(joinPoint, request.responseDatabase().other());
             ShadowReadComparison comparison = shadowReadComparator.compare(responseQuery, otherQuery);
             ShadowReadResult result = comparison.isSame()
                 ? ShadowReadResult.MISMATCH_RESOLVED

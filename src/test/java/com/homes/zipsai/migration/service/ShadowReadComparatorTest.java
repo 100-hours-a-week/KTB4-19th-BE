@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import com.homes.zipsai.migration.domain.MigrationDatabase;
 import com.homes.zipsai.migration.domain.ShadowReadComparison;
 import com.homes.zipsai.migration.domain.ShadowReadComparison.FieldDifference;
+import com.homes.zipsai.migration.domain.ShadowReadFailure;
 import com.homes.zipsai.migration.domain.ShadowReadQuery;
 
 import tools.jackson.databind.json.JsonMapper;
@@ -197,6 +198,17 @@ class ShadowReadComparatorTest {
 
         assertThat(comparison.isSame()).isFalse();
         assertThat(comparison.differingEntityIds()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("한쪽이 비즈니스 예외로 끝나면 다른 쪽 목록의 ID를 모두 재확인 대상으로 담는다")
+    void collectsIdsOfListWhenOtherSideFailed() {
+        ShadowReadComparison comparison = compare(
+            page(item(111783L, "2026-10-14T22:31:15"), item(1L, "2026-10-14T12:00:05")),
+            new ShadowReadFailure("CONVERSATION_NOT_FOUND"));
+
+        assertThat(comparison.idField()).isEqualTo("conversationId");
+        assertThat(comparison.differingEntityIds()).containsExactly("111783", "1");
     }
 
     private ShadowReadComparison compare(Object v1Result, Object v2Result) {

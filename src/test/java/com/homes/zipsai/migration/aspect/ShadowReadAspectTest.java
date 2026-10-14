@@ -29,6 +29,7 @@ import org.springframework.core.task.support.TaskExecutorAdapter;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.homes.zipsai.global.exception.NotFoundException;
 import com.homes.zipsai.migration.domain.MigrationDatabase;
 import com.homes.zipsai.migration.domain.ShadowReadPhase;
 import com.homes.zipsai.migration.domain.ShadowReadQuery;
@@ -301,6 +302,21 @@ class ShadowReadAspectTest {
         assertThat(shadowReads("error")).isEqualTo(1);
         then(migrationEventLogger).should().shadowReadError(any(), eq(ShadowReadPhase.INITIAL),
             any(IllegalStateException.class));
+    }
+
+    @Test
+    @DisplayName("비교 DB가 비즈니스 예외를 던지면 오류가 아니라 불일치로 보고 재비교를 예약한다")
+    void treatsBusinessExceptionOfOtherDatabaseAsMismatch() throws Throwable {
+        givenShadowRead(MigrationDatabase.V1);
+        given(migrationRouting.useReadDatabase(eq(MigrationDatabase.V1), any())).willReturn("세탁기");
+        given(migrationRouting.useReadDatabase(eq(MigrationDatabase.V2), any()))
+            .willThrow(new NotFoundException(NotFoundException.Resource.CONVERSATION));
+
+        shadowReadAspect.routeRead(joinPoint, readOnly());
+
+        assertThat(shadowReads("error")).isZero();
+        assertThat(shadowReads("mismatch_initial")).isEqualTo(1);
+        then(shadowReadScheduler).should().schedule(any(Runnable.class), any(Instant.class));
     }
 
     @Test
