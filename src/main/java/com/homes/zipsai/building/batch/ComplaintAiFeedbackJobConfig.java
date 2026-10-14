@@ -1,8 +1,15 @@
 package com.homes.zipsai.building.batch;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.builder.JobBuilder;
@@ -21,12 +28,18 @@ import org.springframework.transaction.PlatformTransactionManager;
 import com.homes.zipsai.building.domain.Complaint;
 import com.homes.zipsai.building.domain.ComplaintDetail;
 import com.homes.zipsai.building.repository.ComplaintDetailRepository;
+import com.homes.zipsai.conversation.ai.AiComplaintFeedbackBatchRequest;
+import com.homes.zipsai.conversation.ai.AiComplaintFeedbackBatchResponse;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackClient;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackRequest;
 import com.homes.zipsai.global.exception.AiUnavailableException;
+import com.homes.zipsai.global.util.TimeUtils;
 
 @Configuration
 public class ComplaintAiFeedbackJobConfig {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(ComplaintAiFeedbackJobConfig.class);
+    private static final String TRACE_ID_PREFIX = "complaint-feedback-";
 
     private static final int CHUNK_SIZE = 100;
     private static final int MAX_BATCH_SIZE = 5000;
@@ -72,6 +85,7 @@ public class ComplaintAiFeedbackJobConfig {
                     ? complaint.getConversation().getDraftIssueType()
                     : null;
             AiComplaintFeedbackRequest request = new AiComplaintFeedbackRequest(
+                    detail.getId(),
                     complaint.getBuilding().getId(),
                     complaint.getType() != null ? complaint.getType().name() : null,
                     issueType,
@@ -79,7 +93,7 @@ public class ComplaintAiFeedbackJobConfig {
                     detail.getSymptom(),
                     detail.getOccurredTime(),
                     detail.getComment(),
-                    detail.getUpdatedAt());
+                    TimeUtils.toOffsetDateTime(detail.getUpdatedAt()));
             return new FeedbackItem(detail, request);
         };
     }
@@ -88,11 +102,33 @@ public class ComplaintAiFeedbackJobConfig {
     public ItemWriter<FeedbackItem> complaintAiFeedbackWriter(
             AiComplaintFeedbackClient client, ComplaintDetailRepository complaintDetailRepository) {
         return (Chunk<? extends FeedbackItem> chunk) -> {
-            LocalDateTime now = LocalDateTime.now();
+            Map<Long, ComplaintDetail> details = new HashMap<>();
+            List<AiComplaintFeedbackRequest> requests = new ArrayList<>();
             for (FeedbackItem item : chunk) {
-                client.send(item.request());
-                item.detail().markAiFeedbackSent(now);
-                complaintDetailRepository.save(item.detail());
+                details.put(item.detail().getId(), item.detail());
+                requests.add(item.request());
+            }
+            AiComplaintFeedbackBatchResponse response = client.send(
+                    new AiComplaintFeedbackBatchRequest(TRACE_ID_PREFIX + LocalDate.now(), requests));
+
+            LocalDateTime now = LocalDateTime.now();
+            int sent = 0;
+            for (AiComplaintFeedbackBatchResponse.Result result : response.results()) {
+                ComplaintDetail detail = details.remove(result.complaintDetailId());
+                if (detail == null || !(result.delivered() || result.rejected())) {
+                    continue;
+                }
+                if (result.rejected()) {
+                    LOGGER.warn("AI가 민원 답변 피드백을 거부했습니다. complaintDetailId={}, reason={}",
+                            result.complaintDetailId(), result.reason());
+                }
+                detail.markAiFeedbackSent(now);
+                complaintDetailRepository.save(detail);
+                sent++;
+            }
+            if (sent < requests.size()) {
+                LOGGER.warn("민원 답변 피드백 일부가 전송 완료되지 않아 다음 배치에서 다시 보냅니다. requested={}, sent={}",
+                        requests.size(), sent);
             }
         };
     }
