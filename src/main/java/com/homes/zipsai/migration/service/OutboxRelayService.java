@@ -52,7 +52,7 @@ public class OutboxRelayService {
     private static final String RELEASE_LOCK = "SELECT RELEASE_LOCK(?)";
     private static final String LOCK_NAME = "migration_outbox_worker";
     private static final String MARK_COMPLETED = """
-        UPDATE Migration_outbox_events SET status = 'COMPLETED', processed_at = :now WHERE event_id = :eventId
+        UPDATE Migration_outbox_events SET status = 'COMPLETED', processed_at = :completedAt WHERE event_id = :eventId
         """;
     private static final String MARK_RETRY = """
         UPDATE Migration_outbox_events
@@ -201,17 +201,18 @@ public class OutboxRelayService {
         long started = System.nanoTime();
         try {
             if (event.direction() == OutboxDirection.V1_TO_V2) {
-                outboxApplyService.applyV1Event(event, now);
+                outboxApplyService.applyV1Event(event);
             } else {
-                outboxApplyService.applyV2Event(event, now);
+                outboxApplyService.applyV2Event(event);
             }
+            LocalDateTime completedAt = TimeUtils.now();
             source.sql(MARK_COMPLETED)
-                .param("now", now)
+                .param("completedAt", completedAt)
                 .param("eventId", event.eventId())
                 .update();
-            outboxWorkerMetrics.recordApplied(event, now);
+            outboxWorkerMetrics.recordApplied(event, completedAt);
             migrationEventLogger.outboxApplied(event, Duration.ofNanos(System.nanoTime() - started).toMillis(),
-                Duration.between(event.createdAt(), now).toMillis());
+                Duration.between(event.createdAt(), completedAt).toMillis());
             return true;
         } catch (RuntimeException exception) {
             markRetry(event, source, now, exception);

@@ -9,6 +9,7 @@ public enum ShadowReadResult {
     MATCH("match"),
     MISMATCH_INITIAL("mismatch_initial"),
     MISMATCH_RESOLVED("mismatch_resolved"),
+    MISMATCH_LAGGING("mismatch_lagging"),
     MISMATCH_PERSISTENT("mismatch_persistent"),
     ERROR("error"),
     SKIPPED("skipped");

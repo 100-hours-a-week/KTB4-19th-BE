@@ -5,12 +5,14 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.longThat;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -547,7 +549,34 @@ class OutboxRelayServiceTest {
         outboxRelayService.relayPendingEvents(NOON);
 
         assertThat(workerEvents("V1_TO_V2", "success")).isEqualTo(1);
-        then(migrationEventLogger).should().outboxApplied(any(), anyLong(), eq(60_000L));
+        then(migrationEventLogger).should().outboxApplied(any(), anyLong(), anyLong());
+    }
+
+    @Test
+    @DisplayName("회차 시작 시각이 아니라 이벤트마다 반영을 마친 시각을 처리 시각으로 남긴다")
+    void marksEachEventWithActualCompletionTime() {
+        saveItem(v1, 1L, "세탁기");
+        saveEvent(v1, 10L, "V1_TO_V2", "Items", "1");
+        LocalDateTime before = TimeUtils.now();
+
+        outboxRelayService.relayPendingEvents(NOON);
+
+        LocalDateTime processedAt = v1.sql("SELECT processed_at FROM Migration_outbox_events WHERE event_id = 10")
+            .query(LocalDateTime.class)
+            .single();
+        assertThat(processedAt).isAfterOrEqualTo(before).isBeforeOrEqualTo(TimeUtils.now());
+    }
+
+    @Test
+    @DisplayName("반영 지연은 실제 반영을 마친 시각 기준으로 남긴다")
+    void logsLagUntilActualCompletionTime() {
+        saveItem(v1, 1L, "세탁기");
+        saveEvent(v1, 10L, "V1_TO_V2", "Items", "1");
+        long minimumLag = Duration.between(NOON.minusMinutes(1), TimeUtils.now()).toMillis();
+
+        outboxRelayService.relayPendingEvents(NOON);
+
+        then(migrationEventLogger).should().outboxApplied(any(), anyLong(), longThat(lag -> lag >= minimumLag));
     }
 
     @Test

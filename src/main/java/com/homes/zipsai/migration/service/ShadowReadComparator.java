@@ -48,7 +48,9 @@ public class ShadowReadComparator {
         for (String key : v1CommonKeys) {
             addFieldDifferences(fieldDifferences, key, v1Items.get(key), v2Items.get(key));
         }
-        return ShadowReadComparison.of(v1Query, v2Query, keysMissingFrom(v1Items, v2Items),
+        String v1IdField = idFieldOf(listOf(v1Value));
+        String idField = v1IdField == null ? idFieldOf(listOf(v2Value)) : v1IdField;
+        return ShadowReadComparison.of(v1Query, v2Query, idField, keysMissingFrom(v1Items, v2Items),
             keysMissingFrom(v2Items, v1Items), !v1CommonKeys.equals(v2CommonKeys), fieldDifferences);
     }
 
@@ -126,7 +128,8 @@ public class ShadowReadComparator {
         return String.valueOf(((Map<?, ?>) item).get(idField));
     }
 
-    private static String idFieldOf(Object item) {
+    private static String idFieldOf(Object value) {
+        Object item = value instanceof List<?> list && !list.isEmpty() ? list.getFirst() : value;
         if (!(item instanceof Map<?, ?> fields)) {
             return null;
         }

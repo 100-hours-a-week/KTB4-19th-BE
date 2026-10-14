@@ -10,6 +10,8 @@ import static org.mockito.Mockito.times;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
 
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.Signature;
@@ -27,16 +29,19 @@ import org.springframework.core.task.support.TaskExecutorAdapter;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.homes.zipsai.global.exception.NotFoundException;
 import com.homes.zipsai.migration.domain.MigrationDatabase;
 import com.homes.zipsai.migration.domain.ShadowReadPhase;
 import com.homes.zipsai.migration.domain.ShadowReadQuery;
 import com.homes.zipsai.migration.domain.ShadowReadRequest;
 import com.homes.zipsai.migration.domain.ShadowReadResult;
+import com.homes.zipsai.migration.domain.ShadowReadRowCheck;
 import com.homes.zipsai.migration.service.MigrationEventLogger;
 import com.homes.zipsai.migration.service.MigrationMetrics;
 import com.homes.zipsai.migration.service.MigrationRouting;
 import com.homes.zipsai.migration.service.MigrationSettingsProvider;
 import com.homes.zipsai.migration.service.ShadowReadComparator;
+import com.homes.zipsai.migration.service.ShadowReadRowVerifier;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -56,6 +61,9 @@ class ShadowReadAspectTest {
     TaskScheduler shadowReadScheduler;
 
     @Mock
+    ShadowReadRowVerifier shadowReadRowVerifier;
+
+    @Mock
     MigrationEventLogger migrationEventLogger;
 
     @Mock
@@ -72,7 +80,8 @@ class ShadowReadAspectTest {
     void setUp() {
         meterRegistry = new SimpleMeterRegistry();
         shadowReadAspect = new ShadowReadAspect(migrationRouting,
-            new ShadowReadComparator(JsonMapper.builder().build()), new TaskExecutorAdapter(Runnable::run),
+            new ShadowReadComparator(JsonMapper.builder().build()), shadowReadRowVerifier,
+            new TaskExecutorAdapter(Runnable::run),
             shadowReadScheduler, new MigrationMetrics(meterRegistry, new MigrationSettingsProvider()),
             migrationEventLogger);
     }
@@ -227,6 +236,46 @@ class ShadowReadAspectTest {
     }
 
     @Test
+    @DisplayName("처음 달랐던 ID를 PK로 재확인하면 응답 전체를 다시 조회하지 않는다")
+    void skipsFullRereadWhenRowsAreRechecked() throws Throwable {
+        givenComparedReads(MigrationDatabase.V1, "세탁기", "건조기");
+        givenRecompareRunsImmediately();
+        given(shadowReadRowVerifier.verify(any())).willReturn(Optional.of(rowCheck(List.of("1"), List.of())));
+
+        shadowReadAspect.routeRead(joinPoint, readOnly());
+
+        then(migrationRouting).should(times(1)).useReadDatabase(eq(MigrationDatabase.V1), any());
+        then(migrationRouting).should(times(1)).useReadDatabase(eq(MigrationDatabase.V2), any());
+    }
+
+    @Test
+    @DisplayName("PK 재확인에서 모두 같으면 해소된 불일치로 세고 로그를 남긴다")
+    void countsResolvedWhenRowsMatch() throws Throwable {
+        givenComparedReads(MigrationDatabase.V1, "세탁기", "건조기");
+        givenRecompareRunsImmediately();
+        ShadowReadRowCheck rowCheck = rowCheck(List.of("1"), List.of());
+        given(shadowReadRowVerifier.verify(any())).willReturn(Optional.of(rowCheck));
+
+        shadowReadAspect.routeRead(joinPoint, readOnly());
+
+        assertThat(shadowReads("mismatch_resolved")).isEqualTo(1);
+        then(migrationEventLogger).should().shadowReadRowChecked(any(), eq(rowCheck));
+    }
+
+    @Test
+    @DisplayName("PK 재확인에서 반영 대기 중인 ID가 있으면 반영 대기로 센다")
+    void countsLaggingWhenRowsAreWaitingForWorker() throws Throwable {
+        givenComparedReads(MigrationDatabase.V1, "세탁기", "건조기");
+        givenRecompareRunsImmediately();
+        given(shadowReadRowVerifier.verify(any())).willReturn(Optional.of(rowCheck(List.of(), List.of("1"))));
+
+        shadowReadAspect.routeRead(joinPoint, readOnly());
+
+        assertThat(shadowReads("mismatch_lagging")).isEqualTo(1);
+        assertThat(shadowReads("mismatch_persistent")).isZero();
+    }
+
+    @Test
     @DisplayName("재비교 로그에는 원래 요청 ID와 응답 DB를 남긴다")
     void logsRecompareWithOriginalRequest() throws Throwable {
         MDC.put("traceId", TRACE_ID);
@@ -256,10 +305,26 @@ class ShadowReadAspectTest {
     }
 
     @Test
+    @DisplayName("비교 DB가 비즈니스 예외를 던지면 오류가 아니라 불일치로 보고 재비교를 예약한다")
+    void treatsBusinessExceptionOfOtherDatabaseAsMismatch() throws Throwable {
+        givenShadowRead(MigrationDatabase.V1);
+        given(migrationRouting.useReadDatabase(eq(MigrationDatabase.V1), any())).willReturn("세탁기");
+        given(migrationRouting.useReadDatabase(eq(MigrationDatabase.V2), any()))
+            .willThrow(new NotFoundException(NotFoundException.Resource.CONVERSATION));
+
+        shadowReadAspect.routeRead(joinPoint, readOnly());
+
+        assertThat(shadowReads("error")).isZero();
+        assertThat(shadowReads("mismatch_initial")).isEqualTo(1);
+        then(shadowReadScheduler).should().schedule(any(Runnable.class), any(Instant.class));
+    }
+
+    @Test
     @DisplayName("실행 대기열이 가득 차면 건너뛴 것으로 세고 로그를 남긴다")
     void countsSkippedWhenExecutorRejects() throws Throwable {
         shadowReadAspect = new ShadowReadAspect(migrationRouting,
-            new ShadowReadComparator(JsonMapper.builder().build()), rejectingExecutor(), shadowReadScheduler,
+            new ShadowReadComparator(JsonMapper.builder().build()), shadowReadRowVerifier, rejectingExecutor(),
+            shadowReadScheduler,
             new MigrationMetrics(meterRegistry, new MigrationSettingsProvider()), migrationEventLogger);
         givenShadowRead(MigrationDatabase.V1);
         given(migrationRouting.useReadDatabase(eq(MigrationDatabase.V1), any())).willReturn("세탁기");
@@ -302,6 +367,11 @@ class ShadowReadAspectTest {
             invocation.<Runnable>getArgument(0).run();
             return null;
         });
+    }
+
+    private static ShadowReadRowCheck rowCheck(List<String> resolvedIds, List<String> laggingIds) {
+        return ShadowReadRowCheck.of("Items", Instant.now(), Instant.now(), resolvedIds, laggingIds, List.of(),
+            List.of());
     }
 
     private static TaskExecutorAdapter rejectingExecutor() {

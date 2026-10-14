@@ -21,6 +21,7 @@ import com.homes.zipsai.migration.domain.ShadowReadPhase;
 import com.homes.zipsai.migration.domain.ShadowReadQuery;
 import com.homes.zipsai.migration.domain.ShadowReadRequest;
 import com.homes.zipsai.migration.domain.ShadowReadResult;
+import com.homes.zipsai.migration.domain.ShadowReadRowCheck;
 import com.homes.zipsai.migration.domain.WorkerMode;
 
 import tools.jackson.core.JacksonException;
@@ -62,9 +63,17 @@ public class MigrationEventLogger {
 
     public void shadowReadMismatch(ShadowReadRequest request, ShadowReadPhase phase, ShadowReadResult result,
                                    ShadowReadComparison comparison) {
+        String recheck = phase == ShadowReadPhase.RECOMPARE ? "full_result" : null;
         String level = result == ShadowReadResult.MISMATCH_RESOLVED ? "INFO" : "WARN";
-        log("shadow_read_mismatch", level, ComparisonLog.of(ShadowReadContext.of(request, phase, result),
+        log("shadow_read_mismatch", level, ComparisonLog.of(ShadowReadContext.of(request, phase, result), recheck,
             comparison));
+    }
+
+    public void shadowReadRowChecked(ShadowReadRequest request, ShadowReadRowCheck rowCheck) {
+        ShadowReadResult result = rowCheck.result();
+        String level = result == ShadowReadResult.MISMATCH_PERSISTENT ? "WARN" : "INFO";
+        log("shadow_read_mismatch", level, RowCheckLog.of(
+            ShadowReadContext.of(request, ShadowReadPhase.RECOMPARE, result), rowCheck));
     }
 
     public void shadowReadError(ShadowReadRequest request, ShadowReadPhase phase, Throwable throwable) {
@@ -126,18 +135,31 @@ public class MigrationEventLogger {
         }
     }
 
-    private record ComparisonLog(@JsonUnwrapped ShadowReadContext context, Instant v1StartedAt,
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private record ComparisonLog(@JsonUnwrapped ShadowReadContext context, String recheck, Instant v1StartedAt,
                                  Instant v1FinishedAt, Instant v2StartedAt, Instant v2FinishedAt,
                                  List<String> onlyInV1Ids, int onlyInV1Count, List<String> onlyInV2Ids,
                                  int onlyInV2Count, boolean orderDiffers, List<FieldDifference> fieldDifferences,
                                  int fieldDifferenceCount) {
 
-        static ComparisonLog of(ShadowReadContext context, ShadowReadComparison comparison) {
-            return new ComparisonLog(context, comparison.v1Query().startedAt(),
+        static ComparisonLog of(ShadowReadContext context, String recheck, ShadowReadComparison comparison) {
+            return new ComparisonLog(context, recheck, comparison.v1Query().startedAt(),
                 comparison.v1Query().finishedAt(), comparison.v2Query().startedAt(),
                 comparison.v2Query().finishedAt(), comparison.onlyInV1Ids(), comparison.onlyInV1Count(),
                 comparison.onlyInV2Ids(), comparison.onlyInV2Count(), comparison.orderDiffers(),
                 comparison.fieldDifferences(), comparison.fieldDifferenceCount());
+        }
+    }
+
+    private record RowCheckLog(@JsonUnwrapped ShadowReadContext context, String recheck, String table,
+                               Instant rowsStartedAt, Instant rowsFinishedAt, List<String> resolvedIds,
+                               List<String> laggingIds, List<String> persistentIds,
+                               List<FieldDifference> columnDifferences, int columnDifferenceCount) {
+
+        static RowCheckLog of(ShadowReadContext context, ShadowReadRowCheck rowCheck) {
+            return new RowCheckLog(context, "primary_key", rowCheck.tableName(), rowCheck.readStartedAt(),
+                rowCheck.readFinishedAt(), rowCheck.resolvedIds(), rowCheck.laggingIds(), rowCheck.persistentIds(),
+                rowCheck.columnDifferences(), rowCheck.columnDifferenceCount());
         }
     }
 

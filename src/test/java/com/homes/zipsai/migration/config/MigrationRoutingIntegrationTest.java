@@ -45,6 +45,7 @@ import com.homes.zipsai.migration.service.MigrationTestUserService;
 import com.homes.zipsai.migration.service.OutboxEntityTables;
 import com.homes.zipsai.migration.service.OutboxRecorder;
 import com.homes.zipsai.migration.service.ShadowReadComparator;
+import com.homes.zipsai.migration.service.ShadowReadRowVerifier;
 import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.repository.UserRepository;
 
@@ -67,7 +68,7 @@ import com.homes.zipsai.user.repository.UserRepository;
 @ImportAutoConfiguration(JacksonAutoConfiguration.class)
 @Import({MigrationConfiguration.class, MigrationRoutingConfiguration.class, MigrationRouting.class,
     MigrationSettingsProvider.class, OutboxEntityListener.class, OutboxRecorder.class, OutboxEntityTables.class,
-    ShadowReadAspect.class, ShadowReadComparator.class, MigrationTestUserService.class})
+    ShadowReadAspect.class, ShadowReadComparator.class, ShadowReadRowVerifier.class, MigrationTestUserService.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class MigrationRoutingIntegrationTest {
 

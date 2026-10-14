@@ -1,35 +1,51 @@
 package com.homes.zipsai.migration.domain;
 
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 public record ShadowReadComparison(
     ShadowReadQuery v1Query,
     ShadowReadQuery v2Query,
+    String idField,
     List<String> onlyInV1Ids,
     int onlyInV1Count,
     List<String> onlyInV2Ids,
     int onlyInV2Count,
     boolean orderDiffers,
     List<FieldDifference> fieldDifferences,
-    int fieldDifferenceCount
+    int fieldDifferenceCount,
+    List<String> differingEntityIds
 ) {
     public static final int MAX_LOGGED_DIFFERENCES = 20;
     public static final String ROOT_KEY = "$";
     public static final String INDEX_KEY_PREFIX = "#";
 
-    public static ShadowReadComparison of(ShadowReadQuery v1Query, ShadowReadQuery v2Query, List<String> onlyInV1Ids,
-                                          List<String> onlyInV2Ids, boolean orderDiffers,
+    public static ShadowReadComparison of(ShadowReadQuery v1Query, ShadowReadQuery v2Query, String idField,
+                                          List<String> onlyInV1Ids, List<String> onlyInV2Ids, boolean orderDiffers,
                                           List<FieldDifference> fieldDifferences) {
-        return new ShadowReadComparison(v1Query, v2Query, limit(onlyInV1Ids), onlyInV1Ids.size(),
-            limit(onlyInV2Ids), onlyInV2Ids.size(), orderDiffers, limit(fieldDifferences), fieldDifferences.size());
+        return new ShadowReadComparison(v1Query, v2Query, idField, limit(onlyInV1Ids), onlyInV1Ids.size(),
+            limit(onlyInV2Ids), onlyInV2Ids.size(), orderDiffers, limit(fieldDifferences), fieldDifferences.size(),
+            entityIdsOf(onlyInV1Ids, onlyInV2Ids, fieldDifferences));
+    }
+
+    public static <T> List<T> limit(List<T> values) {
+        return List.copyOf(values.subList(0, Math.min(values.size(), MAX_LOGGED_DIFFERENCES)));
     }
 
     public boolean isSame() {
         return onlyInV1Count == 0 && onlyInV2Count == 0 && !orderDiffers && fieldDifferenceCount == 0;
     }
 
-    private static <T> List<T> limit(List<T> values) {
-        return List.copyOf(values.subList(0, Math.min(values.size(), MAX_LOGGED_DIFFERENCES)));
+    private static List<String> entityIdsOf(List<String> onlyInV1Ids, List<String> onlyInV2Ids,
+                                            List<FieldDifference> fieldDifferences) {
+        Set<String> ids = new LinkedHashSet<>(onlyInV1Ids);
+        ids.addAll(onlyInV2Ids);
+        for (FieldDifference difference : fieldDifferences) {
+            ids.add(difference.id());
+        }
+        ids.removeIf(id -> id.equals(ROOT_KEY) || id.startsWith(INDEX_KEY_PREFIX));
+        return List.copyOf(ids);
     }
 
     public record FieldDifference(String id, String field, String v1, String v2) {
