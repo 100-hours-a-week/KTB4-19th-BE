@@ -7,6 +7,9 @@ import org.springframework.stereotype.Component;
 @ConditionalOnProperty(name = "app.ai.client", havingValue = "stub")
 public class StubAiComplaintFeedbackClient implements AiComplaintFeedbackClient {
     @Override
-    public void send(AiComplaintFeedbackRequest request) {
+    public AiComplaintFeedbackBatchResponse send(AiComplaintFeedbackBatchRequest request) {
+        return new AiComplaintFeedbackBatchResponse(request.items().stream()
+                .map(item -> new AiComplaintFeedbackBatchResponse.Result(item.complaintDetailId(), "ACCEPTED", null))
+                .toList());
     }
 }

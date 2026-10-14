@@ -28,7 +28,7 @@ public class HttpAiComplaintFeedbackClient implements AiComplaintFeedbackClient 
     public HttpAiComplaintFeedbackClient(
             RestClient.Builder builder,
             @Value("${app.ai.base-url}") String baseUrl,
-            @Value("${app.ai.complaint-feedback-path:/api/v3/ai/complaints/feedback}") String feedbackPath,
+            @Value("${app.ai.complaint-feedback-path:/api/v3/ai/complaints/feedback/batch}") String feedbackPath,
             @Value("${app.ai.api-key:}") String apiKey) {
         this.restClient = builder.baseUrl(baseUrl).build();
         this.feedbackPath = feedbackPath;
@@ -36,9 +36,9 @@ public class HttpAiComplaintFeedbackClient implements AiComplaintFeedbackClient 
     }
 
     @Override
-    public void send(AiComplaintFeedbackRequest request) {
+    public AiComplaintFeedbackBatchResponse send(AiComplaintFeedbackBatchRequest request) {
         try {
-            restClient.post()
+            AiComplaintFeedbackBatchResponse result = restClient.post()
                     .uri(feedbackPath)
                     .contentType(MediaType.APPLICATION_JSON)
                     .headers(headers -> {
@@ -51,9 +51,11 @@ public class HttpAiComplaintFeedbackClient implements AiComplaintFeedbackClient 
                     .onStatus(HttpStatusCode::isError, (httpRequest, response) -> {
                         throw toApiException(response.getStatusCode());
                     })
-                    .toBodilessEntity();
+                    .body(AiComplaintFeedbackBatchResponse.class);
+            return result == null ? new AiComplaintFeedbackBatchResponse(null) : result;
         } catch (RestClientException exception) {
-            LOGGER.error("AI 민원 답변 피드백 전송에 실패했습니다. buildingId={}", request.buildingId(), exception);
+            LOGGER.error("AI 민원 답변 피드백 전송에 실패했습니다. traceId={}, items={}",
+                    request.traceId(), request.items().size(), exception);
             throw new AiUnavailableException();
         }
     }
