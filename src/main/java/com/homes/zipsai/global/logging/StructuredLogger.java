@@ -7,7 +7,10 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.core.NestedExceptionUtils;
 import org.springframework.stereotype.Component;
+
+import com.homes.zipsai.global.exception.InvalidPubSubFieldException;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
@@ -26,6 +29,35 @@ public class StructuredLogger {
 
     public void requestStarted(String traceId, String route, String method) {
         log(event("request_started", traceId, route, Map.of("method", method)));
+    }
+
+    public void pubSubDone(String operation, String channel, String traceId) {
+        try {
+            log(event("redis_pubsub_done", traceId, null,
+                Map.of("operation", operation, "channel", channel, "outcome", "ok")));
+        } catch (RuntimeException ignored) {
+
+        }
+    }
+
+    public void pubSubFailed(String operation, String channel, String traceId, Throwable exception) {
+        try {
+            Throwable rootCause = NestedExceptionUtils.getMostSpecificCause(exception);
+            Map<String, Object> fields = new LinkedHashMap<>();
+            fields.put("operation", operation);
+            fields.put("channel", channel);
+            fields.put("outcome", "fail");
+            fields.put("exception_type", rootCause.getClass().getName());
+            if (rootCause instanceof InvalidPubSubFieldException invalidPubSubFieldException) {
+                fields.put("field", invalidPubSubFieldException.field);
+                fields.put("reason", invalidPubSubFieldException.reason.name());
+            }
+            Map<String, Object> pubSubFailure = event("redis_pubsub_error", traceId, null, fields);
+            pubSubFailure.put("level", "WARN");
+            log(pubSubFailure);
+        } catch (RuntimeException ignored) {
+
+        }
     }
 
     public void stageDone(String traceId, String route, String stage, long durationMs,
@@ -85,7 +117,12 @@ public class StructuredLogger {
 
     private void log(Map<String, Object> event) {
         try {
-            LOGGER.info(objectMapper.writeValueAsString(event));
+            String logMessage = objectMapper.writeValueAsString(event);
+            if ("WARN".equals(event.get("level"))) {
+                LOGGER.warn(logMessage);
+            } else {
+                LOGGER.info(logMessage);
+            }
         } catch (JacksonException ignored) {
             LOGGER.info("structured_event_serialization_failed");
         }
