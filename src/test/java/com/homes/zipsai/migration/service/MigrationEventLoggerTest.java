@@ -2,8 +2,10 @@ package com.homes.zipsai.migration.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.util.List;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -11,11 +13,18 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 
+import com.homes.zipsai.migration.domain.MigrationDatabase;
 import com.homes.zipsai.migration.domain.MigrationMode;
 import com.homes.zipsai.migration.domain.MigrationSettings;
 import com.homes.zipsai.migration.domain.OutboxDirection;
 import com.homes.zipsai.migration.domain.OutboxEvent;
 import com.homes.zipsai.migration.domain.OutboxStatus;
+import com.homes.zipsai.migration.domain.ShadowReadComparison;
+import com.homes.zipsai.migration.domain.ShadowReadComparison.FieldDifference;
+import com.homes.zipsai.migration.domain.ShadowReadPhase;
+import com.homes.zipsai.migration.domain.ShadowReadQuery;
+import com.homes.zipsai.migration.domain.ShadowReadRequest;
+import com.homes.zipsai.migration.domain.ShadowReadResult;
 import com.homes.zipsai.migration.domain.WorkerMode;
 
 import tools.jackson.databind.json.JsonMapper;
@@ -25,6 +34,12 @@ class MigrationEventLoggerTest {
 
     private static final OutboxEvent EVENT = new OutboxEvent(10L, OutboxDirection.V1_TO_V2, "Users", "1",
         OutboxStatus.PENDING, 0, null, LocalDateTime.of(2026, 10, 13, 12, 0));
+    private static final String METHOD = "ConversationService.getConversations(..)";
+    private static final ShadowReadRequest REQUEST = new ShadowReadRequest("trace-1", METHOD, MigrationDatabase.V1);
+    private static final ShadowReadQuery V1_QUERY = new ShadowReadQuery(MigrationDatabase.V1,
+        Instant.parse("2026-10-14T12:00:00Z"), Instant.parse("2026-10-14T12:00:01Z"), null);
+    private static final ShadowReadQuery V2_QUERY = new ShadowReadQuery(MigrationDatabase.V2,
+        Instant.parse("2026-10-14T12:00:01Z"), Instant.parse("2026-10-14T12:00:02Z"), null);
 
     MigrationEventLogger migrationEventLogger = new MigrationEventLogger(JsonMapper.builder().build());
 
@@ -56,12 +71,48 @@ class MigrationEventLoggerTest {
     }
 
     @Test
-    @DisplayName("Shadow Read 불일치는 메서드와 결과를 JSON으로 남긴다")
-    void logsShadowReadMismatch(CapturedOutput output) {
-        migrationEventLogger.shadowReadMismatch("UserService.findUserName(..)", "mismatch_persistent");
+    @DisplayName("실제 읽기는 요청 ID, 응답 DB, 조회 시각을 JSON으로 남긴다")
+    void logsServedRead(CapturedOutput output) {
+        migrationEventLogger.readServed("trace-1", METHOD, V2_QUERY);
 
-        assertThat(output.getOut()).contains("\"event\":\"shadow_read_mismatch\"",
-            "\"method\":\"UserService.findUserName(..)\"", "\"outcome\":\"mismatch_persistent\"");
+        assertThat(output.getOut()).contains("\"event\":\"migration_read\"", "\"trace_id\":\"trace-1\"",
+            "\"response_database\":\"V2\"", "\"started_at\":\"2026-10-14T12:00:01Z\"",
+            "\"finished_at\":\"2026-10-14T12:00:02Z\"");
+    }
+
+    @Test
+    @DisplayName("Shadow Read 불일치는 단계, DB별 조회 시각, 차이를 JSON으로 남긴다")
+    void logsShadowReadMismatch(CapturedOutput output) {
+        ShadowReadComparison comparison = ShadowReadComparison.of(V1_QUERY, V2_QUERY, List.of("3"), List.of(), false,
+            List.of(new FieldDifference("1", "lastMessageAt", "2026-10-14T12:00:05", "2026-10-14T12:00:02")));
+
+        migrationEventLogger.shadowReadMismatch(REQUEST, ShadowReadPhase.RECOMPARE,
+            ShadowReadResult.MISMATCH_PERSISTENT, comparison);
+
+        assertThat(output.getOut()).contains("\"event\":\"shadow_read_mismatch\"", "\"trace_id\":\"trace-1\"",
+            "\"method\":\"" + METHOD + "\"", "\"phase\":\"recompare\"", "\"response_database\":\"V1\"",
+            "\"outcome\":\"mismatch_persistent\"", "\"v1_started_at\":\"2026-10-14T12:00:00Z\"",
+            "\"v2_finished_at\":\"2026-10-14T12:00:02Z\"", "\"only_in_v1_ids\":[\"3\"]", "\"only_in_v1_count\":1",
+            "\"order_differs\":false", "\"field\":\"lastMessageAt\"", "\"v1\":\"2026-10-14T12:00:05\"",
+            "\"field_difference_count\":1");
+    }
+
+    @Test
+    @DisplayName("Shadow Read 조회 실패는 단계와 오류를 JSON으로 남긴다")
+    void logsShadowReadError(CapturedOutput output) {
+        migrationEventLogger.shadowReadError(REQUEST, ShadowReadPhase.INITIAL, new IllegalStateException("V2 down"));
+
+        assertThat(output.getOut()).contains("\"event\":\"shadow_read_error\"", "\"phase\":\"initial\"",
+            "\"outcome\":\"error\"", "V2 down");
+    }
+
+    @Test
+    @DisplayName("대기열이 가득 차 건너뛴 Shadow Read는 단계와 이유를 JSON으로 남긴다")
+    void logsShadowReadSkipped(CapturedOutput output) {
+        migrationEventLogger.shadowReadSkipped(REQUEST, ShadowReadPhase.RECOMPARE);
+
+        assertThat(output.getOut()).contains("\"event\":\"shadow_read_skipped\"", "\"phase\":\"recompare\"",
+            "\"outcome\":\"skipped\"", "\"reason\":\"queue_full\"");
     }
 
     @Test

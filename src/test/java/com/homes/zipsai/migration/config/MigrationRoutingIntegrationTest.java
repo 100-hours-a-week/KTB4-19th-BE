@@ -2,6 +2,7 @@ package com.homes.zipsai.migration.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.after;
 import static org.mockito.Mockito.never;
@@ -30,6 +31,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.homes.zipsai.migration.aspect.ShadowReadAspect;
+import com.homes.zipsai.migration.domain.MigrationDatabase;
 import com.homes.zipsai.migration.domain.MigrationMode;
 import com.homes.zipsai.migration.domain.MigrationSettings;
 import com.homes.zipsai.migration.domain.WorkerMode;
@@ -183,7 +185,11 @@ class MigrationRoutingIntegrationTest {
         Optional<String> userName = migrationTestUserService.findUserName(EMAIL);
 
         assertThat(userName).contains("V1 이름");
-        then(shadowReadComparator).should(timeout(3000)).isSame(Optional.of("V1 이름"), Optional.of("V2 이름"));
+        then(shadowReadComparator).should(timeout(3000)).compare(
+            argThat(query -> query.database() == MigrationDatabase.V1
+                && query.result().equals(Optional.of("V1 이름"))),
+            argThat(query -> query.database() == MigrationDatabase.V2
+                && query.result().equals(Optional.of("V2 이름"))));
     }
 
     @Test
@@ -193,7 +199,7 @@ class MigrationRoutingIntegrationTest {
 
         migrationTestUserService.findUserName(EMAIL);
 
-        then(shadowReadComparator).should(after(500).never()).isSame(any(), any());
+        then(shadowReadComparator).should(after(500).never()).compare(any(), any());
     }
 
     private void givenSettings(MigrationMode mode, int v2ReadPercent, int shadowReadPercent) {

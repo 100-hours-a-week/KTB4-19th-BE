@@ -13,6 +13,7 @@ import java.time.Instant;
 
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.Signature;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -20,11 +21,17 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.MDC;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.core.task.support.TaskExecutorAdapter;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.homes.zipsai.migration.domain.MigrationDatabase;
+import com.homes.zipsai.migration.domain.ShadowReadPhase;
+import com.homes.zipsai.migration.domain.ShadowReadQuery;
+import com.homes.zipsai.migration.domain.ShadowReadRequest;
+import com.homes.zipsai.migration.domain.ShadowReadResult;
 import com.homes.zipsai.migration.service.MigrationEventLogger;
 import com.homes.zipsai.migration.service.MigrationMetrics;
 import com.homes.zipsai.migration.service.MigrationRouting;
@@ -40,6 +47,7 @@ import tools.jackson.databind.json.JsonMapper;
 class ShadowReadAspectTest {
 
     private static final String METHOD = "UserService.findUserName(..)";
+    private static final String TRACE_ID = "trace-1";
 
     @Mock
     MigrationRouting migrationRouting;
@@ -69,9 +77,15 @@ class ShadowReadAspectTest {
             migrationEventLogger);
     }
 
+    @AfterEach
+    void tearDown() {
+        MDC.clear();
+    }
+
     @Test
     @DisplayName("비교 대상으로 뽑히지 않으면 다른 DB를 조회하지 않는다")
     void skipsComparisonWhenNotSampled() throws Throwable {
+        givenSignature();
         given(migrationRouting.chooseReadDatabase()).willReturn(MigrationDatabase.V1);
         given(migrationRouting.useReadDatabase(eq(MigrationDatabase.V1), any())).willReturn("세탁기");
         given(migrationRouting.shouldShadowRead()).willReturn(false);
@@ -162,6 +176,19 @@ class ShadowReadAspectTest {
     }
 
     @Test
+    @DisplayName("재비교에서 같아졌으면 해소된 불일치로 세고 로그를 남긴다")
+    void countsResolvedMismatchAndLogs() throws Throwable {
+        givenComparedReads(MigrationDatabase.V1, "세탁기", "건조기", "세탁기");
+        givenRecompareRunsImmediately();
+
+        shadowReadAspect.routeRead(joinPoint, readOnly());
+
+        assertThat(shadowReads("mismatch_resolved")).isEqualTo(1);
+        then(migrationEventLogger).should().shadowReadMismatch(any(), eq(ShadowReadPhase.RECOMPARE),
+            eq(ShadowReadResult.MISMATCH_RESOLVED), any());
+    }
+
+    @Test
     @DisplayName("재비교해도 다르면 지속 불일치로 세고 로그를 남긴다")
     void countsPersistentMismatchAndLogs() throws Throwable {
         givenComparedReads(MigrationDatabase.V1, "세탁기", "건조기", "건조기");
@@ -170,11 +197,51 @@ class ShadowReadAspectTest {
         shadowReadAspect.routeRead(joinPoint, readOnly());
 
         assertThat(shadowReads("mismatch_persistent")).isEqualTo(1);
-        then(migrationEventLogger).should().shadowReadMismatch(METHOD, "mismatch_persistent");
+        then(migrationEventLogger).should().shadowReadMismatch(any(), eq(ShadowReadPhase.RECOMPARE),
+            eq(ShadowReadResult.MISMATCH_PERSISTENT), any());
     }
 
     @Test
-    @DisplayName("비교 조회에 실패하면 오류로 센다")
+    @DisplayName("최초 불일치는 initial 단계로 로그를 남긴다")
+    void logsInitialMismatch() throws Throwable {
+        givenComparedReads(MigrationDatabase.V1, "세탁기", "건조기");
+
+        shadowReadAspect.routeRead(joinPoint, readOnly());
+
+        then(migrationEventLogger).should().shadowReadMismatch(any(), eq(ShadowReadPhase.INITIAL),
+            eq(ShadowReadResult.MISMATCH_INITIAL), any());
+    }
+
+    @Test
+    @DisplayName("실제 읽기는 요청 ID와 응답 DB를 로그로 남긴다")
+    void logsServedReadWithTraceIdAndDatabase() throws Throwable {
+        MDC.put("traceId", TRACE_ID);
+        givenComparedReads(MigrationDatabase.V2, "세탁기", "세탁기");
+
+        shadowReadAspect.routeRead(joinPoint, readOnly());
+
+        ArgumentCaptor<ShadowReadQuery> query = ArgumentCaptor.forClass(ShadowReadQuery.class);
+        then(migrationEventLogger).should().readServed(eq(TRACE_ID), eq(METHOD), query.capture());
+        assertThat(query.getValue().database()).isEqualTo(MigrationDatabase.V2);
+        assertThat(query.getValue().startedAt()).isBeforeOrEqualTo(query.getValue().finishedAt());
+    }
+
+    @Test
+    @DisplayName("재비교 로그에는 원래 요청 ID와 응답 DB를 남긴다")
+    void logsRecompareWithOriginalRequest() throws Throwable {
+        MDC.put("traceId", TRACE_ID);
+        givenComparedReads(MigrationDatabase.V2, "세탁기", "건조기", "건조기");
+        givenRecompareRunsImmediately();
+
+        shadowReadAspect.routeRead(joinPoint, readOnly());
+
+        then(migrationEventLogger).should().shadowReadMismatch(
+            eq(new ShadowReadRequest(TRACE_ID, METHOD, MigrationDatabase.V2)), eq(ShadowReadPhase.RECOMPARE),
+            eq(ShadowReadResult.MISMATCH_PERSISTENT), any());
+    }
+
+    @Test
+    @DisplayName("비교 조회에 실패하면 오류로 세고 단계와 함께 로그를 남긴다")
     void countsErrorWhenComparisonReadFails() throws Throwable {
         givenShadowRead(MigrationDatabase.V1);
         given(migrationRouting.useReadDatabase(eq(MigrationDatabase.V1), any())).willReturn("세탁기");
@@ -184,11 +251,33 @@ class ShadowReadAspectTest {
         shadowReadAspect.routeRead(joinPoint, readOnly());
 
         assertThat(shadowReads("error")).isEqualTo(1);
+        then(migrationEventLogger).should().shadowReadError(any(), eq(ShadowReadPhase.INITIAL),
+            any(IllegalStateException.class));
+    }
+
+    @Test
+    @DisplayName("실행 대기열이 가득 차면 건너뛴 것으로 세고 로그를 남긴다")
+    void countsSkippedWhenExecutorRejects() throws Throwable {
+        shadowReadAspect = new ShadowReadAspect(migrationRouting,
+            new ShadowReadComparator(JsonMapper.builder().build()), rejectingExecutor(), shadowReadScheduler,
+            new MigrationMetrics(meterRegistry, new MigrationSettingsProvider()), migrationEventLogger);
+        givenShadowRead(MigrationDatabase.V1);
+        given(migrationRouting.useReadDatabase(eq(MigrationDatabase.V1), any())).willReturn("세탁기");
+
+        Object result = shadowReadAspect.routeRead(joinPoint, readOnly());
+
+        assertThat(result).isEqualTo("세탁기");
+        assertThat(shadowReads("skipped")).isEqualTo(1);
+        then(migrationEventLogger).should().shadowReadSkipped(any(), eq(ShadowReadPhase.INITIAL));
+    }
+
+    private void givenSignature() {
+        given(joinPoint.getSignature()).willReturn(signature);
+        given(signature.toShortString()).willReturn(METHOD);
     }
 
     private void givenShadowRead(MigrationDatabase responseDatabase) {
-        given(joinPoint.getSignature()).willReturn(signature);
-        given(signature.toShortString()).willReturn(METHOD);
+        givenSignature();
         given(migrationRouting.chooseReadDatabase()).willReturn(responseDatabase);
         given(migrationRouting.shouldShadowRead()).willReturn(true);
     }
@@ -212,6 +301,12 @@ class ShadowReadAspectTest {
         given(shadowReadScheduler.schedule(any(Runnable.class), any(Instant.class))).willAnswer(invocation -> {
             invocation.<Runnable>getArgument(0).run();
             return null;
+        });
+    }
+
+    private static TaskExecutorAdapter rejectingExecutor() {
+        return new TaskExecutorAdapter(task -> {
+            throw new TaskRejectedException("full");
         });
     }
 
