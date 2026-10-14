@@ -3,7 +3,7 @@ package com.homes.zipsai.conversation.scheduler;
 import java.time.LocalDateTime;
 import java.util.concurrent.TimeUnit;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBooleanProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -12,8 +12,7 @@ import com.homes.zipsai.conversation.service.ConversationService;
 import lombok.RequiredArgsConstructor;
 
 @Component
-@ConditionalOnProperty(name = "app.conversation.closing-scheduler.enabled", havingValue = "true",
-    matchIfMissing = true)
+@ConditionalOnBooleanProperty("app.conversation.closing-scheduler.enabled")
 @RequiredArgsConstructor
 public class ConversationClosingScheduler {
 
