@@ -14,6 +14,8 @@ public record ShadowReadComparison(
     int fieldDifferenceCount
 ) {
     public static final int MAX_LOGGED_DIFFERENCES = 20;
+    public static final String ROOT_KEY = "$";
+    public static final String INDEX_KEY_PREFIX = "#";
 
     public static ShadowReadComparison of(ShadowReadQuery v1Query, ShadowReadQuery v2Query, List<String> onlyInV1Ids,
                                           List<String> onlyInV2Ids, boolean orderDiffers,
@@ -30,6 +32,6 @@ public record ShadowReadComparison(
         return List.copyOf(values.subList(0, Math.min(values.size(), MAX_LOGGED_DIFFERENCES)));
     }
 
-    public record FieldDifference(String id, String field, String v1Value, String v2Value) {
+    public record FieldDifference(String id, String field, String v1, String v2) {
     }
 }
