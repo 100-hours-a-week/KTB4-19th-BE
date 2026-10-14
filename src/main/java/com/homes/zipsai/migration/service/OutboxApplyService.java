@@ -15,6 +15,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.homes.zipsai.global.util.TimeUtils;
 import com.homes.zipsai.migration.domain.OutboxEvent;
 
 @Service
@@ -27,7 +28,7 @@ public class OutboxApplyService {
             + (SELECT COUNT(*) FROM Migration_outbox_events WHERE direction = :direction AND event_id = :eventId)
         """;
     private static final String INSERT_APPLIED_EVENT = """
-        INSERT INTO Migration_applied_events (direction, event_id, applied_at) VALUES (:direction, :eventId, :now)
+        INSERT INTO Migration_applied_events (direction, event_id, applied_at) VALUES (:direction, :eventId, :appliedAt)
         """;
     private static final String NEW_ROW_ALIAS = "new_row";
     private static final String UPDATED_AT_COLUMN = "updated_at";
@@ -47,16 +48,16 @@ public class OutboxApplyService {
     }
 
     @Transactional(transactionManager = "outboxWorkerV2TransactionManager")
-    public void applyV1Event(OutboxEvent event, LocalDateTime now) {
-        apply(event, v1JdbcClient, v2JdbcClient, now);
+    public void applyV1Event(OutboxEvent event) {
+        apply(event, v1JdbcClient, v2JdbcClient);
     }
 
     @Transactional(transactionManager = "outboxWorkerV1TransactionManager")
-    public void applyV2Event(OutboxEvent event, LocalDateTime now) {
-        apply(event, v2JdbcClient, v1JdbcClient, now);
+    public void applyV2Event(OutboxEvent event) {
+        apply(event, v2JdbcClient, v1JdbcClient);
     }
 
-    private void apply(OutboxEvent event, JdbcClient source, JdbcClient target, LocalDateTime now) {
+    private void apply(OutboxEvent event, JdbcClient source, JdbcClient target) {
         if (isApplied(event, target)) {
             return;
         }
@@ -76,7 +77,7 @@ public class OutboxApplyService {
         target.sql(INSERT_APPLIED_EVENT)
             .param("direction", event.direction().name())
             .param("eventId", event.eventId())
-            .param("now", now)
+            .param("appliedAt", TimeUtils.now())
             .update();
     }
 
