@@ -1,5 +1,17 @@
 # Local development only. Credentials are shared with the team for local use.
 services:
+  redis:
+    image: redis:${REDIS_IMAGE_TAG:-8.2.10-alpine}
+    profiles: ["redis"]
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:${REDIS_LOCAL_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   db:
     image: mysql:8.4.11
     environment:
@@ -23,6 +35,14 @@ services:
       DB_URL: jdbc:mysql://db:3306/zipsai?serverTimezone=Asia/Seoul&characterEncoding=UTF-8&allowPublicKeyRetrieval=true&useSSL=false
       DB_USERNAME: root
       DB_PASSWORD: ${DB_PASSWORD:-mysql}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_USERNAME: ${REDIS_USERNAME:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_TLS: ${REDIS_TLS:-false}
+      REDIS_CONNECT_TIMEOUT: ${REDIS_CONNECT_TIMEOUT:-1s}
+      REDIS_TIMEOUT: ${REDIS_TIMEOUT:-1s}
+      REDIS_SHUTDOWN_TIMEOUT: ${REDIS_SHUTDOWN_TIMEOUT:-1s}
       JWT_SECRET: ${JWT_SECRET:-local-development-only-jwt-secret-change-before-deployment-2026}
       AUTH_SECURE_COOKIE: "false"
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
