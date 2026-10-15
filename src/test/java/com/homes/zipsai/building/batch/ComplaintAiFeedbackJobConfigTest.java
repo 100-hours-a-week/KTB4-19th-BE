@@ -24,18 +24,22 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.homes.zipsai.building.domain.Building;
 import com.homes.zipsai.building.domain.Complaint;
+import com.homes.zipsai.building.domain.ComplaintContent;
 import com.homes.zipsai.building.domain.ComplaintDetail;
 import com.homes.zipsai.building.domain.ComplaintStatus;
 import com.homes.zipsai.building.domain.ComplaintType;
 import com.homes.zipsai.building.repository.BuildingRepository;
 import com.homes.zipsai.building.repository.ComplaintDetailRepository;
 import com.homes.zipsai.building.repository.ComplaintRepository;
+import com.homes.zipsai.conversation.ai.AiComplaintDraft;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackBatchRequest;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackClient;
+import com.homes.zipsai.conversation.ai.AiComplaintFeedbackRequest;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
@@ -47,6 +51,8 @@ import com.homes.zipsai.user.repository.UserRepository;
 @SpringBatchTest
 @Transactional
 class ComplaintAiFeedbackJobConfigTest {
+
+    private static final String UNKNOWN = ComplaintContent.from(AiComplaintDraft.EMPTY).symptom();
 
     @Autowired
     JobOperatorTestUtils jobOperatorTestUtils;
@@ -190,26 +196,78 @@ class ComplaintAiFeedbackJobConfigTest {
         return complaintDetailRepository.findById(detail.getId()).orElseThrow().getAiFeedbackSentAt();
     }
 
+    @Test
+    @DisplayName("질의(QA)는 위치와 이슈 유형을 비워서 보낸다")
+    void sendsQaWithoutLocationAndIssueType() throws Exception {
+        saveComplaintWithDetail(ComplaintType.QA, "leak", "공용 공간", "분리수거장은 지하 1층입니다");
+
+        AiComplaintFeedbackRequest sent = sendAndCaptureSingleItem();
+
+        assertThat(sent.complaintType()).isEqualTo("QA");
+        assertThat(sent.location()).isNull();
+        assertThat(sent.issueType()).isNull();
+    }
+
+    @Test
+    @DisplayName("민원은 위치와 대화의 이슈 유형을 그대로 보낸다")
+    void sendsComplaintWithLocationAndIssueType() throws Exception {
+        saveComplaintWithDetail(ComplaintType.COMPLAINT, "leak", "지하주차장 B2", "배관 누수를 확인했습니다");
+
+        AiComplaintFeedbackRequest sent = sendAndCaptureSingleItem();
+
+        assertThat(sent.complaintType()).isEqualTo("COMPLAINT");
+        assertThat(sent.location()).isEqualTo("지하주차장 B2");
+        assertThat(sent.issueType()).isEqualTo("leak");
+    }
+
+    @Test
+    @DisplayName("민원 위치를 알 수 없으면 위치를 비워서 보낸다")
+    void sendsComplaintWithoutUnknownLocation() throws Exception {
+        saveComplaintWithDetail(ComplaintType.COMPLAINT, "leak", UNKNOWN, "배관 누수를 확인했습니다");
+
+        AiComplaintFeedbackRequest sent = sendAndCaptureSingleItem();
+
+        assertThat(sent.location()).isNull();
+    }
+
+    private AiComplaintFeedbackRequest sendAndCaptureSingleItem() throws Exception {
+        jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
+        ArgumentCaptor<AiComplaintFeedbackBatchRequest> captor =
+            ArgumentCaptor.forClass(AiComplaintFeedbackBatchRequest.class);
+        verify(aiComplaintFeedbackClient).send(captor.capture());
+        return captor.getValue().items().getFirst();
+    }
+
     private ComplaintDetail saveComplaintWithDetail(ComplaintStatus status, String comment) {
-        Conversation conversation = conversationRepository.save(Conversation.builder()
+        ComplaintDetail detail = saveComplaintWithDetail(ComplaintType.QA, null, "공용 공간", comment);
+        detail.getComplaint().changeStatus(status);
+        complaintRepository.save(detail.getComplaint());
+        return detail;
+    }
+
+    private ComplaintDetail saveComplaintWithDetail(ComplaintType type, String issueType, String location,
+                                                    String comment) {
+        Conversation conversation = Conversation.builder()
             .user(resident)
             .type(ConversationType.COMPLAINT)
             .title("분리수거 어디서 해요")
-            .build());
+            .build();
+        ReflectionTestUtils.setField(conversation, "draftIssueType", issueType);
+        conversationRepository.save(conversation);
         Complaint complaint = complaintRepository.save(Complaint.builder()
             .conversation(conversation)
             .user(resident)
             .building(building)
             .title("분리수거 문의")
-            .type(ComplaintType.QA)
+            .type(type)
             .urgency(0)
             .roomNo("302")
             .build());
-        complaint.changeStatus(status);
+        complaint.changeStatus(ComplaintStatus.DONE);
         complaintRepository.save(complaint);
         ComplaintDetail detail = ComplaintDetail.builder()
             .complaint(complaint)
-            .location("공용 공간")
+            .location(location)
             .symptom("분리수거 위치 문의")
             .aiSummary("분리수거장 위치를 물어봄")
             .build();

@@ -15,9 +15,11 @@ import org.springframework.data.domain.Slice;
 
 import com.homes.zipsai.building.domain.Building;
 import com.homes.zipsai.building.domain.Complaint;
+import com.homes.zipsai.building.domain.ComplaintContent;
 import com.homes.zipsai.building.domain.ComplaintDetail;
 import com.homes.zipsai.building.domain.ComplaintStatus;
 import com.homes.zipsai.building.domain.ComplaintType;
+import com.homes.zipsai.conversation.ai.AiComplaintDraft;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
@@ -26,6 +28,8 @@ import com.homes.zipsai.user.repository.UserRepository;
 
 @DataJpaTest
 class ComplaintDetailRepositoryTest {
+
+    private static final String UNKNOWN = ComplaintContent.from(AiComplaintDraft.EMPTY).symptom();
 
     @Autowired
     ComplaintRepository complaintRepository;
@@ -68,7 +72,7 @@ class ComplaintDetailRepositoryTest {
         ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
         entityManager.clear();
 
-        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10));
+        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(UNKNOWN, PageRequest.of(0, 10));
 
         assertThat(found.getContent()).singleElement()
             .satisfies(result -> assertThat(result.getId()).isEqualTo(detail.getId()));
@@ -80,7 +84,7 @@ class ComplaintDetailRepositoryTest {
         saveComplaintWithDetail(ComplaintStatus.IN_PROGRESS, "확인 중입니다");
         entityManager.clear();
 
-        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10));
+        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(UNKNOWN, PageRequest.of(0, 10));
 
         assertThat(found.getContent()).isEmpty();
     }
@@ -91,7 +95,7 @@ class ComplaintDetailRepositoryTest {
         saveComplaintWithDetail(ComplaintStatus.DONE, null);
         entityManager.clear();
 
-        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10));
+        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(UNKNOWN, PageRequest.of(0, 10));
 
         assertThat(found.getContent()).isEmpty();
     }
@@ -104,12 +108,39 @@ class ComplaintDetailRepositoryTest {
         entityManager.flush();
         entityManager.clear();
 
-        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10));
+        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(UNKNOWN, PageRequest.of(0, 10));
+
+        assertThat(found.getContent()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("민원 유형이 없는 민원은 AI가 거절하므로 조회 대상에서 제외한다")
+    void excludesComplaintWithoutType() {
+        saveComplaintWithDetail(null, "분리수거 위치 문의", ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
+        entityManager.clear();
+
+        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(UNKNOWN, PageRequest.of(0, 10));
+
+        assertThat(found.getContent()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("증상을 알 수 없는 민원은 조회 대상에서 제외한다")
+    void excludesUnknownSymptom() {
+        saveComplaintWithDetail(ComplaintType.COMPLAINT, UNKNOWN, ComplaintStatus.DONE, "확인 후 조치했습니다");
+        entityManager.clear();
+
+        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(UNKNOWN, PageRequest.of(0, 10));
 
         assertThat(found.getContent()).isEmpty();
     }
 
     private ComplaintDetail saveComplaintWithDetail(ComplaintStatus status, String comment) {
+        return saveComplaintWithDetail(ComplaintType.QA, "분리수거 위치 문의", status, comment);
+    }
+
+    private ComplaintDetail saveComplaintWithDetail(ComplaintType type, String symptom, ComplaintStatus status,
+                                                    String comment) {
         Conversation conversation = conversationRepository.save(Conversation.builder()
             .user(resident)
             .type(ConversationType.COMPLAINT)
@@ -120,7 +151,7 @@ class ComplaintDetailRepositoryTest {
             .user(resident)
             .building(building)
             .title("분리수거 문의")
-            .type(ComplaintType.QA)
+            .type(type)
             .urgency(0)
             .roomNo("302")
             .build());
@@ -128,7 +159,7 @@ class ComplaintDetailRepositoryTest {
         ComplaintDetail detail = ComplaintDetail.builder()
             .complaint(complaint)
             .location("공용 공간")
-            .symptom("분리수거 위치 문의")
+            .symptom(symptom)
             .aiSummary("분리수거장 위치를 물어봄")
             .build();
         entityManager.persist(detail);
