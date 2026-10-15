@@ -1,12 +1,10 @@
 package com.homes.zipsai.building.batch;
 
 import java.time.Duration;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,7 +27,6 @@ import com.homes.zipsai.building.domain.Complaint;
 import com.homes.zipsai.building.domain.ComplaintDetail;
 import com.homes.zipsai.building.repository.ComplaintDetailRepository;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackBatchRequest;
-import com.homes.zipsai.conversation.ai.AiComplaintFeedbackBatchResponse;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackClient;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackRequest;
 import com.homes.zipsai.global.exception.AiUnavailableException;
@@ -39,7 +36,6 @@ import com.homes.zipsai.global.util.TimeUtils;
 public class ComplaintAiFeedbackJobConfig {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ComplaintAiFeedbackJobConfig.class);
-    private static final String TRACE_ID_PREFIX = "complaint-feedback-";
 
     private static final int CHUNK_SIZE = 100;
     private static final int MAX_BATCH_SIZE = 5000;
@@ -102,34 +98,19 @@ public class ComplaintAiFeedbackJobConfig {
     public ItemWriter<FeedbackItem> complaintAiFeedbackWriter(
             AiComplaintFeedbackClient client, ComplaintDetailRepository complaintDetailRepository) {
         return (Chunk<? extends FeedbackItem> chunk) -> {
-            Map<Long, ComplaintDetail> details = new HashMap<>();
             List<AiComplaintFeedbackRequest> requests = new ArrayList<>();
             for (FeedbackItem item : chunk) {
-                details.put(item.detail().getId(), item.detail());
                 requests.add(item.request());
             }
-            AiComplaintFeedbackBatchResponse response = client.send(
-                    new AiComplaintFeedbackBatchRequest(TRACE_ID_PREFIX + LocalDate.now(), requests));
+            String traceId = UUID.randomUUID().toString();
+            client.send(new AiComplaintFeedbackBatchRequest(traceId, requests));
 
             LocalDateTime now = LocalDateTime.now();
-            int sent = 0;
-            for (AiComplaintFeedbackBatchResponse.Result result : response.results()) {
-                ComplaintDetail detail = details.remove(result.complaintDetailId());
-                if (detail == null || !(result.delivered() || result.rejected())) {
-                    continue;
-                }
-                if (result.rejected()) {
-                    LOGGER.warn("AI가 민원 답변 피드백을 거부했습니다. complaintDetailId={}, reason={}",
-                            result.complaintDetailId(), result.reason());
-                }
-                detail.markAiFeedbackSent(now);
-                complaintDetailRepository.save(detail);
-                sent++;
+            for (FeedbackItem item : chunk) {
+                item.detail().markAiFeedbackSent(now);
+                complaintDetailRepository.save(item.detail());
             }
-            if (sent < requests.size()) {
-                LOGGER.warn("민원 답변 피드백 일부가 전송 완료되지 않아 다음 배치에서 다시 보냅니다. requested={}, sent={}",
-                        requests.size(), sent);
-            }
+            LOGGER.info("민원 답변 피드백을 AI에 전송했습니다. traceId={}, items={}", traceId, requests.size());
         };
     }
 
