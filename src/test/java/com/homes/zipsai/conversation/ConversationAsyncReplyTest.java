@@ -37,6 +37,7 @@ import com.homes.zipsai.conversation.ai.AiConverseClient;
 import com.homes.zipsai.conversation.ai.AiConverseRequest;
 import com.homes.zipsai.conversation.ai.AiConverseResponse;
 import com.homes.zipsai.conversation.ai.AiRoute;
+import com.homes.zipsai.conversation.service.ConversationReplyLock;
 import com.homes.zipsai.global.logging.StructuredLogger;
 
 import tools.jackson.databind.ObjectMapper;
@@ -59,6 +60,9 @@ class ConversationAsyncReplyTest {
 
     @MockitoBean
     AiConverseClient aiConverseClient;
+
+    @MockitoBean
+    ConversationReplyLock conversationReplyLock;
 
     @MockitoSpyBean
     SseService sseService;

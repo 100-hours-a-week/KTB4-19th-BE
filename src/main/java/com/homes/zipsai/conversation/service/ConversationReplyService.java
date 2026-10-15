@@ -1,7 +1,5 @@
 package com.homes.zipsai.conversation.service;
 
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -21,7 +19,6 @@ import com.homes.zipsai.conversation.dto.response.ConversationReplyFailedRespons
 import com.homes.zipsai.conversation.dto.response.ConversationReplyResponse;
 import com.homes.zipsai.global.config.AsyncConfig;
 import com.homes.zipsai.global.exception.ApiException;
-import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.global.exception.InternalServerException;
 import com.homes.zipsai.global.logging.StructuredLogger;
 
@@ -40,24 +37,14 @@ public class ConversationReplyService {
     private final ConversationService conversationService;
     private final AiConverseClient aiConverseClient;
     private final SseService sseService;
-    private final Set<Long> conversationsWaitingForAi = ConcurrentHashMap.newKeySet();
-
-    public void startReplying(Long conversationId) {
-        if (!conversationsWaitingForAi.add(conversationId)) {
-            throw new ConflictException(ConflictException.Reason.CONVERSATION_BUSY);
-        }
-    }
-
-    public void finishReplying(Long conversationId) {
-        conversationsWaitingForAi.remove(conversationId);
-    }
+    private final ConversationReplyLock conversationReplyLock;
 
     @Async(AsyncConfig.CHATBOT_REPLY_EXECUTOR)
-    public void reply(Long userId, PendingAiReply pendingReply) {
-        sseService.send(userId, replyEvent(userId, pendingReply));
+    public void reply(Long userId, PendingAiReply pendingReply, String lockToken) {
+        sseService.send(userId, replyEvent(userId, pendingReply, lockToken));
     }
 
-    private SseEmitter.SseEventBuilder replyEvent(Long userId, PendingAiReply pendingReply) {
+    private SseEmitter.SseEventBuilder replyEvent(Long userId, PendingAiReply pendingReply, String lockToken) {
         Long conversationId = pendingReply.conversation().getId();
         try {
             return event(REPLY_EVENT, askAiAndSaveReply(userId, pendingReply));
@@ -67,7 +54,7 @@ public class ConversationReplyService {
             LOGGER.error("AI 답변을 처리하지 못했습니다. conversationId={}", conversationId, e);
             return failedEvent(conversationId, new InternalServerException());
         } finally {
-            finishReplying(conversationId);
+            conversationReplyLock.release(conversationId, lockToken);
         }
     }
 

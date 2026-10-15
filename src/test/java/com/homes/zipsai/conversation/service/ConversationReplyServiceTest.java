@@ -1,8 +1,6 @@
 package com.homes.zipsai.conversation.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatNoException;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -43,7 +41,6 @@ import com.homes.zipsai.conversation.dto.response.ConversationReplyFailedRespons
 import com.homes.zipsai.conversation.dto.response.ConversationReplyResponse;
 import com.homes.zipsai.conversation.dto.response.MessageResponse;
 import com.homes.zipsai.global.exception.AiUnavailableException;
-import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.global.logging.StructuredLogger;
 
 @ExtendWith(MockitoExtension.class)
@@ -52,6 +49,7 @@ class ConversationReplyServiceTest {
     private static final long RESIDENT_ID = 1L;
     private static final long CONVERSATION_ID = 10L;
     private static final String TURN_ID = "turn-1";
+    private static final String LOCK_TOKEN = "lock-token";
 
     @Mock
     ConversationService conversationService;
@@ -62,11 +60,15 @@ class ConversationReplyServiceTest {
     @Mock
     SseService sseService;
 
+    @Mock
+    ConversationReplyLock conversationReplyLock;
+
     ConversationReplyService conversationReplyService;
 
     @BeforeEach
     void setUp() {
-        conversationReplyService = new ConversationReplyService(conversationService, aiConverseClient, sseService);
+        conversationReplyService = new ConversationReplyService(conversationService, aiConverseClient, sseService,
+            conversationReplyLock);
     }
 
     @AfterEach
@@ -83,7 +85,7 @@ class ConversationReplyServiceTest {
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willReturn(aiResponse);
         given(conversationService.saveAiReply(pendingAiReply, aiResponse)).willReturn(reply);
 
-        conversationReplyService.reply(RESIDENT_ID, pendingAiReply);
+        conversationReplyService.reply(RESIDENT_ID, pendingAiReply, LOCK_TOKEN);
 
         Set<DataWithMediaType> event = sentEvent();
         assertThat(eventName(event)).isEqualTo(ConversationReplyService.REPLY_EVENT);
@@ -105,7 +107,7 @@ class ConversationReplyServiceTest {
         given(conversationService.saveAiReply(pendingAiReply, aiResponse))
             .willReturn(new ConversationReplyResponse(CONVERSATION_ID, assistantMessage(), null));
 
-        conversationReplyService.reply(RESIDENT_ID, pendingAiReply);
+        conversationReplyService.reply(RESIDENT_ID, pendingAiReply, LOCK_TOKEN);
 
         List<Set<DataWithMediaType>> events = sentEvents(3);
         assertThat(events).extracting(ConversationReplyServiceTest::eventName).containsExactly(
@@ -122,7 +124,7 @@ class ConversationReplyServiceTest {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willThrow(new AiUnavailableException());
 
-        conversationReplyService.reply(RESIDENT_ID, pendingAiReply);
+        conversationReplyService.reply(RESIDENT_ID, pendingAiReply, LOCK_TOKEN);
 
         then(conversationService).should().discardUnansweredMessage(pendingAiReply);
         then(conversationService).should(never()).saveAiReply(any(), any());
@@ -139,7 +141,7 @@ class ConversationReplyServiceTest {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willThrow(new AiUnavailableException());
 
-        conversationReplyService.reply(RESIDENT_ID, pendingAiReply);
+        conversationReplyService.reply(RESIDENT_ID, pendingAiReply, LOCK_TOKEN);
 
         assertThat(MDC.get(StructuredLogger.ERROR_CODE)).isEqualTo(new AiUnavailableException().code);
     }
@@ -150,7 +152,7 @@ class ConversationReplyServiceTest {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willReturn(aiResponse("other-turn"));
 
-        conversationReplyService.reply(RESIDENT_ID, pendingAiReply);
+        conversationReplyService.reply(RESIDENT_ID, pendingAiReply, LOCK_TOKEN);
 
         then(conversationService).should().discardUnansweredMessage(pendingAiReply);
         then(conversationService).should(never()).saveAiReply(any(), any());
@@ -164,7 +166,7 @@ class ConversationReplyServiceTest {
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any()))
             .willThrow(new IllegalStateException("AI timeout"));
 
-        conversationReplyService.reply(RESIDENT_ID, pendingAiReply);
+        conversationReplyService.reply(RESIDENT_ID, pendingAiReply, LOCK_TOKEN);
 
         then(conversationService).should().discardUnansweredMessage(pendingAiReply);
         Set<DataWithMediaType> event = sentEvent();
@@ -173,24 +175,14 @@ class ConversationReplyServiceTest {
     }
 
     @Test
-    @DisplayName("AI 답을 기다리는 대화는 다시 대기 상태로 만들 수 없다")
-    void rejectsStartWhileReplying() {
-        conversationReplyService.startReplying(CONVERSATION_ID);
-
-        assertThatThrownBy(() -> conversationReplyService.startReplying(CONVERSATION_ID))
-            .isInstanceOf(ConflictException.class)
-            .hasFieldOrPropertyWithValue("code", "CONVERSATION_BUSY");
-    }
-
-    @Test
-    @DisplayName("AI 답변이 끝나면 같은 대화에 다시 보낼 수 있다")
-    void allowsNextMessageAfterReply() {
+    @DisplayName("AI 답변이 실패해도 대화방 답변 잠금을 푼다")
+    void releasesLockWhenReplyFails() {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willThrow(new AiUnavailableException());
-        conversationReplyService.startReplying(CONVERSATION_ID);
-        conversationReplyService.reply(RESIDENT_ID, pendingAiReply);
 
-        assertThatNoException().isThrownBy(() -> conversationReplyService.startReplying(CONVERSATION_ID));
+        conversationReplyService.reply(RESIDENT_ID, pendingAiReply, LOCK_TOKEN);
+
+        then(conversationReplyLock).should().release(CONVERSATION_ID, LOCK_TOKEN);
     }
 
     private Set<DataWithMediaType> sentEvent() {

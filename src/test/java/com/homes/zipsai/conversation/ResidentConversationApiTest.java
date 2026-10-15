@@ -16,10 +16,12 @@ import org.springframework.core.task.TaskExecutor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.convention.TestBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
+import com.homes.zipsai.conversation.service.ConversationReplyLock;
 import com.homes.zipsai.global.config.AsyncConfig;
 
 import tools.jackson.databind.ObjectMapper;
@@ -40,6 +42,9 @@ class ResidentConversationApiTest {
 
     @Autowired
     ConversationTestFixture conversationTestFixture;
+
+    @MockitoBean
+    ConversationReplyLock conversationReplyLock;
 
     @TestBean(name = AsyncConfig.CHATBOT_REPLY_EXECUTOR)
     TaskExecutor chatbotReplyExecutor;
