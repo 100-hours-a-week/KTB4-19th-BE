@@ -28,7 +28,7 @@ public class HttpAiComplaintFeedbackClient implements AiComplaintFeedbackClient 
     public HttpAiComplaintFeedbackClient(
             RestClient.Builder builder,
             @Value("${app.ai.base-url}") String baseUrl,
-            @Value("${app.ai.complaint-feedback-path:/api/v3/ai/complaints/feedback/batch}") String feedbackPath,
+            @Value("${app.ai.complaint-feedback-path:/api/v2/ai/indexing/comment}") String feedbackPath,
             @Value("${app.ai.api-key:}") String apiKey) {
         this.restClient = builder.baseUrl(baseUrl).build();
         this.feedbackPath = feedbackPath;
@@ -36,9 +36,9 @@ public class HttpAiComplaintFeedbackClient implements AiComplaintFeedbackClient 
     }
 
     @Override
-    public AiComplaintFeedbackBatchResponse send(AiComplaintFeedbackBatchRequest request) {
+    public void send(AiComplaintFeedbackBatchRequest request) {
         try {
-            AiComplaintFeedbackBatchResponse result = restClient.post()
+            restClient.post()
                     .uri(feedbackPath)
                     .contentType(MediaType.APPLICATION_JSON)
                     .headers(headers -> {
@@ -49,10 +49,11 @@ public class HttpAiComplaintFeedbackClient implements AiComplaintFeedbackClient 
                     .body(request)
                     .retrieve()
                     .onStatus(HttpStatusCode::isError, (httpRequest, response) -> {
+                        LOGGER.error("AI가 민원 답변 피드백 접수를 거절했습니다. traceId={}, items={}, status={}",
+                                request.traceId(), request.items().size(), response.getStatusCode().value());
                         throw toApiException(response.getStatusCode());
                     })
-                    .body(AiComplaintFeedbackBatchResponse.class);
-            return result == null ? new AiComplaintFeedbackBatchResponse(null) : result;
+                    .toBodilessEntity();
         } catch (RestClientException exception) {
             LOGGER.error("AI 민원 답변 피드백 전송에 실패했습니다. traceId={}, items={}",
                     request.traceId(), request.items().size(), exception);
