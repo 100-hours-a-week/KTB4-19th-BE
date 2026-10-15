@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import com.homes.zipsai.conversation.service.ConversationService;
 
 import lombok.RequiredArgsConstructor;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 @Component
 @ConditionalOnBooleanProperty("app.conversation.closing-scheduler.enabled")
@@ -19,6 +20,7 @@ public class ConversationClosingScheduler {
     private final ConversationService conversationService;
 
     @Scheduled(fixedDelay = 5, timeUnit = TimeUnit.MINUTES)
+    @SchedulerLock(name = "closeIdleConversations", lockAtLeastFor = "5m", lockAtMostFor = "10m")
     public void closeIdleConversations() {
         conversationService.closeIdleConversations(LocalDateTime.now());
     }
