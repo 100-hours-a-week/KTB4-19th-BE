@@ -39,6 +39,7 @@ import com.homes.zipsai.conversation.ai.AiRoute;
 import com.homes.zipsai.conversation.domain.Message;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
+import com.homes.zipsai.conversation.service.ConversationReplyLock;
 import com.homes.zipsai.global.config.AsyncConfig;
 
 import tools.jackson.databind.ObjectMapper;
@@ -71,6 +72,9 @@ class ConversationMockAiTest {
 
     @MockitoBean
     S3StorageService s3StorageService;
+
+    @MockitoBean
+    ConversationReplyLock conversationReplyLock;
 
     @TestBean(name = AsyncConfig.CHATBOT_REPLY_EXECUTOR)
     TaskExecutor chatbotReplyExecutor;

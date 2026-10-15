@@ -21,6 +21,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.homes.zipsai.conversation.ai.AiConverseRequest;
@@ -39,6 +40,7 @@ class ConversationMessageServiceTest {
 
     private static final long RESIDENT_ID = 1L;
     private static final long CONVERSATION_ID = 10L;
+    private static final String LOCK_TOKEN = "lock-token";
 
     @Mock
     ConversationService conversationService;
@@ -46,11 +48,15 @@ class ConversationMessageServiceTest {
     @Mock
     ConversationReplyService conversationReplyService;
 
+    @Mock
+    ConversationReplyLock conversationReplyLock;
+
     ConversationMessageService conversationMessageService;
 
     @BeforeEach
     void setUp() {
-        conversationMessageService = new ConversationMessageService(conversationService, conversationReplyService);
+        conversationMessageService = new ConversationMessageService(conversationService, conversationReplyService,
+            conversationReplyLock);
     }
 
     @Test
@@ -59,20 +65,22 @@ class ConversationMessageServiceTest {
         PendingAiReply pendingAiReply = pendingAiReply(true);
         given(conversationService.saveFirstMessage(RESIDENT_ID, "천장에서 물이 새요", List.of()))
             .willReturn(pendingAiReply);
+        given(conversationReplyLock.acquire(CONVERSATION_ID)).willReturn(LOCK_TOKEN);
 
         ConversationCreateResponse response =
             conversationMessageService.createConversation(RESIDENT_ID, "천장에서 물이 새요", List.of());
 
         assertThat(response.conversationId()).isEqualTo(CONVERSATION_ID);
-        InOrder inOrder = inOrder(conversationReplyService);
-        inOrder.verify(conversationReplyService).startReplying(CONVERSATION_ID);
-        inOrder.verify(conversationReplyService).reply(RESIDENT_ID, pendingAiReply);
+        InOrder inOrder = inOrder(conversationReplyLock, conversationReplyService);
+        inOrder.verify(conversationReplyLock).acquire(CONVERSATION_ID);
+        inOrder.verify(conversationReplyService).reply(RESIDENT_ID, pendingAiReply, LOCK_TOKEN);
     }
 
     @Test
     @DisplayName("메시지를 저장하면 AI 답변을 맡기고 저장한 메시지를 바로 돌려준다")
     void handsOverReplyAndReturnsSavedMessage() {
         PendingAiReply pendingAiReply = pendingAiReply(false);
+        given(conversationReplyLock.acquire(CONVERSATION_ID)).willReturn(LOCK_TOKEN);
         given(conversationService.saveNextMessage(RESIDENT_ID, CONVERSATION_ID, "안방이요", List.of()))
             .willReturn(pendingAiReply);
 
@@ -81,37 +89,54 @@ class ConversationMessageServiceTest {
 
         assertThat(response.messageId()).isEqualTo(20L);
         assertThat(response.conversationId()).isEqualTo(CONVERSATION_ID);
-        InOrder inOrder = inOrder(conversationReplyService, conversationService);
-        inOrder.verify(conversationReplyService).startReplying(CONVERSATION_ID);
+        InOrder inOrder = inOrder(conversationReplyLock, conversationService, conversationReplyService);
+        inOrder.verify(conversationReplyLock).acquire(CONVERSATION_ID);
         inOrder.verify(conversationService).saveNextMessage(RESIDENT_ID, CONVERSATION_ID, "안방이요", List.of());
-        inOrder.verify(conversationReplyService).reply(RESIDENT_ID, pendingAiReply);
+        inOrder.verify(conversationReplyService).reply(RESIDENT_ID, pendingAiReply, LOCK_TOKEN);
     }
 
     @Test
     @DisplayName("AI 답을 기다리는 대화에 메시지를 보내면 저장하지 않고 거절한다")
     void rejectsMessageWhileAiIsResponding() {
         willThrow(new ConflictException(ConflictException.Reason.CONVERSATION_BUSY))
-            .given(conversationReplyService).startReplying(CONVERSATION_ID);
+            .given(conversationReplyLock).acquire(CONVERSATION_ID);
 
         assertThatThrownBy(() ->
             conversationMessageService.sendMessage(RESIDENT_ID, CONVERSATION_ID, "두 번째 메시지", List.of()))
             .isInstanceOf(ConflictException.class)
             .hasFieldOrPropertyWithValue("code", "CONVERSATION_BUSY");
         then(conversationService).should(never()).saveNextMessage(anyLong(), anyLong(), anyString(), anyList());
-        then(conversationReplyService).should(never()).reply(any(), any());
+        then(conversationReplyService).should(never()).reply(any(), any(), any());
     }
 
     @Test
-    @DisplayName("메시지를 저장하지 못하면 대기 상태를 풀고 AI에 맡기지 않는다")
-    void finishesReplyingWhenMessageCannotBeSaved() {
+    @DisplayName("메시지를 저장하지 못하면 대화방 답변 잠금을 풀고 AI에 맡기지 않는다")
+    void releasesLockWhenMessageCannotBeSaved() {
+        given(conversationReplyLock.acquire(CONVERSATION_ID)).willReturn(LOCK_TOKEN);
         given(conversationService.saveNextMessage(RESIDENT_ID, CONVERSATION_ID, "안방이요", List.of()))
             .willThrow(new NotFoundException(NotFoundException.Resource.CONVERSATION));
 
         assertThatThrownBy(() ->
             conversationMessageService.sendMessage(RESIDENT_ID, CONVERSATION_ID, "안방이요", List.of()))
             .isInstanceOf(NotFoundException.class);
-        then(conversationReplyService).should().finishReplying(CONVERSATION_ID);
-        then(conversationReplyService).should(never()).reply(any(), any());
+        then(conversationReplyLock).should().release(CONVERSATION_ID, LOCK_TOKEN);
+        then(conversationReplyService).should(never()).reply(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("첫 메시지의 대화방 답변 잠금을 잡지 못하면 저장한 대화와 메시지를 지우고 AI에 맡기지 않는다")
+    void discardsFirstMessageWhenLockCannotBeAcquired() {
+        PendingAiReply pendingAiReply = pendingAiReply(true);
+        given(conversationService.saveFirstMessage(RESIDENT_ID, "천장에서 물이 새요", List.of()))
+            .willReturn(pendingAiReply);
+        willThrow(new RedisConnectionFailureException("Redis 연결 실패"))
+            .given(conversationReplyLock).acquire(CONVERSATION_ID);
+
+        assertThatThrownBy(() ->
+            conversationMessageService.createConversation(RESIDENT_ID, "천장에서 물이 새요", List.of()))
+            .isInstanceOf(RedisConnectionFailureException.class);
+        then(conversationService).should().discardUnansweredMessage(pendingAiReply);
+        then(conversationReplyService).should(never()).reply(any(), any(), any());
     }
 
     private static PendingAiReply pendingAiReply(boolean newConversation) {
