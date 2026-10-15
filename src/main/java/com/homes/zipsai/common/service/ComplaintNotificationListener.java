@@ -6,6 +6,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
 
 import com.homes.zipsai.common.domain.UserNotification;
 import com.homes.zipsai.common.event.ComplaintNotificationEvent;
+import com.homes.zipsai.common.event.NotificationEvent;
 
 import lombok.RequiredArgsConstructor;
 
@@ -14,14 +15,15 @@ import lombok.RequiredArgsConstructor;
 public class ComplaintNotificationListener {
 
     private final ComplaintNotificationStorageService complaintNotificationStorageService;
-    private final NotificationStreamService notificationStreamService;
+    private final NotificationEventPublisher notificationEventPublisher;
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onComplaintNotification(ComplaintNotificationEvent event) {
         try {
-            UserNotification received = complaintNotificationStorageService.store(event);
-            if (received != null) {
-                notificationStreamService.sendNotification(received.getUser().getId(), received.getId());
+            UserNotification userNotification = complaintNotificationStorageService.store(event);
+            if (userNotification != null) {
+                notificationEventPublisher.publish(new NotificationEvent(event.content().type(),
+                    userNotification.getUser().getId(), userNotification.getId()));
             }
         } catch (RuntimeException ignored) {
 

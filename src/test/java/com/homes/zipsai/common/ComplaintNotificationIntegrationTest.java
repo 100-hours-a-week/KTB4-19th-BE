@@ -2,10 +2,13 @@ package com.homes.zipsai.common;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -26,19 +29,24 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.homes.zipsai.building.domain.Building;
@@ -49,8 +57,12 @@ import com.homes.zipsai.building.dto.request.ComplaintCreateRequest;
 import com.homes.zipsai.building.dto.request.ComplaintStatusUpdateRequest;
 import com.homes.zipsai.building.repository.ComplaintRepository;
 import com.homes.zipsai.building.service.ComplaintService;
+import com.homes.zipsai.common.config.RedisPubSubProperties;
 import com.homes.zipsai.common.domain.ComplaintNotificationContent;
+import com.homes.zipsai.common.domain.ComplaintNotificationContent.Type;
 import com.homes.zipsai.common.domain.UserNotification;
+import com.homes.zipsai.common.event.NotificationEvent;
+import com.homes.zipsai.common.event.RedisMessage;
 import com.homes.zipsai.common.repository.NotificationRepository;
 import com.homes.zipsai.common.repository.UserNotificationRepository;
 import com.homes.zipsai.conversation.ai.AiComplaintState;
@@ -64,6 +76,7 @@ import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.domain.UserRole;
 import com.homes.zipsai.user.domain.UserStatus;
 
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -106,6 +119,12 @@ class ComplaintNotificationIntegrationTest {
     @MockitoSpyBean
     ObjectMapper json;
 
+    @MockitoBean
+    StringRedisTemplate stringRedisTemplate;
+
+    @Autowired
+    RedisPubSubProperties redisPubSubProperties;
+
     private TransactionTemplate transactions;
     private User manager;
     private User resident;
@@ -134,7 +153,6 @@ class ComplaintNotificationIntegrationTest {
     @AfterEach
     void cleanUp() {
         reset(userNotificationRepository, json);
-        // This class owns a separate Testcontainers database; committed fixtures need explicit cleanup.
         transactions.executeWithoutResult(transaction -> {
             for (String entity : List.of("UserNotification", "Notification", "ComplaintDetail", "Complaint",
                     "Conversation", "Room", "Building", "User")) {
@@ -144,25 +162,55 @@ class ComplaintNotificationIntegrationTest {
     }
 
     @Test
-    @DisplayName("민원과 대화가 커밋된 뒤 관리자에게 JSON 알림을 저장한다")
+    @DisplayName("민원과 알림이 커밋된 뒤 관리자 수신 식별자로 Redis 이벤트를 발행한다")
     void savesCreatedNotificationAfterBusinessCommit() {
+        doAnswer(invocation -> {
+            RedisMessage<NotificationEvent> redisMessage = json.readValue(invocation.getArgument(1, String.class),
+                new TypeReference<RedisMessage<NotificationEvent>>() { });
+            NotificationEvent publishedEvent = redisMessage.payload();
+            TransactionTemplate committedRead = new TransactionTemplate(transactionManager);
+            committedRead.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            committedRead.executeWithoutResult(transaction -> {
+                UserNotification received = entityManager.find(UserNotification.class, publishedEvent.resourceId());
+
+                assertThat(received).isNotNull();
+
+                assertThat(received.getUser().getId()).isEqualTo(publishedEvent.userId());
+            });
+            return 0L;
+        }).when(stringRedisTemplate).convertAndSend(eq(redisPubSubProperties.notificationChannel()), anyString());
+
         transactions.executeWithoutResult(transaction -> {
             createComplaint();
+
             assertNoNotifications();
+
+            verifyNoInteractions(stringRedisTemplate);
         });
 
         assertRecipient(manager.getId());
+
         JsonNode content = savedContent();
         Complaint complaint = complaintRepository.findAll().getFirst();
+
         assertThat(content.path("type").asText()).isEqualTo("COMPLAINT_CREATED");
+
         assertThat(content.path("complaintId").asLong()).isEqualTo(complaint.getId());
+
         assertThat(content.path("buildingId").asLong()).isEqualTo(building.getId());
+
         assertThat(content.path("title").asText()).isEqualTo("천장 누수");
+
         assertThat(content.path("roomNo").asText()).isEqualTo("302");
+
         assertThat(content.has("statusCode")).isFalse();
+
         assertThat(OffsetDateTime.parse(content.path("occurredAt").asText()).getOffset())
             .isEqualTo(ZoneOffset.ofHours(9));
+
         assertConversationCreated();
+
+        assertPublishedNotification(Type.COMPLAINT_CREATED, manager.getId());
     }
 
     @Test
@@ -174,7 +222,11 @@ class ComplaintNotificationIntegrationTest {
         });
 
         assertNoNotifications();
+
         assertThat(complaintRepository.count()).isZero();
+
+        verifyNoInteractions(stringRedisTemplate);
+
         transactions.executeWithoutResult(transaction -> assertThat(
             entityManager.find(Conversation.class, conversation.getId()).getStatus())
             .isEqualTo(ConversationStatus.ACTIVE));
@@ -203,6 +255,7 @@ class ComplaintNotificationIntegrationTest {
         });
 
         assertThat(savedContent().path("title").asText()).isEqualTo("천장 누수");
+
         assertThat(complaintRepository.findAll().getFirst().getTitle()).isEqualTo("수정된 제목");
     }
 
@@ -211,17 +264,23 @@ class ComplaintNotificationIntegrationTest {
     void skipsUnchangedStatusAndPreservesResolvedAt() {
         Complaint complaint = savedComplaint();
         changeStatus(complaint.getId(), ComplaintStatus.PENDING);
+
         assertNoNotifications();
 
         changeStatus(complaint.getId(), ComplaintStatus.DONE);
+
         assertRecipient(resident.getId());
+
         LocalDateTime firstResolvedAt = complaintRepository.findById(complaint.getId()).orElseThrow().getResolvedAt();
         LocalDateTime firstUpdatedAt = complaintRepository.findById(complaint.getId()).orElseThrow().getUpdatedAt();
         changeStatus(complaint.getId(), ComplaintStatus.DONE);
 
         assertThat(notificationRepository.count()).isEqualTo(1);
+
         Complaint repeated = complaintRepository.findById(complaint.getId()).orElseThrow();
+
         assertThat(repeated.getResolvedAt()).isEqualTo(firstResolvedAt);
+
         assertThat(repeated.getUpdatedAt()).isEqualTo(firstUpdatedAt);
     }
 
@@ -240,24 +299,33 @@ class ComplaintNotificationIntegrationTest {
 
         assertThat(complaintRepository.findById(complaint.getId()).orElseThrow().getResolvedAt())
             .isEqualTo(resolvedAt);
+
         assertNoNotifications();
     }
 
     @Test
-    @DisplayName("실제 상태 변경이 커밋되면 작성 입주민에게 상태 스냅샷을 저장한다")
+    @DisplayName("상태 변경과 알림이 커밋되면 작성 입주민 수신 식별자로 Redis 이벤트를 발행한다")
     void savesStatusNotificationAfterCommit() {
         Complaint complaint = savedComplaint();
         transactions.executeWithoutResult(transaction -> {
             changeStatus(complaint.getId(), ComplaintStatus.IN_PROGRESS);
+
             assertNoNotifications();
         });
 
         assertRecipient(resident.getId());
+
         JsonNode content = savedContent();
+
         assertThat(content.path("type").asText()).isEqualTo("COMPLAINT_STATUS_CHANGED");
+
         assertThat(content.path("complaintId").asLong()).isEqualTo(complaint.getId());
+
         assertThat(content.path("statusCode").asText()).isEqualTo("IN_PROGRESS");
+
         assertThat(content.has("roomNo")).isFalse();
+
+        assertPublishedNotification(Type.COMPLAINT_STATUS_CHANGED, resident.getId());
     }
 
     @Test
@@ -270,8 +338,13 @@ class ComplaintNotificationIntegrationTest {
         });
 
         assertNoNotifications();
+
+        verifyNoInteractions(stringRedisTemplate);
+
         Complaint restored = complaintRepository.findById(complaint.getId()).orElseThrow();
+
         assertThat(restored.getStatus()).isEqualTo(ComplaintStatus.PENDING);
+
         assertThat(restored.getResolvedAt()).isNull();
     }
 
@@ -285,6 +358,7 @@ class ComplaintNotificationIntegrationTest {
         });
 
         assertNoNotifications();
+
         assertThat(complaintRepository.findById(complaint.getId()).orElseThrow().getStatus())
             .isEqualTo(ComplaintStatus.IN_PROGRESS);
     }
@@ -300,6 +374,7 @@ class ComplaintNotificationIntegrationTest {
         });
 
         changeStatus(complaint.getId(), ComplaintStatus.IN_PROGRESS);
+
         assertRecipient(resident.getId());
     }
 
@@ -310,6 +385,7 @@ class ComplaintNotificationIntegrationTest {
         transactions.executeWithoutResult(transaction -> ReflectionTestUtils.setField(
             entityManager.find(User.class, resident.getId()), "status", UserStatus.INACTIVE));
         changeStatus(complaint.getId(), ComplaintStatus.IN_PROGRESS);
+
         assertNoNotifications();
 
         transactions.executeWithoutResult(transaction -> {
@@ -318,6 +394,7 @@ class ComplaintNotificationIntegrationTest {
             current.selectRole(UserRole.NONE);
         });
         changeStatus(complaint.getId(), ComplaintStatus.DONE);
+
         assertNoNotifications();
 
         transactions.executeWithoutResult(transaction -> {
@@ -326,6 +403,7 @@ class ComplaintNotificationIntegrationTest {
             ReflectionTestUtils.setField(current, "deletedAt", LocalDateTime.now());
         });
         changeStatus(complaint.getId(), ComplaintStatus.PENDING);
+
         assertNoNotifications();
     }
 
@@ -339,6 +417,7 @@ class ComplaintNotificationIntegrationTest {
         });
 
         assertNoNotifications();
+
         assertThat(complaintRepository.count()).isEqualTo(1);
     }
 
@@ -359,7 +438,9 @@ class ComplaintNotificationIntegrationTest {
         createComplaint();
 
         assertNoNotifications();
+
         assertThat(complaintRepository.count()).isEqualTo(1);
+
         assertConversationCreated();
     }
 
@@ -368,6 +449,7 @@ class ComplaintNotificationIntegrationTest {
     void preservesCreatedComplaintWhenRecipientStorageFails() throws Exception {
         doAnswer(invocation -> {
             assertThat(notificationRepository.count()).isEqualTo(1);
+
             throw new DataIntegrityViolationException("test recipient failure");
         }).when(userNotificationRepository).save(any(UserNotification.class));
 
@@ -377,9 +459,14 @@ class ComplaintNotificationIntegrationTest {
             .andExpect(status().isCreated()).andExpect(jsonPath("$.data.complaintId").exists());
 
         assertThat(complaintRepository.count()).isEqualTo(1);
+
         assertConversationCreated();
+
         assertNoNotifications();
+
         verify(userNotificationRepository).save(any(UserNotification.class));
+
+        verifyNoInteractions(stringRedisTemplate);
     }
 
     @Test
@@ -395,8 +482,46 @@ class ComplaintNotificationIntegrationTest {
 
         assertThat(complaintRepository.findById(complaint.getId()).orElseThrow().getStatus())
             .isEqualTo(ComplaintStatus.DONE);
+
         assertNoNotifications();
+
         verify(json).writeValueAsString(any(ComplaintNotificationContent.class));
+
+        verifyNoInteractions(stringRedisTemplate);
+    }
+
+    @Test
+    @DisplayName("Redis 발행이 실패해도 민원 접수는 201이며 저장된 알림을 유지한다")
+    void preservesComplaintAndNotificationWhenRedisPublishFails() throws Exception {
+        doThrow(new RedisConnectionFailureException("test-only publish failure"))
+            .when(stringRedisTemplate).convertAndSend(eq(redisPubSubProperties.notificationChannel()), anyString());
+
+        mvc.perform(post("/api/v1/residents/me/complaints").with(as(resident))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"conversationId\":" + conversation.getId() + "}"))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.data.complaintId").exists());
+
+        assertThat(complaintRepository.count()).isEqualTo(1);
+
+        assertConversationCreated();
+
+        assertRecipient(manager.getId());
+
+        assertPublishedNotification(Type.COMPLAINT_CREATED, manager.getId());
+    }
+
+    private void assertPublishedNotification(Type eventType, long userId) {
+        ArgumentCaptor<String> redisMessageJson = ArgumentCaptor.forClass(String.class);
+
+        verify(stringRedisTemplate).convertAndSend(eq(redisPubSubProperties.notificationChannel()),
+            redisMessageJson.capture());
+
+        long userNotiId = userNotificationRepository.findAll().getFirst().getId();
+        RedisMessage<NotificationEvent> redisMessage = json.readValue(redisMessageJson.getValue(),
+            new TypeReference<RedisMessage<NotificationEvent>>() { });
+
+        assertThat(redisMessage.payload())
+            .isEqualTo(new NotificationEvent(eventType, userId, userNotiId));
     }
 
     private long createComplaint() {
@@ -419,11 +544,17 @@ class ComplaintNotificationIntegrationTest {
 
     private void assertRecipient(long userId) {
         assertThat(notificationRepository.count()).isEqualTo(1);
+
         assertThat(userNotificationRepository.count()).isEqualTo(1);
+
         transactions.executeWithoutResult(transaction -> {
             UserNotification received = userNotificationRepository.findAll().getFirst();
+
             assertThat(received.getUser().getId()).isEqualTo(userId);
-            assertThat(received.getNotification().getId()).isEqualTo(notificationRepository.findAll().getFirst().getId());
+
+            assertThat(received.getNotification().getId())
+                .isEqualTo(notificationRepository.findAll().getFirst().getId());
+
             assertThat(received.getReadAt()).isNull();
         });
     }
@@ -434,6 +565,7 @@ class ComplaintNotificationIntegrationTest {
 
     private void assertNoNotifications() {
         assertThat(notificationRepository.count()).isZero();
+
         assertThat(userNotificationRepository.count()).isZero();
     }
 

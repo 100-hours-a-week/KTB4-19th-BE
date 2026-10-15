@@ -2,16 +2,18 @@ package com.homes.zipsai.common;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.net.URI;
 import java.net.Socket;
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -33,18 +35,26 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
+import org.springframework.test.context.DynamicPropertyRegistrar;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -53,20 +63,28 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.utility.DockerImageName;
 
 import com.homes.zipsai.building.domain.Building;
+import com.homes.zipsai.building.domain.ComplaintStatus;
 import com.homes.zipsai.building.domain.Room;
 import com.homes.zipsai.building.dto.request.ComplaintCreateRequest;
 import com.homes.zipsai.building.dto.request.ComplaintStatusUpdateRequest;
 import com.homes.zipsai.building.service.ComplaintService;
+import com.homes.zipsai.common.config.RedisPubSubProperties;
 import com.homes.zipsai.common.domain.ComplaintNotificationContent;
+import com.homes.zipsai.common.domain.ComplaintNotificationContent.Type;
 import com.homes.zipsai.common.domain.Notification;
 import com.homes.zipsai.common.domain.UserNotification;
 import com.homes.zipsai.common.event.ComplaintNotificationEvent;
+import com.homes.zipsai.common.event.NotificationEvent;
+import com.homes.zipsai.common.event.RedisMessage;
 import com.homes.zipsai.common.event.UserAccessRevokedEvent;
 import com.homes.zipsai.common.repository.UserNotificationRepository;
 import com.homes.zipsai.common.service.ComplaintNotificationListener;
 import com.homes.zipsai.common.service.ComplaintNotificationStorageService;
+import com.homes.zipsai.common.service.NotificationEventPublisher;
 import com.homes.zipsai.common.service.NotificationService;
 import com.homes.zipsai.common.service.SseService;
 import com.homes.zipsai.conversation.ai.AiComplaintState;
@@ -80,6 +98,7 @@ import com.homes.zipsai.user.domain.UserRole;
 import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@Import(SseIntegrationTest.RedisConfiguration.class)
 @TestPropertySource(properties = {
     "spring.datasource.url=jdbc:tc:mysql:8.4.11:///zipsai_notification_stream?TC_DAEMON=true",
     "spring.datasource.username=test",
@@ -134,6 +153,18 @@ class SseIntegrationTest {
     @MockitoSpyBean
     UserNotificationRepository userNotificationRepository;
 
+    @Autowired
+    StringRedisTemplate stringRedisTemplate;
+
+    @Autowired
+    RedisPubSubProperties redisPubSubProperties;
+
+    @Autowired
+    RedisMessageListenerContainer redisMessageListenerContainer;
+
+    @MockitoSpyBean
+    NotificationEventPublisher notificationEventPublisher;
+
     private final HttpClient client = HttpClient.newHttpClient();
     private final List<InputStream> streams = new ArrayList<>();
     private TransactionTemplate transactions;
@@ -144,6 +175,7 @@ class SseIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        await().atMost(Duration.ofSeconds(10)).until(redisMessageListenerContainer::isListening);
         transactions = new TransactionTemplate(transactionManager);
         transactions.executeWithoutResult(transaction -> {
             manager = user(UserRole.MANAGER);
@@ -185,7 +217,9 @@ class SseIntegrationTest {
                 request(STREAM).header("Authorization", "Bearer invalid").build(),
                 request(STREAM + "?access_token=" + token(resident, Instant.now().plusSeconds(60))).build())) {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
             assertThat(response.statusCode()).isEqualTo(401);
+
             assertThat(json.readTree(response.body()).path("error").path("code").asText()).isEqualTo("UNAUTHORIZED");
         }
     }
@@ -199,7 +233,9 @@ class SseIntegrationTest {
             HttpResponse<String> response = client.send(request(STREAM)
                 .header("Authorization", "Bearer " + token(user, Instant.now().plusSeconds(60))).build(),
                 HttpResponse.BodyHandlers.ofString());
+
             assertThat(response.statusCode()).isEqualTo(403);
+
             assertThat(json.readTree(response.body()).path("error").path("code").asText()).isEqualTo("FORBIDDEN");
         }
     }
@@ -208,9 +244,13 @@ class SseIntegrationTest {
     @DisplayName("인증된 연결은 heartbeat를 보내고 설정된 timeout에 정상 종료한다")
     void sendsHeartbeatAndClosesAtConfiguredTimeout() throws Exception {
         HttpResponse<InputStream> response = connect(resident, Instant.now().plusSeconds(60), "999999999");
+
         assertThat(response.statusCode()).isEqualTo(200);
+
         assertThat(response.headers().firstValue("Content-Type")).hasValue("text/event-stream");
+
         String body = CompletableFuture.supplyAsync(() -> readAll(response.body())).get(5, TimeUnit.SECONDS);
+
         assertThat(body).contains(":heartbeat")
             .doesNotContain("event:notification", "event: notification", "UNAUTHORIZED", "FORBIDDEN");
     }
@@ -230,6 +270,7 @@ class SseIntegrationTest {
             String line;
             do {
                 line = reader.readLine();
+
                 assertThat(line).isNotNull();
             } while (!line.contains(":connected"));
             socket.setSoLinger(true, 0);
@@ -238,7 +279,9 @@ class SseIntegrationTest {
         HttpResponse<InputStream> active = connect(manager, Instant.now().plusSeconds(60), null);
         CompletableFuture<String> body = CompletableFuture.supplyAsync(() -> readAll(active.body()));
         listener.onComplaintNotification(createdEvent());
+
         assertThat(body.get(5, TimeUnit.SECONDS)).contains("event:notification", ":heartbeat");
+
         assertThat(output.getAll()).doesNotContain("Unhandled API failure", "\"event\":\"request_error\"",
             "Failure in @ExceptionHandler");
     }
@@ -248,10 +291,15 @@ class SseIntegrationTest {
     void keepsConnectionUntilConfiguredTimeoutAfterAccessTokenExpiry() throws Exception {
         Instant expiresAt = Instant.now().plusSeconds(1);
         HttpResponse<InputStream> response = connect(resident, expiresAt, null);
+
         assertThat(response.statusCode()).isEqualTo(200);
+
         CompletableFuture<String> body = CompletableFuture.supplyAsync(() -> readAll(response.body()));
+
         assertThatThrownBy(() -> body.get(1500, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
+
         assertThat(body.get(5, TimeUnit.SECONDS)).contains(":heartbeat");
+
         assertThat(Instant.now()).isAfter(expiresAt);
     }
 
@@ -261,7 +309,9 @@ class SseIntegrationTest {
         HttpResponse<String> response = client.send(request(STREAM)
             .header("Authorization", "Bearer " + token(resident, Instant.now().minusSeconds(120))).build(),
             HttpResponse.BodyHandlers.ofString());
+
         assertThat(response.statusCode()).isEqualTo(401);
+
         assertThat(json.readTree(response.body()).path("error").path("code").asText()).isEqualTo("UNAUTHORIZED");
     }
 
@@ -270,8 +320,11 @@ class SseIntegrationTest {
     void deliversCommittedNotificationToManagersTabs() throws Exception {
         HttpResponse<InputStream> first = connect(manager, Instant.now().plusSeconds(60), null);
         HttpResponse<InputStream> second = connect(manager, Instant.now().plusSeconds(60), null);
+
         assertThat(first.statusCode()).isEqualTo(200);
+
         assertThat(second.statusCode()).isEqualTo(200);
+
         CompletableFuture<String> firstEvent = notification(first.body());
         CompletableFuture<String> secondEvent = notification(second.body());
 
@@ -280,21 +333,62 @@ class SseIntegrationTest {
             .createQuery("select n from UserNotification n", UserNotification.class).getSingleResult().getId());
         for (CompletableFuture<String> event : List.of(firstEvent, secondEvent)) {
             String frame = event.get(3, TimeUnit.SECONDS);
+
             assertThat(frame).contains("id:" + id, "event:notification");
+
             String data = frame.lines().filter(line -> line.startsWith("data:")).findFirst().orElseThrow().substring(5);
+
             assertThat(json.readTree(data).size()).isEqualTo(2);
+
             assertThat(json.readTree(data).path("message").asText()).isEqualTo("success");
+
             assertThat(json.readTree(data).path("data").path("userNotiId").asLong()).isEqualTo(id);
         }
         transactions.executeWithoutResult(transaction -> assertThat(entityManager
             .find(UserNotification.class, id).getReadAt()).isNull());
     }
 
+    @ParameterizedTest
+    @EnumSource(Type.class)
+    @DisplayName("Redis에서 수신한 민원 알림은 대상 사용자에게만 기존 SSE 형식으로 전달한다")
+    void deliversReceivedNotificationOnlyToTargetUser(Type eventType) throws Exception {
+        User targetUser = eventType == Type.COMPLAINT_CREATED ? manager : resident;
+        User otherUser = eventType == Type.COMPLAINT_CREATED ? resident : manager;
+        UserNotification received = storage.store(eventType == Type.COMPLAINT_CREATED ? createdEvent()
+            : new ComplaintNotificationEvent(ComplaintNotificationContent.complaintStatusChanged(1, building.getId(),
+                "천장 누수", ComplaintStatus.IN_PROGRESS, LocalDateTime.now()), resident.getId()));
+        HttpResponse<InputStream> targetStream = connect(targetUser, Instant.now().plusSeconds(60), null);
+        HttpResponse<InputStream> otherStream = connect(otherUser, Instant.now().plusSeconds(60), null);
+
+        assertThat(targetStream.statusCode()).isEqualTo(200);
+
+        assertThat(otherStream.statusCode()).isEqualTo(200);
+
+        CompletableFuture<String> targetNotification = notification(targetStream.body());
+        CompletableFuture<String> otherNotifications = CompletableFuture.supplyAsync(() -> readAll(otherStream.body()));
+
+        stringRedisTemplate.convertAndSend(redisPubSubProperties.notificationChannel(),
+            json.writeValueAsString(new RedisMessage<>("trace-id",
+                new NotificationEvent(eventType, targetUser.getId(), received.getId()))));
+
+        String frame = targetNotification.get(3, TimeUnit.SECONDS);
+
+        assertThat(frame).contains("id:" + received.getId(), "event:notification");
+
+        String data = frame.lines().filter(line -> line.startsWith("data:")).findFirst().orElseThrow().substring(5);
+
+        assertThat(json.readTree(data).path("data").path("userNotiId").asLong()).isEqualTo(received.getId());
+
+        assertThat(otherNotifications.get(5, TimeUnit.SECONDS)).doesNotContain("event:notification");
+    }
+
     @Test
     @DisplayName("동일 SSE 연결에서 공통 이벤트와 알림 이벤트를 함께 전달한다")
     void deliversDifferentEventTypesOverSameConnection() throws Exception {
         HttpResponse<InputStream> response = connect(manager, Instant.now().plusSeconds(60), null);
+
         assertThat(response.statusCode()).isEqualTo(200);
+
         CompletableFuture<String> body = CompletableFuture.supplyAsync(() -> readAll(response.body()));
 
         sse.send(manager.getId(), SseEmitter.event().name("test").data("sample"));
@@ -307,9 +401,12 @@ class SseIntegrationTest {
     @DisplayName("수신자가 다른 사용자에게는 알림 이벤트를 전달하지 않는다")
     void isolatesNotificationRecipients() throws Exception {
         HttpResponse<InputStream> response = connect(resident, Instant.now().plusSeconds(60), null);
+
         assertThat(response.statusCode()).isEqualTo(200);
+
         listener.onComplaintNotification(createdEvent());
         String body = CompletableFuture.supplyAsync(() -> readAll(response.body())).get(5, TimeUnit.SECONDS);
+
         assertThat(body).doesNotContain("event:notification", "event: notification");
     }
 
@@ -318,27 +415,37 @@ class SseIntegrationTest {
     void recoversOfflineNotificationThroughListWithoutReplayingStream() throws Exception {
         listener.onComplaintNotification(createdEvent());
         HttpResponse<InputStream> response = connect(manager, Instant.now().plusSeconds(60), "999999999");
+
         assertThat(response.statusCode()).isEqualTo(200);
+
         assertThat(CompletableFuture.supplyAsync(() -> readAll(response.body())).get(5, TimeUnit.SECONDS))
             .doesNotContain("event:notification");
+
         HttpResponse<String> list = client.send(request("/api/v1/users/me/notifications")
             .setHeader("Accept", "application/json")
             .header("Authorization", "Bearer " + token(manager, Instant.now().plusSeconds(60))).build(),
             HttpResponse.BodyHandlers.ofString());
+
         assertThat(list.statusCode()).isEqualTo(200);
+
         assertThat(json.readTree(list.body()).path("data").path("totalCount").asLong()).isEqualTo(1);
-        assertThat(json.readTree(list.body()).path("data").path("notifications").get(0).path("readAt").isNull()).isTrue();
+
+        assertThat(json.readTree(list.body()).path("data").path("notifications").get(0).path("readAt").isNull())
+            .isTrue();
     }
 
     @Test
     @DisplayName("Last-Event-ID와 Authorization을 포함한 허용 출처의 preflight를 통과한다")
     void allowsReconnectHeadersInCors() throws Exception {
-        HttpResponse<String> response = client.send(request(STREAM).method("OPTIONS", HttpRequest.BodyPublishers.noBody())
+        HttpResponse<String> response = client.send(request(STREAM)
+            .method("OPTIONS", HttpRequest.BodyPublishers.noBody())
             .header("Origin", "http://localhost:3000")
             .header("Access-Control-Request-Method", "GET")
             .header("Access-Control-Request-Headers", "Authorization,Last-Event-ID").build(),
             HttpResponse.BodyHandlers.ofString());
+
         assertThat(response.statusCode()).isEqualTo(200);
+
         assertThat(response.headers().firstValue("Access-Control-Allow-Headers").orElseThrow())
             .containsIgnoringCase("Last-Event-ID");
     }
@@ -347,12 +454,16 @@ class SseIntegrationTest {
     @DisplayName("민원 이벤트 발행 후 커밋 전에는 SSE를 보내지 않고 커밋 이후에만 보낸다")
     void waitsForComplaintTransactionCommit() throws Exception {
         HttpResponse<InputStream> response = connect(manager, Instant.now().plusSeconds(60), null);
+
         assertThat(response.statusCode()).isEqualTo(200);
+
         CompletableFuture<String> event = notification(response.body());
         transactions.executeWithoutResult(transaction -> {
             events.publishEvent(createdEvent());
+
             assertThatThrownBy(() -> event.get(150, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
         });
+
         assertThat(event.get(3, TimeUnit.SECONDS)).contains("event:notification");
     }
 
@@ -360,13 +471,17 @@ class SseIntegrationTest {
     @DisplayName("민원 이벤트가 발행돼도 트랜잭션 롤백 시 알림과 SSE를 생성하지 않는다")
     void skipsRolledBackComplaintTransaction() throws Exception {
         HttpResponse<InputStream> response = connect(manager, Instant.now().plusSeconds(60), null);
+
         assertThat(response.statusCode()).isEqualTo(200);
+
         transactions.executeWithoutResult(transaction -> {
             events.publishEvent(createdEvent());
             transaction.setRollbackOnly();
         });
+
         assertThat(CompletableFuture.supplyAsync(() -> readAll(response.body())).get(5, TimeUnit.SECONDS))
             .doesNotContain("event:notification");
+
         transactions.executeWithoutResult(transaction -> assertThat(entityManager
             .createQuery("select count(n) from Notification n", Long.class).getSingleResult()).isZero());
     }
@@ -375,12 +490,16 @@ class SseIntegrationTest {
     @DisplayName("수신 행 저장 실패 시 원본이 롤백되고 SSE를 보내지 않는다")
     void skipsDeliveryWhenRecipientStorageFails() throws Exception {
         HttpResponse<InputStream> response = connect(manager, Instant.now().plusSeconds(60), null);
+
         assertThat(response.statusCode()).isEqualTo(200);
+
         doThrow(new DataIntegrityViolationException("test recipient insert failed"))
             .when(userNotificationRepository).save(any(UserNotification.class));
         listener.onComplaintNotification(createdEvent());
+
         assertThat(CompletableFuture.supplyAsync(() -> readAll(response.body())).get(5, TimeUnit.SECONDS))
             .doesNotContain("event:notification");
+
         transactions.executeWithoutResult(transaction -> assertThat(entityManager
             .createQuery("select count(n) from Notification n", Long.class).getSingleResult()).isZero());
     }
@@ -395,7 +514,9 @@ class SseIntegrationTest {
 
         transactions.executeWithoutResult(transaction -> {
             UserNotification stale = entityManager.find(UserNotification.class, received.getId());
+
             assertThat(stale.getReadAt()).isNull();
+
             competing.executeWithoutResult(other -> entityManager.createNativeQuery(
                     "UPDATE User_notifications SET read_at = :readAt WHERE user_noti_id = :id")
                 .setParameter("readAt", firstReadAt).setParameter("id", received.getId()).executeUpdate());
@@ -403,6 +524,7 @@ class SseIntegrationTest {
             var response = notifications.markNotificationRead(manager.getId(), received.getId());
 
             assertThat(response.readAt().toLocalDateTime()).isEqualTo(firstReadAt);
+
             assertThat(response.unreadCount()).isZero();
         });
         transactions.executeWithoutResult(transaction -> assertThat(entityManager
@@ -413,12 +535,14 @@ class SseIntegrationTest {
     @DisplayName("알림 저장 서비스만 호출하면 DB에 저장하고 SSE는 보내지 않는다")
     void storesNotificationWithoutSendingSse() throws Exception {
         HttpResponse<InputStream> response = connect(manager, Instant.now().plusSeconds(60), null);
+
         assertThat(response.statusCode()).isEqualTo(200);
 
         storage.store(createdEvent());
 
         assertThat(CompletableFuture.supplyAsync(() -> readAll(response.body())).get(5, TimeUnit.SECONDS))
             .doesNotContain("event:notification");
+
         transactions.executeWithoutResult(transaction -> assertThat(entityManager
             .createQuery("select count(n) from UserNotification n", Long.class).getSingleResult()).isEqualTo(1));
     }
@@ -427,7 +551,9 @@ class SseIntegrationTest {
     @DisplayName("수신 행 저장 이후 커밋이 실패하면 알림을 롤백하고 SSE를 보내지 않는다")
     void skipsDeliveryWhenNotificationCommitFails() throws Exception {
         HttpResponse<InputStream> response = connect(manager, Instant.now().plusSeconds(60), null);
+
         assertThat(response.statusCode()).isEqualTo(200);
+
         doAnswer(invocation -> {
             UserNotification received = (UserNotification) invocation.callRealMethod();
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -443,23 +569,30 @@ class SseIntegrationTest {
 
         assertThat(CompletableFuture.supplyAsync(() -> readAll(response.body())).get(5, TimeUnit.SECONDS))
             .doesNotContain("event:notification");
+
         transactions.executeWithoutResult(transaction -> {
             assertThat(entityManager.createQuery("select count(n) from Notification n", Long.class)
                 .getSingleResult()).isZero();
+
             assertThat(entityManager.createQuery("select count(n) from UserNotification n", Long.class)
                 .getSingleResult()).isZero();
         });
+
+        verifyNoInteractions(notificationEventPublisher);
     }
 
     @Test
     @DisplayName("연결 중 퇴거하면 다음 heartbeat에서 연결을 종료한다")
     void closesStreamAfterResidentMovesOut() throws Exception {
         HttpResponse<InputStream> response = connect(resident, Instant.now().plusSeconds(60), null);
+
         assertThat(response.statusCode()).isEqualTo(200);
+
         transactions.executeWithoutResult(transaction -> entityManager
             .createQuery("select r from Room r where r.resident.id = :id", Room.class)
             .setParameter("id", resident.getId()).getSingleResult().moveOutResident());
         CompletableFuture<String> body = CompletableFuture.supplyAsync(() -> readAll(response.body()));
+
         assertThat(body.get(1, TimeUnit.SECONDS)).doesNotContain("event:notification", "FORBIDDEN");
     }
 
@@ -467,7 +600,9 @@ class SseIntegrationTest {
     @DisplayName("접근 회수 이벤트가 커밋되면 heartbeat를 기다리지 않고 연결을 종료한다")
     void closesStreamRightAfterAccessRevokedEventCommits() throws Exception {
         HttpResponse<InputStream> response = connect(resident, Instant.now().plusSeconds(60), null);
+
         assertThat(response.statusCode()).isEqualTo(200);
+
         CompletableFuture<String> body = CompletableFuture.supplyAsync(() -> readAll(response.body()));
 
         transactions.executeWithoutResult(transaction ->
@@ -480,7 +615,9 @@ class SseIntegrationTest {
     @DisplayName("접근 회수 이벤트가 롤백되면 연결을 유지한다")
     void keepsStreamWhenAccessRevokedEventRollsBack() throws Exception {
         HttpResponse<InputStream> response = connect(resident, Instant.now().plusSeconds(60), null);
+
         assertThat(response.statusCode()).isEqualTo(200);
+
         CompletableFuture<String> body = CompletableFuture.supplyAsync(() -> readAll(response.body()));
 
         transactions.executeWithoutResult(transaction -> {
@@ -496,17 +633,25 @@ class SseIntegrationTest {
     void deliversFromActualComplaintBusinessFlow() throws Exception {
         HttpResponse<InputStream> managerStream = connect(manager, Instant.now().plusSeconds(60), null);
         HttpResponse<InputStream> residentStream = connect(resident, Instant.now().plusSeconds(60), null);
+
         assertThat(managerStream.statusCode()).isEqualTo(200);
+
         assertThat(residentStream.statusCode()).isEqualTo(200);
+
         CompletableFuture<String> created = notification(managerStream.body());
         CompletableFuture<String> changed = notification(residentStream.body());
         Long complaintId = complaints.createComplaint(resident.getId(),
             ComplaintCreateRequest.builder().conversationId(conversation.getId()).build()).complaintId();
+
         assertThat(created.get(3, TimeUnit.SECONDS)).contains("event:notification");
+
         assertThat(changed).isNotDone();
+
         complaints.updateManagerComplaintStatus(manager.getId(), complaintId,
             new ComplaintStatusUpdateRequest("DONE"));
+
         assertThat(changed.get(3, TimeUnit.SECONDS)).contains("event:notification");
+
         transactions.executeWithoutResult(transaction -> assertThat(entityManager
             .createQuery("select count(n) from UserNotification n where n.readAt is null", Long.class)
             .getSingleResult()).isEqualTo(2));
@@ -579,5 +724,22 @@ class SseIntegrationTest {
     private <T> T persist(T entity) {
         entityManager.persist(entity);
         return entity;
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class RedisConfiguration {
+
+        @Bean(initMethod = "start", destroyMethod = "stop")
+        GenericContainer<?> redisContainer() {
+            return new GenericContainer<>(DockerImageName.parse("redis:8.2.10-alpine")).withExposedPorts(6379);
+        }
+
+        @Bean
+        DynamicPropertyRegistrar redisProperties(GenericContainer<?> redisContainer) {
+            return registry -> {
+                registry.add("spring.data.redis.host", redisContainer::getHost);
+                registry.add("spring.data.redis.port", () -> redisContainer.getMappedPort(6379));
+            };
+        }
     }
 }
