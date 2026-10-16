@@ -3,8 +3,6 @@ name: Backend CI
 # Pull Request에서는 검증만 한다.
 # main 병합으로 발생한 push에서만 검증된 Image를 Commit SHA 앞 7자리 Tag로 ECR에 Push한다.
 on:
-  pull_request:
-    branches: [main]
   push:
     branches: [main]
 
