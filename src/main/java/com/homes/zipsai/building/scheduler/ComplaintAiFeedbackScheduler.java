@@ -12,7 +12,10 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import com.homes.zipsai.building.batch.ComplaintAiFeedbackJobRunner;
+
 import lombok.RequiredArgsConstructor;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 @Component
 @ConditionalOnProperty(name = "app.complaint.ai-feedback-scheduler.enabled", havingValue = "true",
@@ -26,6 +29,7 @@ public class ComplaintAiFeedbackScheduler {
     private final Job complaintAiFeedbackJob;
 
     @Scheduled(cron = "0 0 0 * * *", zone = "Asia/Seoul")
+    @SchedulerLock(name = ComplaintAiFeedbackJobRunner.LOCK_NAME, lockAtLeastFor = "1m", lockAtMostFor = "30m")
     public void runDailyComplaintAiFeedbackJob() {
         try {
             jobOperator.start(complaintAiFeedbackJob, new JobParametersBuilder()

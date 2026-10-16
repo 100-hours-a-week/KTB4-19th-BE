@@ -60,6 +60,20 @@ public class ComplaintAiFeedbackJobConfig {
     }
 
     @Bean
+    public Job complaintAiFeedbackSendJob(JobRepository jobRepository, Step complaintAiFeedbackStep) {
+        return new JobBuilder("complaintAiFeedbackSendJob", jobRepository)
+                .start(complaintAiFeedbackStep)
+                .build();
+    }
+
+    @Bean
+    public Job complaintAiFeedbackDeleteJob(JobRepository jobRepository, Step complaintAiFeedbackDeleteStep) {
+        return new JobBuilder("complaintAiFeedbackDeleteJob", jobRepository)
+                .start(complaintAiFeedbackDeleteStep)
+                .build();
+    }
+
+    @Bean
     public Step complaintAiFeedbackStep(
             JobRepository jobRepository,
             PlatformTransactionManager transactionManager,
