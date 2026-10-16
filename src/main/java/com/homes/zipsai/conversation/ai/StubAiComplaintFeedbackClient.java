@@ -9,4 +9,8 @@ public class StubAiComplaintFeedbackClient implements AiComplaintFeedbackClient 
     @Override
     public void send(AiComplaintFeedbackBatchRequest request) {
     }
+
+    @Override
+    public void delete(AiComplaintFeedbackDeleteRequest request) {
+    }
 }
