@@ -65,12 +65,23 @@ public class BuildingCoordinateRetryJob {
     private LocalDateTime updatedAt;
 
     public BuildingCoordinateRetryJob(Building building, String lastErrorType, LocalDateTime nextRetryAt) {
-        this.building = Objects.requireNonNull(building, "building");
+        this(building, lastErrorType);
         this.nextRetryAt = Objects.requireNonNull(nextRetryAt, "nextRetryAt");
+    }
+
+    private BuildingCoordinateRetryJob(Building building, String lastErrorType) {
+        this.building = Objects.requireNonNull(building, "building");
         if (lastErrorType == null || lastErrorType.isBlank() || lastErrorType.length() > 30) {
             throw new IllegalArgumentException("lastErrorType must contain 1 to 30 characters");
         }
         this.lastErrorType = lastErrorType;
+    }
+
+    public static BuildingCoordinateRetryJob failed(Building building, String lastErrorType) {
+        BuildingCoordinateRetryJob job = new BuildingCoordinateRetryJob(building, lastErrorType);
+        job.status = BuildingCoordinateRetryJobStatus.FAILED;
+        job.failureReason = lastErrorType;
+        return job;
     }
 
     @PrePersist
