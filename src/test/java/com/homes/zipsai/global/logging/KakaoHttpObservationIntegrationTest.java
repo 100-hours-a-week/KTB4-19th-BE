@@ -28,6 +28,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.client.RestClient;
 
 import com.homes.zipsai.building.client.KakaoAddressClient;
+import com.homes.zipsai.building.client.KakaoAddressResult;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
@@ -42,10 +43,10 @@ class KakaoHttpObservationIntegrationTest {
     private static final String ADDRESS = "서울 강남구 테헤란로 152";
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Logger logger = (Logger) org.slf4j.LoggerFactory.getLogger("structured-events");
-    private final ListAppender<ILoggingEvent> appender = new ListAppender<>();
-    private HttpServer server;
-    private ExecutorService executor;
-    private ApplicationContextRunner runner;
+    private final ListAppender<ILoggingEvent> listAppender = new ListAppender<>();
+    private HttpServer httpServer;
+    private ExecutorService executorService;
+    private ApplicationContextRunner applicationContextRunner;
     private volatile int responseStatus;
     private volatile String responseBody;
     private volatile boolean blockResponse;
@@ -59,14 +60,14 @@ class KakaoHttpObservationIntegrationTest {
              {"address_type":"ROAD_ADDR","x":"127.0365","y":"37.5000"}]}
             """;
         releaseResponse = new CountDownLatch(1);
-        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        executor = Executors.newVirtualThreadPerTaskExecutor();
-        server.setExecutor(executor);
-        server.createContext("/v2/local/search/address.json", this::respond);
-        server.start();
-        appender.start();
-        logger.addAppender(appender);
-        runner = new ApplicationContextRunner()
+        httpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        executorService = Executors.newVirtualThreadPerTaskExecutor();
+        httpServer.setExecutor(executorService);
+        httpServer.createContext("/v2/local/search/address.json", this::respond);
+        httpServer.start();
+        listAppender.start();
+        logger.addAppender(listAppender);
+        applicationContextRunner = new ApplicationContextRunner()
             .withInitializer(context -> context.getBeanFactory()
                 .setConversionService(ApplicationConversionService.getSharedInstance()))
             .withConfiguration(AutoConfigurations.of(ObservationAutoConfiguration.class,
@@ -74,7 +75,7 @@ class KakaoHttpObservationIntegrationTest {
             .withUserConfiguration(ExternalApiHttpObservationHandler.class, KakaoAddressClient.class)
             .withBean(StructuredLogger.class, () -> new StructuredLogger(objectMapper))
             .withPropertyValues("app.ai.client=stub", "app.ai.base-url=http://ai.test:8000",
-                "app.kakao.base-url=http://127.0.0.1:" + server.getAddress().getPort(),
+                "app.kakao.base-url=http://127.0.0.1:" + httpServer.getAddress().getPort(),
                 "app.kakao.api-key=test-kakao-key",
                 "app.external-api.targets.ai.base-url=${app.ai.base-url}",
                 "app.external-api.targets.ai.stage=ai_api",
@@ -87,10 +88,10 @@ class KakaoHttpObservationIntegrationTest {
     @AfterEach
     void tearDown() {
         releaseResponse.countDown();
-        server.stop(0);
-        executor.shutdownNow();
-        logger.detachAppender(appender);
-        appender.stop();
+        httpServer.stop(0);
+        executorService.shutdownNow();
+        logger.detachAppender(listAppender);
+        listAppender.stop();
     }
 
     @Test
@@ -99,7 +100,7 @@ class KakaoHttpObservationIntegrationTest {
         query(true);
 
         assertLogs("ok", null);
-        assertThat(appender.list).allSatisfy(event -> assertThat(event.getFormattedMessage())
+        assertThat(listAppender.list).allSatisfy(event -> assertThat(event.getFormattedMessage())
             .doesNotContain("test-kakao-key", ADDRESS, "query="));
     }
 
@@ -119,7 +120,7 @@ class KakaoHttpObservationIntegrationTest {
     @DisplayName("실제 응답 대기 시간 초과도 실패 시간으로 기록하고 좌표 조회 예외를 전파하지 않는다")
     void logsReadTimeoutWithoutFailingRequest() {
         blockResponse = true;
-        runner = runner.withPropertyValues("app.kakao.read-timeout=PT0.1S");
+        applicationContextRunner = applicationContextRunner.withPropertyValues("app.kakao.read-timeout=PT0.1S");
 
         query(false);
 
@@ -142,7 +143,7 @@ class KakaoHttpObservationIntegrationTest {
     void logsFailureWithoutApiKey() {
         responseStatus = 401;
         responseBody = "{\"message\":\"test error\"}";
-        runner = runner.withPropertyValues("app.kakao.api-key=");
+        applicationContextRunner = applicationContextRunner.withPropertyValues("app.kakao.api-key=");
 
         query(false);
 
@@ -152,8 +153,8 @@ class KakaoHttpObservationIntegrationTest {
     @Test
     @DisplayName("AI HTTP 호출도 자동 Observation으로 기존 stage와 요청 요약 시간을 유지한다")
     void preservesAiLoggingThroughBootObservation() {
-        String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
-        runner.withPropertyValues("app.ai.client=http", "app.ai.base-url=" + baseUrl,
+        String baseUrl = "http://127.0.0.1:" + httpServer.getAddress().getPort();
+        applicationContextRunner.withPropertyValues("app.ai.client=http", "app.ai.base-url=" + baseUrl,
             "app.kakao.base-url=https://dapi.kakao.com").run(context -> {
                 RequestIdFilter filter = new RequestIdFilter(context.getBean(StructuredLogger.class));
                 MockHttpServletRequest request = new MockHttpServletRequest("POST", ROUTE);
@@ -178,14 +179,15 @@ class KakaoHttpObservationIntegrationTest {
     }
 
     private void query(boolean expectedCoordinates) {
-        runner.run(context -> {
+        applicationContextRunner.run(context -> {
             assertThat(context).hasSingleBean(ExternalApiHttpObservationHandler.class);
             RequestIdFilter filter = new RequestIdFilter(context.getBean(StructuredLogger.class));
             MockHttpServletRequest request = new MockHttpServletRequest("POST", ROUTE);
             MockHttpServletResponse response = new MockHttpServletResponse();
 
             filter.doFilter(request, response, (req, res) -> {
-                assertThat(context.getBean(KakaoAddressClient.class).findCoordinates(ADDRESS).isPresent())
+                assertThat(context.getBean(KakaoAddressClient.class).findCoordinates(ADDRESS)
+                    instanceof KakaoAddressResult.Success)
                     .isEqualTo(expectedCoordinates);
                 response.setStatus(201);
             });
@@ -224,7 +226,7 @@ class KakaoHttpObservationIntegrationTest {
     }
 
     private List<JsonNode> events() {
-        return appender.list.stream().map(event -> objectMapper.readTree(event.getFormattedMessage())).toList();
+        return listAppender.list.stream().map(event -> objectMapper.readTree(event.getFormattedMessage())).toList();
     }
 
     private void respond(HttpExchange exchange) throws IOException {
