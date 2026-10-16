@@ -80,7 +80,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v5
         with:
           # 적용 전 Repository Variable과 staging 브랜치용 OIDC Trust Policy 설정 필요.
-          role-to-assume: ${{ vars.AWS_BACKEND_CI_ROLE_ARN }}
+          role-to-assume: ${{ vars.AWS_BACKEND_CI_V2_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Set image tag
