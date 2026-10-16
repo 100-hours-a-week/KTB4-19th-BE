@@ -116,9 +116,9 @@ class ComplaintAiFeedbackJobConfigTest {
     @DisplayName("이미 전송한 민원은 다시 전송하지 않는다")
     void doesNotResendAlreadySentFeedback() throws Exception {
         saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
-        runJob();
+        jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
 
-        runJob();
+        jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
 
         verify(aiComplaintFeedbackClient, times(1)).send(any(AiComplaintFeedbackBatchRequest.class));
     }
@@ -234,12 +234,12 @@ class ComplaintAiFeedbackJobConfigTest {
     @DisplayName("전송 후 수정한 답변은 다시 전송한다")
     void resendsEditedFeedback() throws Exception {
         ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
-        runJob();
+        jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
         ComplaintDetail reloaded = complaintDetailRepository.findById(detail.getId()).orElseThrow();
         reloaded.updateComment("분리수거장은 지하 2층으로 옮겼습니다");
         complaintDetailRepository.saveAndFlush(reloaded);
 
-        runJob();
+        jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
 
         ArgumentCaptor<AiComplaintFeedbackBatchRequest> captor =
             ArgumentCaptor.forClass(AiComplaintFeedbackBatchRequest.class);
@@ -252,12 +252,13 @@ class ComplaintAiFeedbackJobConfigTest {
     @DisplayName("전송한 답변을 삭제하면 AI에 삭제를 요청하고 전송 기록을 지운다")
     void deletesSentFeedbackFromAi() throws Exception {
         ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
-        runJob();
+        jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
         ComplaintDetail reloaded = complaintDetailRepository.findById(detail.getId()).orElseThrow();
         reloaded.deleteComment();
         complaintDetailRepository.saveAndFlush(reloaded);
 
-        JobExecution execution = runJob();
+        JobExecution execution = jobOperatorTestUtils.startJob(
+            jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
 
         assertThat(execution.getExitStatus()).isEqualTo(ExitStatus.COMPLETED);
         ArgumentCaptor<AiComplaintFeedbackDeleteRequest> captor =
@@ -277,7 +278,7 @@ class ComplaintAiFeedbackJobConfigTest {
         detail.deleteComment();
         complaintDetailRepository.saveAndFlush(detail);
 
-        runJob();
+        jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
 
         verify(aiComplaintFeedbackClient, never()).delete(any(AiComplaintFeedbackDeleteRequest.class));
     }
@@ -286,20 +287,16 @@ class ComplaintAiFeedbackJobConfigTest {
     @DisplayName("AI 삭제 요청이 실패하면 전송 기록을 남겨 다음 배치에서 다시 요청한다")
     void keepsSentRecordWhenDeleteFails() throws Exception {
         ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
-        runJob();
+        jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
         ComplaintDetail reloaded = complaintDetailRepository.findById(detail.getId()).orElseThrow();
         reloaded.deleteComment();
         complaintDetailRepository.saveAndFlush(reloaded);
         doThrow(new InternalServerException())
             .when(aiComplaintFeedbackClient).delete(any(AiComplaintFeedbackDeleteRequest.class));
 
-        runJob();
+        jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
 
         assertThat(sentAt(detail)).isNotNull();
-    }
-
-    private JobExecution runJob() throws Exception {
-        return jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
     }
 
     private AiComplaintFeedbackRequest sendAndCaptureSingleItem() throws Exception {
