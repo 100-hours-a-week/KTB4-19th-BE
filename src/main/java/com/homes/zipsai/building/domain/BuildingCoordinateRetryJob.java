@@ -71,17 +71,61 @@ public class BuildingCoordinateRetryJob {
 
     private BuildingCoordinateRetryJob(Building building, String lastErrorType) {
         this.building = Objects.requireNonNull(building, "building");
-        if (lastErrorType == null || lastErrorType.isBlank() || lastErrorType.length() > 30) {
-            throw new IllegalArgumentException("lastErrorType must contain 1 to 30 characters");
-        }
-        this.lastErrorType = lastErrorType;
+        this.lastErrorType = requireError(lastErrorType);
     }
 
     public static BuildingCoordinateRetryJob failed(Building building, String lastErrorType) {
         BuildingCoordinateRetryJob job = new BuildingCoordinateRetryJob(building, lastErrorType);
-        job.status = BuildingCoordinateRetryJobStatus.FAILED;
-        job.failureReason = lastErrorType;
+        job.fail(lastErrorType, lastErrorType, (short) 0);
         return job;
+    }
+
+    public void claim(LocalDateTime now) {
+        boolean available = status == BuildingCoordinateRetryJobStatus.PENDING && !nextRetryAt.isAfter(now)
+            || status == BuildingCoordinateRetryJobStatus.PROCESSING && !leaseExpiresAt.isAfter(now);
+        if (!available) {
+            throw new IllegalStateException("Job is not available for claiming");
+        }
+        claimVersion = Math.incrementExact(claimVersion);
+        status = BuildingCoordinateRetryJobStatus.PROCESSING;
+        nextRetryAt = null;
+        leaseExpiresAt = now.plusMinutes(10);
+    }
+
+    public boolean isOwnedBy(long version, LocalDateTime now) {
+        return status == BuildingCoordinateRetryJobStatus.PROCESSING
+            && claimVersion == version && leaseExpiresAt.isAfter(now);
+    }
+
+    public void complete() {
+        status = BuildingCoordinateRetryJobStatus.COMPLETED;
+        nextRetryAt = null;
+        leaseExpiresAt = null;
+    }
+
+    public void retry(String lastErrorType, short retryFailureCount, LocalDateTime nextRetryAt) {
+        this.lastErrorType = requireError(lastErrorType);
+        this.retryFailureCount = retryFailureCount;
+        this.nextRetryAt = Objects.requireNonNull(nextRetryAt, "nextRetryAt");
+        status = BuildingCoordinateRetryJobStatus.PENDING;
+        leaseExpiresAt = null;
+        failureReason = null;
+    }
+
+    public void fail(String lastErrorType, String failureReason, short retryFailureCount) {
+        this.lastErrorType = requireError(lastErrorType);
+        this.failureReason = requireError(failureReason);
+        this.retryFailureCount = retryFailureCount;
+        status = BuildingCoordinateRetryJobStatus.FAILED;
+        nextRetryAt = null;
+        leaseExpiresAt = null;
+    }
+
+    private static String requireError(String error) {
+        if (error == null || error.isBlank() || error.length() > 30) {
+            throw new IllegalArgumentException("error must contain 1 to 30 characters");
+        }
+        return error;
     }
 
     @PrePersist
