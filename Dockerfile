@@ -22,6 +22,10 @@ RUN --mount=type=cache,target=/root/.gradle \
 FROM eclipse-temurin:25-jre-jammy AS runtime
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
 # bootJar로 생성한 실행 가능한 JAR만 Runtime Image에 복사한다.
 COPY --from=builder --chown=10001:10001 \
     /app/build/libs/zipsai-0.0.1-SNAPSHOT.jar /app/app.jar

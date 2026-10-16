@@ -1,0 +1,316 @@
+name: Backend CD V2 ECS
+
+# 적용 위치: BE 저장소의 .github/workflows/backend-cd-v2.yml로 추가한다.
+# 기존 V1 EC2 수동 CD는 별도 파일로 유지하며 덮어쓰지 않는다.
+# 별도 JSON/SH 없이 이 Workflow만 추가한다. 일반 앱 설정은 아래 APP_SETTINGS에서 관리한다.
+# workflow_run 자동 실행을 위해 이 파일이 기본 브랜치에도 있어야 한다.
+# 적용 전 GitHub Environments staging / production을 생성한다.
+# production에는 Required reviewers와 main 배포 브랜치 제한을 설정한다.
+# 환경별 Variables:
+#   AWS_BACKEND_CD_ROLE_ARN, ECS_CLUSTER_NAME,
+#   ECS_API_SERVICE_NAME, ECS_WORKER_SERVICE_NAME, API_HEALTH_URL
+# OIDC Role Trust Policy의 sub는 각각 아래 GitHub Environment를 허용해야 한다.
+#   repo:100-hours-a-week/KTB4-19th-BE:environment:staging
+#   repo:100-hours-a-week/KTB4-19th-BE:environment:production
+# IAM: 대상 ECS 조회/Task Definition 등록/Service 갱신, 기존 Task Role의
+# iam:PassRole, ECR DescribeImages, 검증 이력 경로의 SSM 읽기/쓰기가 필요하다.
+# Production Role은 staging 검증 이력 읽기만 허용한다. PR에는 AWS 권한을 주지 않는다.
+# CD는 현재 Service에 적용된 Task Definition을 복사하며 인프라 계약 Parameter를 읽지 않는다.
+# CPU/메모리는 ECS 콘솔에서 변경해 Service에 적용한다. CD는 적용된 값을 유지한다.
+# 이미지·허용된 일반 환경변수만 변경한다. Sidecar·Secret·Role·사양·Task 수는 유지한다.
+# staging Push CI 성공은 Staging 자동 배포, main 수동 실행은 Production 고정이다.
+on:
+  workflow_run:
+    workflows: [Backend CI V2]
+    types: [completed]
+    branches: [staging]
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Staging에서 검증한 ECR 이미지 태그 (커밋 SHA 앞 7자리)
+        required: true
+        type: string
+      service:
+        description: 배포할 ECS Service (각각 독립 배포)
+        required: true
+        type: choice
+        options: [api, worker]
+        default: api
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ap-northeast-2
+  ECR_REGISTRY: 929368845727.dkr.ecr.ap-northeast-2.amazonaws.com
+  ECR_REPOSITORY: zipsai-backend
+
+jobs:
+  select:
+    name: Select deployment
+    # PR CI 완료나 외부 저장소의 실행 결과로 배포하지 않는다.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'staging' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.select.outputs.environment }}
+      image_tag: ${{ steps.select.outputs.image_tag }}
+      service: ${{ steps.select.outputs.service }}
+    steps:
+      - name: Select environment and image
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CI_SHA: ${{ github.event.workflow_run.head_sha }}
+          INPUT_SHA: ${{ inputs.commit_sha }}
+          INPUT_SERVICE: ${{ inputs.service }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == workflow_run ]]; then
+            deployment_environment=staging
+            image_tag="${CI_SHA:0:7}"
+            service=api
+          else
+            deployment_environment=production
+            image_tag="$INPUT_SHA"
+            service="$INPUT_SERVICE"
+          fi
+          [[ "$deployment_environment" == staging || "$deployment_environment" == production ]] || exit 1
+          [[ "$service" == api || "$service" == worker ]] || {
+            echo '배포 대상은 api 또는 worker만 허용합니다.' >&2
+            exit 1
+          }
+          [[ "$image_tag" =~ ^[0-9a-f]{7}$ ]] || {
+            echo 'SHA 앞 7자리 소문자 16진수 태그를 입력하세요.' >&2
+            exit 1
+          }
+          echo "environment=$deployment_environment" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$image_tag" >> "$GITHUB_OUTPUT"
+          echo "service=$service" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Deploy selected ECS service
+    needs: select
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    # 승인·환경별 Variable·OIDC Environment subject는 이 Job에 적용된다.
+    environment: ${{ needs.select.outputs.environment }}
+    # 같은 환경의 API/Worker 배포를 직렬화하고 진행 중 배포는 취소하지 않는다.
+    concurrency:
+      group: backend-cd-v2-${{ needs.select.outputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DEPLOYMENT_ENVIRONMENT: ${{ needs.select.outputs.environment }}
+      IMAGE_TAG: ${{ needs.select.outputs.image_tag }}
+      SERVICE_ROLE: ${{ needs.select.outputs.service }}
+      ECS_CLUSTER: ${{ vars.ECS_CLUSTER_NAME }}
+      API_SERVICE: ${{ vars.ECS_API_SERVICE_NAME }}
+      WORKER_SERVICE: ${{ vars.ECS_WORKER_SERVICE_NAME }}
+      API_HEALTH_URL: ${{ vars.API_HEALTH_URL }}
+      # 백엔드가 관리하는 일반 설정. Secret·DB/Redis/AI 주소·스케줄러는 넣지 않는다.
+      # owned_environment_keys는 이 Workflow가 추가/수정/삭제할 수 있는 키의 명시적 목록이다.
+      # 아래 목록도 검토 없이 확대하지 않는다. 기존 ECS secrets와 중복되면 배포를 중단한다.
+      APP_SETTINGS: |
+        {
+          "schema_version": 2,
+          "owned_environment_keys": [
+            "SPRING_PROFILES_ACTIVE", "MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE",
+            "SERVER_TOMCAT_MBEANREGISTRY_ENABLED", "AUTH_SECURE_COOKIE", "BACKEND_PORT",
+            "AI_CLIENT", "TZ", "CORS_ALLOWED_ORIGINS"
+          ],
+          "common": {
+            "SPRING_PROFILES_ACTIVE": "prod",
+            "MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE": "health,prometheus",
+            "SERVER_TOMCAT_MBEANREGISTRY_ENABLED": "true",
+            "AUTH_SECURE_COOKIE": "true", "BACKEND_PORT": "8080",
+            "AI_CLIENT": "http", "TZ": "Asia/Seoul"
+          },
+          "environments": {
+            "staging": {"CORS_ALLOWED_ORIGINS": "https://v2.zipsai.co.kr"},
+            "production": {"CORS_ALLOWED_ORIGINS": "https://zipsai.co.kr"}
+          },
+          "services": {"api": {"enabled": true}, "worker": {"enabled": false}}
+        }
+    steps:
+      - name: Skip superseded automatic deployment
+        id: freshness
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          CI_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          proceed=true
+          if [[ "$EVENT_NAME" == workflow_run ]]; then
+            latest_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/staging" --jq '.commit.sha')"
+            if [[ "$latest_sha" != "$CI_SHA" ]]; then
+              echo '더 최신 staging 커밋이 있어 이전 CI의 자동 배포를 건너뜁니다.'
+              proceed=false
+            fi
+          fi
+          echo "proceed=$proceed" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials with OIDC
+        if: steps.freshness.outputs.proceed == 'true'
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_BACKEND_CD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy image digest and verify service
+        if: steps.freshness.outputs.proceed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${ECS_CLUSTER:?ECS_CLUSTER_NAME 환경 Variable 설정 필요}"
+          if [[ "$SERVICE_ROLE" == api ]]; then
+            service="${API_SERVICE:?ECS_API_SERVICE_NAME 환경 Variable 설정 필요}"
+            : "${API_HEALTH_URL:?API_HEALTH_URL 환경 Variable 설정 필요}"
+          else
+            service="${WORKER_SERVICE:?ECS_WORKER_SERVICE_NAME 환경 Variable 설정 필요}"
+          fi
+          task_dir="$(mktemp -d)"
+          trap 'rm -f "$task_dir/service.json" "$task_dir/current-task.json" "$task_dir/register.json" "$task_dir/status.json"; rmdir "$task_dir"' EXIT
+          config_hash="$(jq -cS . <<< "$APP_SETTINGS" | sha256sum | cut -d ' ' -f 1)"
+
+          digest="$(aws ecr describe-images \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=$IMAGE_TAG" \
+            --query 'imageDetails[0].imageDigest' --output text)"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          image="$ECR_REGISTRY/$ECR_REPOSITORY@$digest"
+          # Staging Service별 검증 이력을 보존하므로 이전 정상 SHA도 승격 가능하다.
+          verification_parameter="/zipsai/staging/deploy/backend/$SERVICE_ROLE/verified-images/$IMAGE_TAG"
+          if [[ "$DEPLOYMENT_ENVIRONMENT" == production ]]; then
+            verification="$(aws ssm get-parameter --name "$verification_parameter" \
+              --query 'Parameter.Value' --output text)"
+            jq -e --arg digest "$digest" --arg service "$SERVICE_ROLE" --arg config_hash "$config_hash" \
+              '.digest == $digest and .service == $service and .config_hash == $config_hash' \
+              <<< "$verification" > /dev/null
+          fi
+
+          aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$service" > "$task_dir/service.json"
+          jq -e '.failures | length == 0' "$task_dir/service.json" > /dev/null
+          jq -e '.services | length == 1' "$task_dir/service.json" > /dev/null
+          # 종료되거나 이미 배포 중인 Service를 덮어쓰지 않는다.
+          jq -e '.services[0] | .status == "ACTIVE" and .desiredCount >= 0 and
+            .deploymentController.type == "ECS" and
+            .deploymentConfiguration.deploymentCircuitBreaker.enable == true and
+            .deploymentConfiguration.deploymentCircuitBreaker.rollback == true and
+            (.deployments | length == 1) and .deployments[0].rolloutState == "COMPLETED"' \
+            "$task_dir/service.json" > /dev/null
+          previous_revision="$(jq -r '.services[0].taskDefinition' "$task_dir/service.json")"
+          desired_count="$(jq -r '.services[0].desiredCount' "$task_dir/service.json")"
+
+          # 최신 family Revision이 아니라 Service에 적용된 Revision의 사양을 사용한다.
+          aws ecs describe-task-definition --task-definition "$previous_revision" \
+            --include TAGS --output json > "$task_dir/current-task.json"
+
+          # 클라우드가 Service에 적용한 정의를 기반으로 이미지와 앱 소유 환경변수만 변경한다.
+          # CPU/메모리·IAM·Secret ARN·Sidecar·로그·Health Check·명령은 그대로 보존한다.
+          jq --argjson settings "$APP_SETTINGS" --arg environment "$DEPLOYMENT_ENVIRONMENT" \
+            --arg role "$SERVICE_ROLE" --arg image "$image" '
+            . as $response | .taskDefinition as $task |
+            $settings.owned_environment_keys as $owned |
+            ($settings.common + $settings.environments[$environment]) as $values |
+            if $settings.schema_version != 2 or $settings.services[$role].enabled != true or
+               ($settings.environments[$environment] | type) != "object" or
+               ($owned | type) != "array" or ($owned | unique | length) != ($owned | length) or
+               any($owned[]; test("^[A-Z][A-Z0-9_]*$") | not) or
+               any($owned[]; test("SECRET|PASSWORD|TOKEN|API_KEY|^DB_|^REDIS_|^APPCONFIG_|^AWS_|^S3_|^SQS_|SCHEDULER|^AI_API_URL$")) or
+               any($values | to_entries[]; (.value | type) != "string") or
+               ((($values | keys) - $owned) | length) != 0
+              then error("invalid app settings or service disabled; do not override cloud-owned settings") else . end |
+            if ([$task.containerDefinitions[] | select(.name == $role)] | length) != 1
+              then error("expected exactly one application container") else . end |
+            ([$task.containerDefinitions[] | select(.name == $role) | .secrets[]?.name]) as $secret_names |
+            if ([$owned[] | select(. as $key | $secret_names | index($key))] | length) > 0
+              then error("app setting conflicts with Parameter Store variable") else . end |
+            $task |
+            del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities,
+                .registeredAt, .registeredBy, .deregisteredAt) |
+            .tags = ($response.tags // []) |
+            .containerDefinitions |= map(
+              if .name == $role then
+                .image = $image |
+                .environment = (((.environment // []) | map(select(.name as $key | $owned | index($key) | not))) +
+                  ($values | to_entries | sort_by(.key) | map({name:.key, value:.value})))
+              else . end)
+          ' "$task_dir/current-task.json" > "$task_dir/register.json"
+          revision="$(aws ecs register-task-definition --cli-input-json "file://$task_dir/register.json" \
+            --query 'taskDefinition.taskDefinitionArn' --output text)"
+
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$service" \
+            --task-definition "$revision" --query 'service.taskDefinition' --output text
+
+          if [[ "$desired_count" == 0 ]]; then
+            echo '### ECS 실행 버전 준비 완료 — Task 수 0 유지' >> "$GITHUB_STEP_SUMMARY"
+            echo "- Service: $service / Image tag: $IMAGE_TAG / Revision: $revision" >> "$GITHUB_STEP_SUMMARY"
+            echo '- 실행·Health 검증 전입니다. 클라우드 담당자가 Task 수를 올린 뒤 다시 배포·검증하세요.' >> "$GITHUB_STEP_SUMMARY"
+            echo '- staging 검증 이력은 기록하지 않습니다. 운영 승격 가능한 검증 완료 상태가 아닙니다.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # waiter는 자동 Rollback 후에도 성공할 수 있다. 새 Revision인지 별도 확인한다.
+          if ! aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$service"; then
+            aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$service" \
+              --query 'services[0].{Deployments:deployments,Events:events[0:10]}'
+            echo '배포 안정화 실패. Circuit Breaker 및 ECS 이벤트를 확인하세요.' >&2
+            exit 1
+          fi
+          aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$service" > "$task_dir/status.json"
+          jq -e --arg revision "$revision" '.services[0] |
+            .taskDefinition == $revision and
+            (.deployments | length == 1) and
+            .deployments[0].rolloutState == "COMPLETED" and
+            .runningCount == .desiredCount and .pendingCount == 0' \
+            "$task_dir/status.json" > /dev/null
+
+          if [[ "$SERVICE_ROLE" == api ]]; then
+            # ECS/ALB 정상화 뒤 외부 readiness 응답까지 확인한다.
+            # 응답 코드뿐 아니라 Spring Health의 status=UP을 확인한다.
+            if ! health="$(curl --fail --silent --show-error --connect-timeout 5 \
+              --max-time 15 --retry 5 --retry-all-errors --retry-delay 5 "$API_HEALTH_URL")" ||
+              ! jq -e '.status == "UP"' <<< "$health" > /dev/null; then
+              # Health 실패 시 이번 Revision이 아직 현재 Revision일 때만 되돌린다.
+              current="$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$service" \
+                --query 'services[0].taskDefinition' --output text)"
+              if [[ "$current" == "$revision" ]]; then
+                aws ecs update-service --cluster "$ECS_CLUSTER" --service "$service" \
+                  --task-definition "$previous_revision" --query 'service.taskDefinition' --output text
+                aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$service"
+              fi
+              echo '외부 Health Check 실패. 새 버전 배포는 실패로 처리합니다.' >&2
+              exit 1
+            fi
+          fi
+
+          if [[ "$DEPLOYMENT_ENVIRONMENT" == staging ]]; then
+            verification="$(jq -n --arg digest "$digest" --arg service "$SERVICE_ROLE" \
+              --arg revision "$revision" --arg config_hash "$config_hash" \
+              --arg run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+              '{digest:$digest, service:$service, config_hash:$config_hash, task_definition:$revision, run_url:$run}')"
+            aws ssm put-parameter --name "$verification_parameter" --type String \
+              --value "$verification" --overwrite > /dev/null
+          fi
+          {
+            echo '### Backend ECS 배포 결과'
+            echo "- Environment: $DEPLOYMENT_ENVIRONMENT"
+            echo "- Service: $service"
+            echo "- Image tag: $IMAGE_TAG"
+            echo "- Image: $image"
+            echo "- Previous revision: $previous_revision"
+            echo "- New revision: $revision"
+            echo '- ECS 안정화 확인 완료. API는 외부 readiness도 확인했습니다.'
+            echo '- 기능·SQS 처리 검증은 별도이며, Health Check 성공만으로 보장하지 않습니다.'
+          } >> "$GITHUB_STEP_SUMMARY"
