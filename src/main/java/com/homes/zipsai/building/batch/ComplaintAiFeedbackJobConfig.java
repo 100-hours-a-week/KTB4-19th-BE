@@ -24,8 +24,11 @@ import org.springframework.core.retry.RetryPolicy;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import com.homes.zipsai.building.domain.Complaint;
+import com.homes.zipsai.building.domain.ComplaintContent;
 import com.homes.zipsai.building.domain.ComplaintDetail;
+import com.homes.zipsai.building.domain.ComplaintType;
 import com.homes.zipsai.building.repository.ComplaintDetailRepository;
+import com.homes.zipsai.conversation.ai.AiComplaintDraft;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackBatchRequest;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackClient;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackRequest;
@@ -37,6 +40,7 @@ public class ComplaintAiFeedbackJobConfig {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ComplaintAiFeedbackJobConfig.class);
 
+    private static final String UNKNOWN_VALUE = ComplaintContent.from(AiComplaintDraft.EMPTY).symptom();
     private static final int CHUNK_SIZE = 100;
     private static final int MAX_BATCH_SIZE = 5000;
     private static final long RETRY_LIMIT = 3;
@@ -71,21 +75,25 @@ public class ComplaintAiFeedbackJobConfig {
     @Bean
     @StepScope
     public ItemReader<ComplaintDetail> complaintAiFeedbackReader(ComplaintDetailRepository complaintDetailRepository) {
-        return new ComplaintAiFeedbackItemReader(complaintDetailRepository, MAX_BATCH_SIZE);
+        return new ComplaintAiFeedbackItemReader(complaintDetailRepository, UNKNOWN_VALUE, MAX_BATCH_SIZE);
     }
 
     private ItemProcessor<ComplaintDetail, FeedbackItem> complaintAiFeedbackProcessor() {
         return detail -> {
             Complaint complaint = detail.getComplaint();
-            String issueType = complaint.getConversation() != null
-                    ? complaint.getConversation().getDraftIssueType()
-                    : null;
+            boolean qa = complaint.getType() == ComplaintType.QA;
+            String issueType = qa || complaint.getConversation() == null
+                    ? null
+                    : complaint.getConversation().getDraftIssueType();
+            String location = qa || UNKNOWN_VALUE.equals(detail.getLocation())
+                    ? null
+                    : detail.getLocation();
             AiComplaintFeedbackRequest request = new AiComplaintFeedbackRequest(
                     detail.getId(),
                     complaint.getBuilding().getId(),
-                    complaint.getType() != null ? complaint.getType().name() : null,
+                    complaint.getType().name(),
                     issueType,
-                    detail.getLocation(),
+                    location,
                     detail.getSymptom(),
                     detail.getOccurredTime(),
                     detail.getComment(),
