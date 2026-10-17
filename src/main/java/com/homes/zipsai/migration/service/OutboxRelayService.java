@@ -52,7 +52,8 @@ public class OutboxRelayService {
     private static final String RELEASE_LOCK = "SELECT RELEASE_LOCK(?)";
     private static final String LOCK_NAME = "migration_outbox_worker";
     private static final String MARK_COMPLETED = """
-        UPDATE Migration_outbox_events SET status = 'COMPLETED', processed_at = :completedAt WHERE event_id = :eventId
+        UPDATE Migration_outbox_events SET status = 'COMPLETED', processed_at = :completedAt
+        WHERE event_id IN (:eventIds)
         """;
     private static final String MARK_RETRY = """
         UPDATE Migration_outbox_events
@@ -169,17 +170,41 @@ public class OutboxRelayService {
     }
 
     private int relayEvents(List<OutboxEvent> events, MigrationMode mode, LocalDateTime now) {
+        List<OutboxEvent> relayableEvents = events.stream()
+            .takeWhile(event -> !event.isFailed() && !event.isWaitingForRetry(now))
+            .toList();
+        if (relayableEvents.isEmpty() || !canContinue(mode, relayableEvents.getFirst().direction(), now)) {
+            return 0;
+        }
+        int relayedCount = relayTogether(relayableEvents)
+            ? relayableEvents.size()
+            : relayOneByOne(relayableEvents, mode, now);
+        if (relayedCount > 0) {
+            OutboxEvent lastEvent = relayableEvents.get(relayedCount - 1);
+            LOGGER.info("이전 이벤트를 반영했습니다. direction={}, count={}, lastEventId={}", lastEvent.direction(),
+                relayedCount, lastEvent.eventId());
+        }
+        return relayedCount;
+    }
+
+    private boolean relayTogether(List<OutboxEvent> events) {
+        try {
+            applyAndComplete(events);
+            return true;
+        } catch (RuntimeException exception) {
+            LOGGER.warn("이전 이벤트를 묶어서 반영하지 못해 한 건씩 다시 반영합니다. firstEventId={}, count={}",
+                events.getFirst().eventId(), events.size(), exception);
+            return false;
+        }
+    }
+
+    private int relayOneByOne(List<OutboxEvent> events, MigrationMode mode, LocalDateTime now) {
         int relayedCount = 0;
         for (OutboxEvent event : events) {
             if (!canContinue(mode, event.direction(), now) || !relay(event, now)) {
                 break;
             }
             relayedCount++;
-        }
-        if (relayedCount > 0) {
-            OutboxEvent lastEvent = events.get(relayedCount - 1);
-            LOGGER.info("이전 이벤트를 반영했습니다. direction={}, count={}, lastEventId={}", lastEvent.direction(),
-                relayedCount, lastEvent.eventId());
         }
         return relayedCount;
     }
@@ -196,29 +221,33 @@ public class OutboxRelayService {
     }
 
     private boolean relay(OutboxEvent event, LocalDateTime now) {
-        if (event.isFailed() || event.isWaitingForRetry(now)) {
-            return false;
-        }
-        JdbcClient source = sourceOf(event.direction());
-        long started = System.nanoTime();
         try {
-            if (event.direction() == OutboxDirection.V1_TO_V2) {
-                outboxApplyService.applyV1Event(event);
-            } else {
-                outboxApplyService.applyV2Event(event);
-            }
-            LocalDateTime completedAt = TimeUtils.now();
-            source.sql(MARK_COMPLETED)
-                .param("completedAt", completedAt)
-                .param("eventId", event.eventId())
-                .update();
-            outboxWorkerMetrics.recordApplied(event, completedAt);
-            migrationEventLogger.outboxApplied(event, Duration.ofNanos(System.nanoTime() - started).toMillis(),
-                Duration.between(event.createdAt(), completedAt).toMillis());
+            applyAndComplete(List.of(event));
             return true;
         } catch (RuntimeException exception) {
-            markRetry(event, source, now, exception);
+            markRetry(event, sourceOf(event.direction()), now, exception);
             return false;
+        }
+    }
+
+    private void applyAndComplete(List<OutboxEvent> events) {
+        OutboxDirection direction = events.getFirst().direction();
+        long started = System.nanoTime();
+        if (direction == OutboxDirection.V1_TO_V2) {
+            outboxApplyService.applyV1Events(events);
+        } else {
+            outboxApplyService.applyV2Events(events);
+        }
+        LocalDateTime completedAt = TimeUtils.now();
+        sourceOf(direction).sql(MARK_COMPLETED)
+            .param("completedAt", completedAt)
+            .param("eventIds", events.stream().map(OutboxEvent::eventId).toList())
+            .update();
+        long durationMillis = Duration.ofNanos(System.nanoTime() - started).toMillis();
+        for (OutboxEvent event : events) {
+            outboxWorkerMetrics.recordApplied(event, completedAt);
+            migrationEventLogger.outboxApplied(event, durationMillis,
+                Duration.between(event.createdAt(), completedAt).toMillis());
         }
     }
 
