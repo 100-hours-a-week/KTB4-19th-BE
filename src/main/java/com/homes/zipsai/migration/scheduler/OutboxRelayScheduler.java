@@ -32,12 +32,12 @@ public class OutboxRelayScheduler {
         } while (hasMoreEvents && System.nanoTime() < deadline);
     }
 
-    @Scheduled(fixedDelay = 1, timeUnit = TimeUnit.MINUTES, scheduler = "migrationTaskScheduler")
+    @Scheduled(fixedDelay = 1, timeUnit = TimeUnit.MINUTES, scheduler = "migrationMetricsTaskScheduler")
     public void logUnprocessedCounts() {
         outboxRelayService.logUnprocessedCounts();
     }
 
-    @Scheduled(fixedDelay = 15, timeUnit = TimeUnit.SECONDS, scheduler = "migrationTaskScheduler")
+    @Scheduled(fixedDelay = 15, timeUnit = TimeUnit.SECONDS, scheduler = "migrationMetricsTaskScheduler")
     public void refreshMetrics() {
         outboxWorkerMetrics.refresh(TimeUtils.now());
     }
