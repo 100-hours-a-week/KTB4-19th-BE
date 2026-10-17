@@ -1,5 +1,6 @@
 package com.homes.zipsai.building.service;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 import org.locationtech.jts.geom.Point;
@@ -32,8 +33,12 @@ public class BuildingCoordinateRetryClaimService {
             });
     }
 
+    public boolean prepare(Claim claim) {
+        return activeJob(claim).isPresent();
+    }
+
     public boolean complete(Claim claim, Point coordinates) {
-        return ownedJob(claim).map(job -> {
+        return activeJob(claim).map(job -> {
             buildingLocationRepository.save(new BuildingLocation(job.getBuilding(), coordinates));
             job.complete();
             return true;
@@ -41,7 +46,7 @@ public class BuildingCoordinateRetryClaimService {
     }
 
     public boolean retry(Claim claim, String lastErrorType, short retryFailureCount) {
-        return ownedJob(claim).map(job -> {
+        return activeJob(claim).map(job -> {
             job.retry(lastErrorType, retryFailureCount,
                 buildingCoordinateRetryJobRepository.currentTime().plusHours(1));
             return true;
@@ -49,15 +54,26 @@ public class BuildingCoordinateRetryClaimService {
     }
 
     public boolean fail(Claim claim, String lastErrorType, String failureReason, short retryFailureCount) {
-        return ownedJob(claim).map(job -> {
+        return activeJob(claim).map(job -> {
             job.fail(lastErrorType, failureReason, retryFailureCount);
             return true;
         }).orElse(false);
     }
 
-    private Optional<BuildingCoordinateRetryJob> ownedJob(Claim claim) {
+    private Optional<BuildingCoordinateRetryJob> activeJob(Claim claim) {
         return buildingCoordinateRetryJobRepository.findLockedById(claim.buildingId())
-            .filter(job -> job.isOwnedBy(claim.version(), buildingCoordinateRetryJobRepository.currentTime()));
+            .filter(job -> {
+                LocalDateTime deletedAt = buildingCoordinateRetryJobRepository
+                    .findBuildingDeletedAtForUpdate(claim.buildingId());
+                if (!job.isOwnedBy(claim.version(), buildingCoordinateRetryJobRepository.currentTime())) {
+                    return false;
+                }
+                if (deletedAt != null) {
+                    job.fail("BUILDING_DELETED", "BUILDING_DELETED", job.getRetryFailureCount());
+                    return false;
+                }
+                return true;
+            });
     }
 
     public record Claim(Long buildingId, long version, String roadAddress, short retryFailureCount) {
