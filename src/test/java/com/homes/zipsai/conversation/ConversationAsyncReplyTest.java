@@ -31,7 +31,7 @@ import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
-import com.homes.zipsai.common.service.SseService;
+import com.homes.zipsai.common.service.RedisMessagePublisher;
 import com.homes.zipsai.conversation.ai.AiComplaintState;
 import com.homes.zipsai.conversation.ai.AiConverseClient;
 import com.homes.zipsai.conversation.ai.AiConverseRequest;
@@ -64,8 +64,8 @@ class ConversationAsyncReplyTest {
     @MockitoBean
     ConversationReplyLock conversationReplyLock;
 
-    @MockitoSpyBean
-    SseService sseService;
+    @MockitoBean
+    RedisMessagePublisher redisMessagePublisher;
 
     @MockitoSpyBean
     StructuredLogger structuredLogger;
@@ -93,7 +93,7 @@ class ConversationAsyncReplyTest {
         assertThat(thread.isVirtual()).isTrue();
         assertThat(thread.getName()).startsWith("chatbot-reply-");
         assertThat(aiTraceId.get(5, TimeUnit.SECONDS)).isEqualTo(result.getResponse().getHeader("X-Request-Id"));
-        then(sseService).should(timeout(5000)).send(anyLong(), any());
+        then(redisMessagePublisher).should(timeout(5000)).publish(any(), any());
     }
 
     @Test

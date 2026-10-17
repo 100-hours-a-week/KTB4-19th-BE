@@ -6,17 +6,17 @@ import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
-import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import com.homes.zipsai.common.service.SseService;
+import com.homes.zipsai.common.service.RedisMessagePublisher;
 import com.homes.zipsai.conversation.ai.AiConverseClient;
 import com.homes.zipsai.conversation.ai.AiConverseResponse;
+import com.homes.zipsai.conversation.config.ChatbotReplyPubSubProperties;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyDeltaResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyFailedResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyResponse;
+import com.homes.zipsai.conversation.event.ChatbotReplyEvent;
 import com.homes.zipsai.global.config.AsyncConfig;
 import com.homes.zipsai.global.exception.ApiException;
 import com.homes.zipsai.global.exception.InternalServerException;
@@ -28,39 +28,36 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class ConversationReplyService {
 
-    static final String REPLY_DELTA_EVENT = "chat-delta";
-    static final String REPLY_EVENT = "chat-done";
-    static final String REPLY_FAILED_EVENT = "chat-error";
-
     private static final Logger LOGGER = LoggerFactory.getLogger(ConversationReplyService.class);
 
     private final ConversationService conversationService;
     private final AiConverseClient aiConverseClient;
-    private final SseService sseService;
+    private final RedisMessagePublisher redisMessagePublisher;
+    private final ChatbotReplyPubSubProperties chatbotReplyPubSubProperties;
     private final ConversationReplyLock conversationReplyLock;
 
     @Async(AsyncConfig.CHATBOT_REPLY_EXECUTOR)
     public void reply(Long userId, PendingAiReply pendingReply, String lockToken) {
-        sseService.send(userId, replyEvent(userId, pendingReply, lockToken));
+        ChatbotReplyEvent event = askAiForReply(userId, pendingReply);
+        conversationReplyLock.release(pendingReply.conversation().getId(), lockToken);
+        publish(event);
     }
 
-    private SseEmitter.SseEventBuilder replyEvent(Long userId, PendingAiReply pendingReply, String lockToken) {
+    private ChatbotReplyEvent askAiForReply(Long userId, PendingAiReply pendingReply) {
         Long conversationId = pendingReply.conversation().getId();
         try {
-            return event(REPLY_EVENT, askAiAndSaveReply(userId, pendingReply));
+            return ChatbotReplyEvent.of(userId, askAiAndSaveReply(userId, pendingReply));
         } catch (ApiException e) {
-            return failedEvent(conversationId, e);
+            return failedEvent(userId, conversationId, e);
         } catch (RuntimeException e) {
             LOGGER.error("AI 답변을 처리하지 못했습니다. conversationId={}", conversationId, e);
-            return failedEvent(conversationId, new InternalServerException());
-        } finally {
-            conversationReplyLock.release(conversationId, lockToken);
+            return failedEvent(userId, conversationId, new InternalServerException());
         }
     }
 
-    private SseEmitter.SseEventBuilder failedEvent(Long conversationId, ApiException exception) {
+    private ChatbotReplyEvent failedEvent(Long userId, Long conversationId, ApiException exception) {
         MDC.put(StructuredLogger.ERROR_CODE, exception.code);
-        return event(REPLY_FAILED_EVENT, ConversationReplyFailedResponse.of(conversationId, exception));
+        return ChatbotReplyEvent.of(userId, ConversationReplyFailedResponse.of(conversationId, exception));
     }
 
     private ConversationReplyResponse askAiAndSaveReply(Long userId, PendingAiReply pendingReply) {
@@ -78,8 +75,8 @@ public class ConversationReplyService {
 
     private Consumer<String> replyDeltaSender(Long userId, Long conversationId) {
         AtomicInteger seq = new AtomicInteger();
-        return text -> sseService.send(userId,
-            event(REPLY_DELTA_EVENT, new ConversationReplyDeltaResponse(conversationId, seq.incrementAndGet(), text)));
+        return text -> publish(ChatbotReplyEvent.of(userId,
+            new ConversationReplyDeltaResponse(conversationId, seq.incrementAndGet(), text)));
     }
 
     private void verifyPairedWithRequest(String turnId, AiConverseResponse aiResponse) {
@@ -91,7 +88,7 @@ public class ConversationReplyService {
         throw new InternalServerException();
     }
 
-    private static SseEmitter.SseEventBuilder event(String name, Object data) {
-        return SseEmitter.event().name(name).data(data, MediaType.APPLICATION_JSON);
+    private void publish(ChatbotReplyEvent event) {
+        redisMessagePublisher.publish(chatbotReplyPubSubProperties.chatbotReplyChannel(), event);
     }
 }

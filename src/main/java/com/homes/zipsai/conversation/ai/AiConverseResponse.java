@@ -9,6 +9,7 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -91,7 +92,7 @@ public record AiConverseResponse(String code, String turnId, Data data) {
     @Builder
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record DraftPatch(String location, String symptom, String occurredAt, String issueType,
-                             @JsonProperty("attachmentIds") List<Long> attachmentIds,
+                             @JsonProperty("attachmentIds") @JsonAlias("attachment_ids") List<Long> attachmentIds,
                              Long representativeAttachmentId) {
 
         public AiComplaintDraft toDraft() {
@@ -129,6 +130,7 @@ public record AiConverseResponse(String code, String turnId, Data data) {
         }
     }
 
-    public record ImageObservation(Long attachmentId, String summary, String ocrText) {
+    public record ImageObservation(@JsonAlias("attachment_id") Long attachmentId, String summary,
+                                   @JsonAlias("ocr_text") String ocrText) {
     }
 }
