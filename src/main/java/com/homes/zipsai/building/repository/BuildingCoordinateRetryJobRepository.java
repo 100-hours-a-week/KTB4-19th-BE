@@ -27,6 +27,9 @@ public interface BuildingCoordinateRetryJobRepository extends JpaRepository<Buil
     @Query("select j from BuildingCoordinateRetryJob j where j.id = :id")
     Optional<BuildingCoordinateRetryJob> findLockedById(@Param("id") Long id);
 
+    @Query(value = "SELECT deleted_at FROM Buildings WHERE building_id = :id FOR UPDATE", nativeQuery = true)
+    LocalDateTime findBuildingDeletedAtForUpdate(@Param("id") Long id);
+
     @Query(value = "SELECT CURRENT_TIMESTAMP(6)", nativeQuery = true)
     LocalDateTime currentTime();
 }
