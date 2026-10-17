@@ -2,6 +2,7 @@ package com.homes.zipsai.migration.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -638,7 +639,7 @@ class OutboxRelayServiceTest {
         outboxRelayService.relayPendingEvents(NOON);
 
         assertThat(workerEvents("V1_TO_V2", "success")).isEqualTo(1);
-        then(migrationEventLogger).should().outboxApplied(any(), anyLong(), anyLong());
+        then(migrationEventLogger).should().outboxApplied(any(), any(), anyInt(), anyLong());
     }
 
     @Test
@@ -665,7 +666,7 @@ class OutboxRelayServiceTest {
 
         outboxRelayService.relayPendingEvents(NOON);
 
-        then(migrationEventLogger).should().outboxApplied(any(), anyLong(), longThat(lag -> lag >= minimumLag));
+        then(migrationEventLogger).should().outboxApplied(any(), any(), anyInt(), longThat(lag -> lag >= minimumLag));
     }
 
     @Test

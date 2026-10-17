@@ -243,10 +243,10 @@ public class OutboxRelayService {
             .param("completedAt", completedAt)
             .param("eventIds", events.stream().map(OutboxEvent::eventId).toList())
             .update();
-        long durationMillis = Duration.ofNanos(System.nanoTime() - started).toMillis();
+        Duration batchDuration = Duration.ofNanos(System.nanoTime() - started);
         for (OutboxEvent event : events) {
             outboxWorkerMetrics.recordApplied(event, completedAt);
-            migrationEventLogger.outboxApplied(event, durationMillis,
+            migrationEventLogger.outboxApplied(event, batchDuration, events.size(),
                 Duration.between(event.createdAt(), completedAt).toMillis());
         }
     }
