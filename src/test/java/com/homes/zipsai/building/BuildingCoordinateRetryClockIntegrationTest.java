@@ -3,6 +3,7 @@ package com.homes.zipsai.building;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.LocalDateTime;
+import java.util.Optional;
 import java.util.TimeZone;
 import java.util.UUID;
 
@@ -22,6 +23,7 @@ import com.homes.zipsai.building.domain.Building;
 import com.homes.zipsai.building.domain.BuildingCoordinateRetryJob;
 import com.homes.zipsai.building.repository.BuildingCoordinateRetryJobRepository;
 import com.homes.zipsai.building.service.BuildingCoordinateRetryClaimService;
+import com.homes.zipsai.building.service.BuildingCoordinateRetryClaimService.Claim;
 import com.homes.zipsai.user.domain.User;
 
 @SpringBootTest
@@ -82,7 +84,7 @@ class BuildingCoordinateRetryClockIntegrationTest {
         });
         LocalDateTime before = LocalDateTime.now().minusSeconds(1);
 
-        var result = buildingCoordinateRetryClaimService.claimNext();
+        Optional<Claim> result = buildingCoordinateRetryClaimService.claimNext();
 
         assertThat(result).isPresent();
 

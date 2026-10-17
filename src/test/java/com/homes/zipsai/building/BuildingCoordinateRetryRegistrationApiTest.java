@@ -17,6 +17,7 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
@@ -255,9 +256,9 @@ class BuildingCoordinateRetryRegistrationApiTest {
         responseStatus = 503;
         requestsEntered = new CountDownLatch(2);
         releaseRequests = new CountDownLatch(1);
-        try (var executor = Executors.newFixedThreadPool(2)) {
-            var first = executor.submit(() -> register().andReturn().getResponse().getStatus());
-            var second = executor.submit(() -> register().andReturn().getResponse().getStatus());
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Integer> first = executor.submit(() -> register().andReturn().getResponse().getStatus());
+            Future<Integer> second = executor.submit(() -> register().andReturn().getResponse().getStatus());
             try {
                 assertThat(requestsEntered.await(10, TimeUnit.SECONDS)).isTrue();
             } finally {

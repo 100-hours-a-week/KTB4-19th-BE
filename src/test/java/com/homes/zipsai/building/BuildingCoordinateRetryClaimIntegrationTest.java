@@ -4,12 +4,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import javax.sql.DataSource;
@@ -164,8 +168,8 @@ class BuildingCoordinateRetryClaimIntegrationTest {
         try (Connection connection = dataSource.getConnection()) {
             connection.setAutoCommit(false);
             lock(connection, first);
-            try (var executor = Executors.newSingleThreadExecutor()) {
-                var result = executor.submit(buildingCoordinateRetryClaimService::claimNext);
+            try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+                Future<Optional<Claim>> result = executor.submit(buildingCoordinateRetryClaimService::claimNext);
                 try {
                     assertThat(result.get(5, TimeUnit.SECONDS)).map(Claim::buildingId).contains(second);
                 } finally {
@@ -182,12 +186,12 @@ class BuildingCoordinateRetryClaimIntegrationTest {
     void claimsOnceAcrossConcurrentWorkers() throws Exception {
         Long id = pendingJob((short) 0);
         CountDownLatch start = new CountDownLatch(1);
-        try (var executor = Executors.newFixedThreadPool(2)) {
-            var first = executor.submit(() -> {
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Optional<Claim>> first = executor.submit(() -> {
                 start.await();
                 return buildingCoordinateRetryClaimService.claimNext();
             });
-            var second = executor.submit(() -> {
+            Future<Optional<Claim>> second = executor.submit(() -> {
                 start.await();
                 return buildingCoordinateRetryClaimService.claimNext();
             });
@@ -210,11 +214,11 @@ class BuildingCoordinateRetryClaimIntegrationTest {
 
         try (Connection connection = dataSource.getConnection()) {
             connection.setAutoCommit(false);
-            try (var statement = connection.prepareStatement("""
+            try (PreparedStatement statement = connection.prepareStatement("""
                     SELECT status FROM Building_coordinate_retry_jobs WHERE building_id = ? FOR UPDATE NOWAIT
                     """)) {
                 statement.setLong(1, id);
-                try (var result = statement.executeQuery()) {
+                try (ResultSet result = statement.executeQuery()) {
                     assertThat(result.next()).isTrue();
 
                     assertThat(result.getString(1)).isEqualTo("PROCESSING");
@@ -432,11 +436,11 @@ class BuildingCoordinateRetryClaimIntegrationTest {
     }
 
     private void lock(Connection connection, Long id) throws Exception {
-        try (var statement = connection.prepareStatement("""
+        try (PreparedStatement statement = connection.prepareStatement("""
                 SELECT building_id FROM Building_coordinate_retry_jobs WHERE building_id = ? FOR UPDATE
                 """)) {
             statement.setLong(1, id);
-            try (var result = statement.executeQuery()) {
+            try (ResultSet result = statement.executeQuery()) {
                 assertThat(result.next()).isTrue();
             }
         }

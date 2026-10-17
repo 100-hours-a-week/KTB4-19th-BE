@@ -1,11 +1,17 @@
 package com.homes.zipsai.global.logging;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyShort;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -17,6 +23,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.slf4j.MDC;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.convert.ApplicationConversionService;
 import org.springframework.boot.micrometer.observation.autoconfigure.ObservationAutoConfiguration;
@@ -29,6 +36,10 @@ import org.springframework.web.client.RestClient;
 
 import com.homes.zipsai.building.client.KakaoAddressClient;
 import com.homes.zipsai.building.client.KakaoAddressResult;
+import com.homes.zipsai.building.service.BuildingCoordinateRetryClaimService;
+import com.homes.zipsai.building.service.BuildingCoordinateRetryClaimService.Claim;
+import com.homes.zipsai.building.service.BuildingCoordinateRetryWorker;
+import com.homes.zipsai.building.service.BuildingCoordinateRetryWorker.Outcome;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
@@ -176,6 +187,51 @@ class KakaoHttpObservationIntegrationTest {
         assertThat(requestDone.path("ai_api_ms").asLong()).isEqualTo(stages.getFirst().path("duration_ms").asLong());
         assertThat(requestDone.path("trace_id").asText()).isEqualTo(stages.getFirst().path("trace_id").asText());
         assertThat(stages.getFirst().path("outcome").asText()).isEqualTo("ok");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {200, 401, 503})
+    @DisplayName("HTTP 요청 없이 실행한 워커도 카카오 호출과 저장 결과를 같은 추적값으로 공통 로그에 기록한다")
+    void correlatesBackgroundWorkerWithKakaoObservation(int status) {
+        responseStatus = status;
+        BuildingCoordinateRetryClaimService buildingCoordinateRetryClaimService =
+            mock(BuildingCoordinateRetryClaimService.class);
+        Claim claim = new Claim(17L, 2, ADDRESS, (short) 1);
+        when(buildingCoordinateRetryClaimService.claimNext()).thenReturn(Optional.of(claim));
+        when(buildingCoordinateRetryClaimService.prepare(claim)).thenReturn(true);
+        when(buildingCoordinateRetryClaimService.complete(any(), any())).thenReturn(true);
+        when(buildingCoordinateRetryClaimService.retry(any(), anyString(), anyShort())).thenReturn(true);
+        applicationContextRunner.withUserConfiguration(BuildingCoordinateRetryWorker.class)
+            .withBean(BuildingCoordinateRetryClaimService.class, () -> buildingCoordinateRetryClaimService)
+            .run(context -> {
+                assertThat(context.getBean(BuildingCoordinateRetryWorker.class).executeNext())
+                    .isEqualTo(status == 200 ? Outcome.CONTINUE : Outcome.STOP_ROUND);
+
+                JsonNode stage = kakaoStage();
+                List<JsonNode> results = events().stream()
+                    .filter(event -> "building_coordinate_retry_result".equals(event.path("event").asText())).toList();
+
+                assertThat(results).hasSize(1);
+
+                assertThat(stage.path("trace_id").asText()).isNotBlank();
+
+                assertThat(results.getFirst().path("trace_id").asText())
+                    .isEqualTo(stage.path("trace_id").asText());
+
+                assertThat(stage.path("outcome").asText()).isEqualTo(status == 200 ? "ok" : "fail");
+
+                assertThat(stage.path("route").asText()).isEqualTo("/v2/local/search/address.json");
+
+                assertThat(results.getFirst().path("status").asText())
+                    .isEqualTo(status == 200 ? "COMPLETED" : "PENDING");
+
+                assertThat(events()).noneMatch(event -> "request_done".equals(event.path("event").asText()));
+
+                assertThat(listAppender.list).allSatisfy(event -> assertThat(event.getFormattedMessage())
+                    .doesNotContain("test-kakao-key", ADDRESS, "query="));
+
+                assertThat(MDC.getCopyOfContextMap()).isNullOrEmpty();
+            });
     }
 
     private void query(boolean expectedCoordinates) {

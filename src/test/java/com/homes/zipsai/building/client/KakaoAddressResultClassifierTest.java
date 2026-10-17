@@ -17,6 +17,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.locationtech.jts.geom.Point;
 import org.springframework.http.HttpHeaders;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientException;
@@ -36,7 +37,7 @@ class KakaoAddressResultClassifierTest {
 
         assertThat(result).isInstanceOf(KakaoAddressResult.Success.class);
 
-        var coordinates = ((KakaoAddressResult.Success) result).coordinates();
+        Point coordinates = ((KakaoAddressResult.Success) result).coordinates();
 
         assertThat(coordinates.getX()).isEqualTo(127.0276);
 
