@@ -1,5 +1,6 @@
 package com.homes.zipsai.migration.scheduler;
 
+import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBooleanProperty;
@@ -17,12 +18,18 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class OutboxRelayScheduler {
 
+    private static final Duration RELAY_TIME_LIMIT = Duration.ofSeconds(10);
+
     private final OutboxRelayService outboxRelayService;
     private final OutboxWorkerMetrics outboxWorkerMetrics;
 
     @Scheduled(fixedDelay = 1, timeUnit = TimeUnit.SECONDS, scheduler = "migrationTaskScheduler")
     public void relayPendingEvents() {
-        outboxRelayService.relayPendingEvents(TimeUtils.now());
+        long deadline = System.nanoTime() + RELAY_TIME_LIMIT.toNanos();
+        boolean hasMoreEvents;
+        do {
+            hasMoreEvents = outboxRelayService.relayPendingEvents(TimeUtils.now());
+        } while (hasMoreEvents && System.nanoTime() < deadline);
     }
 
     @Scheduled(fixedDelay = 1, timeUnit = TimeUnit.MINUTES, scheduler = "migrationTaskScheduler")
