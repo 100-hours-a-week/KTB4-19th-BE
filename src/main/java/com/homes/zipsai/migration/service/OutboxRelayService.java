@@ -84,21 +84,22 @@ public class OutboxRelayService {
         this.migrationEventLogger = migrationEventLogger;
     }
 
-    public void relayPendingEvents(LocalDateTime now) {
+    public boolean relayPendingEvents(LocalDateTime now) {
         if (!migrationSettingsProvider.getSettings().isWorkerRunning()) {
-            return;
+            return false;
         }
         try (Connection lockConnection = lockDataSource.getConnection()) {
             if (!acquireLock(lockConnection)) {
-                return;
+                return false;
             }
             try {
-                relayEventsOfOneDirection(now);
+                return relayEventsOfOneDirection(now) == BATCH_SIZE;
             } finally {
                 releaseLock(lockConnection);
             }
         } catch (SQLException exception) {
             LOGGER.warn("워커 락을 잡지 못해 이번 회차를 건너뜁니다.", exception);
+            return false;
         }
     }
 
@@ -131,7 +132,7 @@ public class OutboxRelayService {
         }
     }
 
-    private void relayEventsOfOneDirection(LocalDateTime now) {
+    private int relayEventsOfOneDirection(LocalDateTime now) {
         MigrationSettings settings = migrationSettingsProvider.getSettings();
         MigrationMode mode = settings.modeAt(TimeUtils.toOffsetDateTime(now));
         OutboxDirection writeDirection = mode.getPrimaryDatabase().getOutboxDirection();
@@ -141,10 +142,10 @@ public class OutboxRelayService {
             }
             List<OutboxEvent> events = findUnprocessedEvents(direction);
             if (!events.isEmpty()) {
-                relayEvents(events, mode, now);
-                return;
+                return relayEvents(events, mode, now);
             }
         }
+        return 0;
     }
 
     private long countUnprocessedEvents(OutboxDirection direction, OutboxStatus status) {
@@ -167,7 +168,7 @@ public class OutboxRelayService {
         return direction == OutboxDirection.V1_TO_V2 ? v1JdbcClient : v2JdbcClient;
     }
 
-    private void relayEvents(List<OutboxEvent> events, MigrationMode mode, LocalDateTime now) {
+    private int relayEvents(List<OutboxEvent> events, MigrationMode mode, LocalDateTime now) {
         int relayedCount = 0;
         for (OutboxEvent event : events) {
             if (!canContinue(mode, event.direction(), now) || !relay(event, now)) {
@@ -180,6 +181,7 @@ public class OutboxRelayService {
             LOGGER.info("이전 이벤트를 반영했습니다. direction={}, count={}, lastEventId={}", lastEvent.direction(),
                 relayedCount, lastEvent.eventId());
         }
+        return relayedCount;
     }
 
     private boolean canContinue(MigrationMode mode, OutboxDirection direction, LocalDateTime now) {

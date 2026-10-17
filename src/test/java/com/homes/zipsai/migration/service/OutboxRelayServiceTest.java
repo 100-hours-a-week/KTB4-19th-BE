@@ -361,6 +361,32 @@ class OutboxRelayServiceTest {
     }
 
     @Test
+    @DisplayName("한 번에 가져오는 100건을 모두 반영하면 이벤트가 더 남았다고 알린다")
+    void reportsMoreEventsWhenFullBatchIsRelayed() {
+        saveItem(v1, 1L, "세탁기");
+        for (long eventId = 1; eventId <= 101; eventId++) {
+            saveEvent(v1, eventId, "V1_TO_V2", "Items", "1");
+        }
+
+        boolean hasMoreEvents = outboxRelayService.relayPendingEvents(NOON);
+
+        assertThat(hasMoreEvents).isTrue();
+        assertThat(eventStatus(v1, 100L)).isEqualTo("COMPLETED");
+        assertThat(eventStatus(v1, 101L)).isEqualTo("PENDING");
+    }
+
+    @Test
+    @DisplayName("가져온 이벤트가 100건보다 적으면 더 남지 않았다고 알린다")
+    void reportsNoMoreEventsWhenBatchIsNotFull() {
+        saveItem(v1, 1L, "세탁기");
+        saveEvent(v1, 10L, "V1_TO_V2", "Items", "1");
+
+        boolean hasMoreEvents = outboxRelayService.relayPendingEvents(NOON);
+
+        assertThat(hasMoreEvents).isFalse();
+    }
+
+    @Test
     @DisplayName("대상 DB 행의 updated_at이 더 최신이면 덮어쓰지 않는다")
     void keepsTargetRowWhenTargetIsNewer() {
         saveNotice(v1, 1L, "점검 안내", NOON.minusMinutes(2));
