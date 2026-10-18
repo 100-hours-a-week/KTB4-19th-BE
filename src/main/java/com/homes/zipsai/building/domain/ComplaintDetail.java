@@ -63,15 +63,9 @@ public class ComplaintDetail extends BaseTimeEntity {
 
     public void updateComment(String comment) {
         this.comment = comment;
-        this.aiFeedbackSentAt = null;
     }
 
     public void deleteComment() {
         this.comment = null;
-        this.aiFeedbackSentAt = null;
-    }
-
-    public void markAiFeedbackSent(LocalDateTime sentAt) {
-        this.aiFeedbackSentAt = sentAt;
     }
 }

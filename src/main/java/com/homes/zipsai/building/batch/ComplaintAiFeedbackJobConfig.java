@@ -27,10 +27,12 @@ import com.homes.zipsai.building.domain.Complaint;
 import com.homes.zipsai.building.domain.ComplaintContent;
 import com.homes.zipsai.building.domain.ComplaintDetail;
 import com.homes.zipsai.building.domain.ComplaintType;
+import com.homes.zipsai.building.repository.AiFeedbackDeletionTarget;
 import com.homes.zipsai.building.repository.ComplaintDetailRepository;
 import com.homes.zipsai.conversation.ai.AiComplaintDraft;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackBatchRequest;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackClient;
+import com.homes.zipsai.conversation.ai.AiComplaintFeedbackDeleteRequest;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackRequest;
 import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.global.util.TimeUtils;
@@ -49,9 +51,11 @@ public class ComplaintAiFeedbackJobConfig {
     private static final Duration MAX_DELAY = Duration.ofSeconds(4);
 
     @Bean
-    public Job complaintAiFeedbackJob(JobRepository jobRepository, Step complaintAiFeedbackStep) {
+    public Job complaintAiFeedbackJob(JobRepository jobRepository, Step complaintAiFeedbackStep,
+                                      Step complaintAiFeedbackDeleteStep) {
         return new JobBuilder("complaintAiFeedbackJob", jobRepository)
                 .start(complaintAiFeedbackStep)
+                .next(complaintAiFeedbackDeleteStep)
                 .build();
     }
 
@@ -98,7 +102,7 @@ public class ComplaintAiFeedbackJobConfig {
                     detail.getOccurredTime(),
                     detail.getComment(),
                     TimeUtils.toOffsetDateTime(detail.getUpdatedAt()));
-            return new FeedbackItem(detail, request);
+            return new FeedbackItem(detail.getId(), detail.getUpdatedAt(), request);
         };
     }
 
@@ -113,12 +117,55 @@ public class ComplaintAiFeedbackJobConfig {
             String traceId = UUID.randomUUID().toString();
             client.send(new AiComplaintFeedbackBatchRequest(traceId, requests));
 
-            LocalDateTime now = LocalDateTime.now();
             for (FeedbackItem item : chunk) {
-                item.detail().markAiFeedbackSent(now);
-                complaintDetailRepository.save(item.detail());
+                complaintDetailRepository.markAiFeedbackSent(item.id(), item.updatedAt());
             }
             LOGGER.info("민원 답변 피드백을 AI에 전송했습니다. traceId={}, items={}", traceId, requests.size());
+        };
+    }
+
+    @Bean
+    public Step complaintAiFeedbackDeleteStep(
+            JobRepository jobRepository,
+            PlatformTransactionManager transactionManager,
+            ItemReader<AiFeedbackDeletionTarget> complaintAiFeedbackDeletionReader,
+            ItemWriter<AiFeedbackDeletionTarget> complaintAiFeedbackDeletionWriter) {
+        return new StepBuilder("complaintAiFeedbackDeleteStep", jobRepository)
+                .<AiFeedbackDeletionTarget, AiFeedbackDeletionTarget>chunk(CHUNK_SIZE)
+                .reader(complaintAiFeedbackDeletionReader)
+                .writer(complaintAiFeedbackDeletionWriter)
+                .transactionManager(transactionManager)
+                .faultTolerant()
+                .retryPolicy(retryPolicy())
+                .build();
+    }
+
+    @Bean
+    @StepScope
+    public ItemReader<AiFeedbackDeletionTarget> complaintAiFeedbackDeletionReader(
+            ComplaintDetailRepository complaintDetailRepository) {
+        return new ComplaintAiFeedbackDeletionReader(complaintDetailRepository, MAX_BATCH_SIZE);
+    }
+
+    @Bean
+    public ItemWriter<AiFeedbackDeletionTarget> complaintAiFeedbackDeletionWriter(
+            AiComplaintFeedbackClient client, ComplaintDetailRepository complaintDetailRepository) {
+        return (Chunk<? extends AiFeedbackDeletionTarget> chunk) -> {
+            List<AiComplaintFeedbackDeleteRequest.Item> items = new ArrayList<>();
+            for (AiFeedbackDeletionTarget target : chunk) {
+                items.add(new AiComplaintFeedbackDeleteRequest.Item(target.buildingId(), target.complaintDetailId(),
+                        TimeUtils.toOffsetDateTime(target.updatedAt())));
+            }
+            String traceId = UUID.randomUUID().toString();
+            client.delete(new AiComplaintFeedbackDeleteRequest(traceId, items));
+
+            int marked = 0;
+            for (AiFeedbackDeletionTarget target : chunk) {
+                marked += complaintDetailRepository.markAiFeedbackDeleted(
+                        target.complaintDetailId(), target.updatedAt());
+            }
+            LOGGER.info("삭제된 민원 답변을 AI에서 제거했습니다. traceId={}, items={}, changedDuringDelete={}",
+                    traceId, items.size(), items.size() - marked);
         };
     }
 
@@ -132,6 +179,6 @@ public class ComplaintAiFeedbackJobConfig {
                 .build();
     }
 
-    private record FeedbackItem(ComplaintDetail detail, AiComplaintFeedbackRequest request) {
+    private record FeedbackItem(Long id, LocalDateTime updatedAt, AiComplaintFeedbackRequest request) {
     }
 }
