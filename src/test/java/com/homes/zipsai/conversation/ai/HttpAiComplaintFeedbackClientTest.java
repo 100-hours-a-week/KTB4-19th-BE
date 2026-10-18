@@ -82,10 +82,12 @@ class HttpAiComplaintFeedbackClientTest {
             .andExpect(jsonPath("$.trace_id").value(TRACE_ID))
             .andExpect(jsonPath("$.items[0].building_id").value(101))
             .andExpect(jsonPath("$.items[0].complaint_detail_id").value(9001))
+            .andExpect(jsonPath("$.items[0].updated_at").value("2026-10-16T09:00:00+09:00"))
             .andRespond(withStatus(HttpStatus.ACCEPTED));
 
         assertThatCode(() -> client.delete(new AiComplaintFeedbackDeleteRequest(TRACE_ID,
-            List.of(new AiComplaintFeedbackDeleteRequest.Item(101L, 9001L))))).doesNotThrowAnyException();
+            List.of(new AiComplaintFeedbackDeleteRequest.Item(101L, 9001L,
+                OffsetDateTime.parse("2026-10-16T09:00:00+09:00")))))).doesNotThrowAnyException();
 
         mockRestServiceServer.verify();
     }

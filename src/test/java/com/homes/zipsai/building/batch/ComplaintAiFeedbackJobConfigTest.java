@@ -267,6 +267,7 @@ class ComplaintAiFeedbackJobConfigTest {
         assertThat(captor.getValue().items()).singleElement().satisfies(item -> {
             assertThat(item.complaintDetailId()).isEqualTo(detail.getId());
             assertThat(item.buildingId()).isEqualTo(building.getId());
+            assertThat(item.updatedAt()).isNotNull();
         });
         assertThat(sentAt(detail)).isNull();
     }

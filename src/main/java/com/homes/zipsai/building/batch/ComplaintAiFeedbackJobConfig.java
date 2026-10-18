@@ -153,7 +153,8 @@ public class ComplaintAiFeedbackJobConfig {
         return (Chunk<? extends AiFeedbackDeletionTarget> chunk) -> {
             List<AiComplaintFeedbackDeleteRequest.Item> items = new ArrayList<>();
             for (AiFeedbackDeletionTarget target : chunk) {
-                items.add(new AiComplaintFeedbackDeleteRequest.Item(target.buildingId(), target.complaintDetailId()));
+                items.add(new AiComplaintFeedbackDeleteRequest.Item(target.buildingId(), target.complaintDetailId(),
+                        TimeUtils.toOffsetDateTime(target.updatedAt())));
             }
             String traceId = UUID.randomUUID().toString();
             client.delete(new AiComplaintFeedbackDeleteRequest(traceId, items));

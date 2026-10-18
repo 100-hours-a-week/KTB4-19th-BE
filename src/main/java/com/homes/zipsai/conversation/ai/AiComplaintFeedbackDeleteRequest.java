@@ -1,5 +1,6 @@
 package com.homes.zipsai.conversation.ai;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 
 import tools.jackson.databind.PropertyNamingStrategies;
@@ -12,6 +13,6 @@ public record AiComplaintFeedbackDeleteRequest(
 ) {
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-    public record Item(long buildingId, long complaintDetailId) {
+    public record Item(long buildingId, long complaintDetailId, OffsetDateTime updatedAt) {
     }
 }
