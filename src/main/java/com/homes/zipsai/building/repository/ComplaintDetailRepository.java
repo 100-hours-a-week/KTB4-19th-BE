@@ -23,11 +23,10 @@ public interface ComplaintDetailRepository extends JpaRepository<ComplaintDetail
                 and c.deletedAt is null
                 and c.type is not null
                 and cd.comment is not null
-                and cd.symptom <> :unknownValue
                 and (cd.aiFeedbackSentAt is null or cd.updatedAt > cd.aiFeedbackSentAt)
             order by cd.id
             """)
-    Slice<ComplaintDetail> findPendingAiFeedback(@Param("unknownValue") String unknownValue, Pageable pageable);
+    Slice<ComplaintDetail> findPendingAiFeedback(Pageable pageable);
 
     @Query("""
             select new com.homes.zipsai.building.repository.AiFeedbackDeletionTarget(cd.id, c.building.id, cd.updatedAt)
