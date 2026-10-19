@@ -223,6 +223,69 @@ class ComplaintDetailRepositoryTest {
             .extracting(ComplaintDetail::getId).containsExactly(detail.getId());
     }
 
+    @Test
+    @DisplayName("AI 처리 실패 통지의 버전이 전송 기록과 같으면 다시 전송 대상으로 되돌린다")
+    void revertsSentFeedbackWhenVersionMatches() {
+        ComplaintDetail detail = sentFeedback("분리수거장은 지하 1층입니다");
+        LocalDateTime sentVersion = reload(detail).getAiFeedbackSentAt();
+
+        int reverted = complaintDetailRepository.revertAiFeedbackSent(detail.getId(), sentVersion);
+
+        assertThat(reverted).isOne();
+        assertThat(complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10)).getContent())
+            .extracting(ComplaintDetail::getId).containsExactly(detail.getId());
+    }
+
+    @Test
+    @DisplayName("늦게 도착한 AI 처리 실패 통지는 그사이 다시 보낸 전송 기록을 되돌리지 않는다")
+    void keepsNewerSentVersionWhenLateFailureArrives() {
+        ComplaintDetail detail = sentFeedback("분리수거장은 지하 1층입니다");
+        LocalDateTime oldVersion = reload(detail).getAiFeedbackSentAt();
+        reload(detail).updateComment("분리수거장은 지하 2층으로 옮겼습니다");
+        entityManager.flush();
+        LocalDateTime newVersion = reload(detail).getUpdatedAt();
+        complaintDetailRepository.markAiFeedbackSent(detail.getId(), newVersion);
+
+        int reverted = complaintDetailRepository.revertAiFeedbackSent(detail.getId(), oldVersion);
+
+        assertThat(reverted).isZero();
+        assertThat(reload(detail).getAiFeedbackSentAt()).isEqualTo(newVersion);
+    }
+
+    @Test
+    @DisplayName("AI 삭제 실패 통지의 버전이 삭제된 답변과 같으면 다시 AI 삭제 대상으로 되돌린다")
+    void revertsDeletedFeedbackWhenVersionMatches() {
+        ComplaintDetail detail = sentFeedback("분리수거장은 지하 1층입니다");
+        reload(detail).deleteComment();
+        entityManager.flush();
+        LocalDateTime deletedVersion = reload(detail).getUpdatedAt();
+        complaintDetailRepository.markAiFeedbackDeleted(detail.getId(), deletedVersion);
+
+        int reverted = complaintDetailRepository.revertAiFeedbackDeleted(detail.getId(), deletedVersion);
+
+        assertThat(reverted).isOne();
+        assertThat(complaintDetailRepository.findPendingAiFeedbackDeletions(PageRequest.of(0, 10)))
+            .extracting(AiFeedbackDeletionTarget::complaintDetailId).containsExactly(detail.getId());
+    }
+
+    @Test
+    @DisplayName("AI 삭제 실패 통지 전에 답변을 다시 달았으면 삭제 대상으로 되돌리지 않는다")
+    void keepsRewrittenCommentWhenDeleteFailureArrives() {
+        ComplaintDetail detail = sentFeedback("분리수거장은 지하 1층입니다");
+        reload(detail).deleteComment();
+        entityManager.flush();
+        LocalDateTime deletedVersion = reload(detail).getUpdatedAt();
+        complaintDetailRepository.markAiFeedbackDeleted(detail.getId(), deletedVersion);
+        reload(detail).updateComment("다시 안내드립니다");
+        entityManager.flush();
+
+        int reverted = complaintDetailRepository.revertAiFeedbackDeleted(detail.getId(), deletedVersion);
+
+        assertThat(reverted).isZero();
+        assertThat(complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10)).getContent())
+            .extracting(ComplaintDetail::getId).containsExactly(detail.getId());
+    }
+
     private ComplaintDetail sentFeedback(String comment) {
         ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, comment);
         complaintDetailRepository.markAiFeedbackSent(detail.getId(), reload(detail).getUpdatedAt());
