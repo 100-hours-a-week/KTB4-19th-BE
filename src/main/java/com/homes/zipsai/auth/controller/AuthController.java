@@ -11,6 +11,7 @@ import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.CookieValue;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.homes.zipsai.auth.dto.LoginRequest;
 import com.homes.zipsai.auth.dto.LoginResponse;
+import com.homes.zipsai.auth.dto.PasswordChangeRequest;
 import com.homes.zipsai.auth.dto.ReissueResponse;
 import com.homes.zipsai.auth.dto.SignupRequest;
 import com.homes.zipsai.auth.dto.SignupResponse;
@@ -90,6 +92,18 @@ public class AuthController {
     ) {
         authService.logout(principal, refresh);
         cookie(response, "", 0);
+        return ApiResponse.data(null);
+    }
+
+    @PatchMapping("/password")
+    @Operation(summary = "비밀번호 변경", description = "현재 비밀번호를 확인한 뒤 변경하고, 현재 기기 외 로그인 세션을 만료한다.")
+    public ApiResponse<Void> changePassword(
+            @AuthenticationPrincipal AuthPrincipal principal,
+            @CookieValue(name = "refreshToken", required = false) String refresh,
+            @RequestBody PasswordChangeRequest request
+    ) {
+        authService.changePassword(principal, request.currentPassword(), request.newPassword(),
+                request.newPasswordConfirm(), refresh);
         return ApiResponse.data(null);
     }
 
