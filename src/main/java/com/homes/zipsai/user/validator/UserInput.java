@@ -75,11 +75,15 @@ public final class UserInput {
     }
 
     public static String password(String value) {
+        return password(value, "password");
+    }
+
+    public static String password(String value, String field) {
         if (value == null || value.isBlank()) {
-            throw missing("password");
+            throw missing(field);
         }
         if (!value.matches("(?=.*[A-Za-z])(?=.*[0-9])(?=.*[^A-Za-z0-9])[!-~]{8,20}")) {
-            throw invalid("password", Reason.INVALID_PASSWORD_FORMAT);
+            throw invalid(field, Reason.INVALID_PASSWORD_FORMAT);
         }
         return value;
     }

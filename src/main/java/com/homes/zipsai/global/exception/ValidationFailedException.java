@@ -21,6 +21,8 @@ public class ValidationFailedException extends UnprocessableEntityException {
         DUPLICATE_TERMS_TYPE("약관 타입이 중복되었습니다."),
         REQUIRED_TERMS_NOT_AGREED("필수 약관은 동의해야 합니다."),
         PASSWORD_CONFIRMATION_MISMATCH("비밀번호가 일치하지 않습니다."),
+        CURRENT_PASSWORD_MISMATCH("현재 비밀번호가 일치하지 않습니다."),
+        SAME_AS_CURRENT_PASSWORD("현재 비밀번호와 다른 비밀번호를 입력해주세요."),
         INVALID_USER_ROLE("허용되지 않은 역할입니다."),
         BUILDING_NAME_TOO_LONG("건물명은 20자 이하여야 합니다."),
         ROAD_ADDRESS_TOO_LONG("주소는 200자 이하여야 합니다."),
