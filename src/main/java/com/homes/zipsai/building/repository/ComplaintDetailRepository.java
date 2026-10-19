@@ -56,24 +56,4 @@ public interface ComplaintDetailRepository extends JpaRepository<ComplaintDetail
                 and cd.updatedAt = :updatedAt
             """)
     int markAiFeedbackDeleted(@Param("id") Long id, @Param("updatedAt") LocalDateTime updatedAt);
-
-    @Modifying(clearAutomatically = true)
-    @Query("""
-            update ComplaintDetail cd
-            set cd.aiFeedbackSentAt = null
-            where cd.id = :id
-                and cd.aiFeedbackSentAt = :sentVersion
-            """)
-    int revertAiFeedbackSent(@Param("id") Long id, @Param("sentVersion") LocalDateTime sentVersion);
-
-    @Modifying(clearAutomatically = true)
-    @Query("""
-            update ComplaintDetail cd
-            set cd.aiFeedbackSentAt = cd.updatedAt
-            where cd.id = :id
-                and cd.comment is null
-                and cd.aiFeedbackSentAt is null
-                and cd.updatedAt = :updatedAt
-            """)
-    int revertAiFeedbackDeleted(@Param("id") Long id, @Param("updatedAt") LocalDateTime updatedAt);
 }
