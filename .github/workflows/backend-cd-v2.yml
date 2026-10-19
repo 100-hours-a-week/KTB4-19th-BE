@@ -125,7 +125,7 @@ jobs:
           "owned_environment_keys": [
             "SPRING_PROFILES_ACTIVE", "MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE",
             "SERVER_TOMCAT_MBEANREGISTRY_ENABLED", "AUTH_SECURE_COOKIE", "BACKEND_PORT",
-            "AI_CLIENT", "TZ", "CORS_ALLOWED_ORIGINS"
+            "AI_CLIENT", "TZ", "CORS_ALLOWED_ORIGINS", "COMPLAINT_AI_FEEDBACK_OPERATOR_IDS"
           ],
           "common": {
             "SPRING_PROFILES_ACTIVE": "prod",
@@ -135,7 +135,7 @@ jobs:
             "AI_CLIENT": "http", "TZ": "Asia/Seoul"
           },
           "environments": {
-            "staging": {"CORS_ALLOWED_ORIGINS": "https://v2.zipsai.co.kr"},
+            "staging": {"CORS_ALLOWED_ORIGINS": "https://v2.zipsai.co.kr", "COMPLAINT_AI_FEEDBACK_OPERATOR_IDS": "4"},
             "production": {"CORS_ALLOWED_ORIGINS": "https://zipsai.co.kr"}
           },
           "services": {"api": {"enabled": true}, "worker": {"enabled": false}}
