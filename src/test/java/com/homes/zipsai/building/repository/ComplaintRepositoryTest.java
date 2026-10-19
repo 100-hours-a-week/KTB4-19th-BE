@@ -107,9 +107,25 @@ class ComplaintRepositoryTest {
             .satisfies(complaint -> assertThat(complaint.getBuilding().getId()).isEqualTo(building.getId()));
     }
 
+    @Test
+    @DisplayName("긴급 민원만 보면 AI가 긴급으로 판정한 민원만 조회한다")
+    void findsOnlyUrgentComplaintsWhenUrgentOnly() {
+        saveComplaint(building, null, true);
+        saveComplaint(building, null, false);
+        saveComplaint(building, null, null);
+        entityManager.clear();
+
+        Slice<Complaint> found = complaintRepository.findManagerComplaints(manager.getId(), null,
+            List.of(ComplaintStatus.PENDING), true, PageRequest.of(0, 10));
+
+        assertThat(found.getContent()).singleElement()
+            .extracting(Complaint::getUrgent)
+            .isEqualTo(true);
+    }
+
     private Slice<Complaint> findManagerComplaints() {
         return complaintRepository.findManagerComplaints(manager.getId(), null, List.of(ComplaintStatus.PENDING),
-            false, Complaint.URGENCY_THRESHOLD, PageRequest.of(0, 10));
+            false, PageRequest.of(0, 10));
     }
 
     private void saveComplaint(File attachment) {
@@ -117,6 +133,10 @@ class ComplaintRepositoryTest {
     }
 
     private void saveComplaint(Building complaintBuilding, File attachment) {
+        saveComplaint(complaintBuilding, attachment, null);
+    }
+
+    private void saveComplaint(Building complaintBuilding, File attachment, Boolean urgent) {
         Conversation conversation = conversationRepository.save(Conversation.builder()
             .user(resident)
             .type(ConversationType.COMPLAINT)
@@ -128,7 +148,7 @@ class ComplaintRepositoryTest {
             .building(complaintBuilding)
             .attachment(attachment)
             .title("천장 누수")
-            .urgency(5)
+            .urgent(urgent)
             .roomNo("101")
             .build());
     }

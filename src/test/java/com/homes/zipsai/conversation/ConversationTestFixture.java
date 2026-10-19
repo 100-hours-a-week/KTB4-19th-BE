@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.homes.zipsai.building.domain.Building;
 import com.homes.zipsai.building.domain.Room;
+import com.homes.zipsai.building.domain.RoomStatus;
 import com.homes.zipsai.building.repository.BuildingRepository;
 import com.homes.zipsai.building.repository.RoomRepository;
 import com.homes.zipsai.common.domain.File;
@@ -53,6 +54,13 @@ public class ConversationTestFixture {
         room.invite();
         room.moveIn(resident);
         return resident.getEmail();
+    }
+
+    @Transactional(readOnly = true)
+    public String managerOf(String residentEmail) {
+        User resident = userRepository.findByEmail(residentEmail).orElseThrow();
+        Room room = roomRepository.findByResidentIdAndStatus(resident.getId(), RoomStatus.LIVING).orElseThrow();
+        return room.getBuilding().getManager().getEmail();
     }
 
     @Transactional

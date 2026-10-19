@@ -51,7 +51,6 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class ComplaintService {
 
-    private static final int URGENCY_NOT_EVALUATED = 0;
     private static final Sort MANAGER_COMPLAINT_SORT = Sort.by(
         Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
 
@@ -80,7 +79,9 @@ public class ComplaintService {
             .attachment(selectRepresentativeImage(conversation, type, request.representativeAttachmentId()))
             .title(content.title())
             .type(type)
-            .urgency(URGENCY_NOT_EVALUATED)
+            .urgency(conversation.getDraftUrgency())
+            .urgent(conversation.getDraftUrgent())
+            .urgencyVersion(conversation.getDraftUrgencyVersion())
             .roomNo(room.getRoomNo())
             .build());
         ComplaintDetail detail = complaintDetailRepository.save(ComplaintDetail.builder()
@@ -155,7 +156,7 @@ public class ComplaintService {
         List<ComplaintStatus> statuses = normalizeStatuses(statusValues);
         Pageable pageable = PageRequest.of(page, size, MANAGER_COMPLAINT_SORT);
         Slice<Complaint> complaints = complaintRepository.findManagerComplaints(
-            managerId, normalizedKeyword, statuses, urgentOnly, Complaint.URGENCY_THRESHOLD, pageable);
+            managerId, normalizedKeyword, statuses, urgentOnly, pageable);
         if (complaints.isEmpty()) {
             verifyManagesBuilding(managerId);
         }
