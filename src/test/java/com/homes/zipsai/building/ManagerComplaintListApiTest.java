@@ -78,11 +78,11 @@ class ManagerComplaintListApiTest {
     @Test
     void returnsOnlyTheAuthenticatedManagersBuildingWithPagingFields() throws Exception {
         ManagerBuilding owner = managerBuilding();
-        complaint(owner.building(), owner.firstRoom(), "누수 민원", ComplaintStatus.PENDING, 9);
-        complaint(owner.building(), owner.secondRoom(), "전등 민원", ComplaintStatus.IN_PROGRESS, 5);
+        complaint(owner.building(), owner.firstRoom(), "누수 민원", ComplaintStatus.PENDING, 9, true);
+        complaint(owner.building(), owner.secondRoom(), "전등 민원", ComplaintStatus.IN_PROGRESS, 5, false);
 
         ManagerBuilding other = managerBuilding();
-        complaint(other.building(), other.firstRoom(), "다른 건물 민원", ComplaintStatus.PENDING, 9);
+        complaint(other.building(), other.firstRoom(), "다른 건물 민원", ComplaintStatus.PENDING, 9, true);
 
         mvc.perform(get(COMPLAINTS).with(manager(owner.manager().getId())))
             .andExpect(status().isOk())
@@ -104,8 +104,8 @@ class ManagerComplaintListApiTest {
     @Test
     void appliesKeywordStatusUrgencyAndBlankKeywordRules() throws Exception {
         ManagerBuilding owner = managerBuilding();
-        complaint(owner.building(), owner.firstRoom(), "천장 누수", ComplaintStatus.PENDING, 9);
-        complaint(owner.building(), owner.secondRoom(), "현관 전등", ComplaintStatus.IN_PROGRESS, 5);
+        complaint(owner.building(), owner.firstRoom(), "천장 누수", ComplaintStatus.PENDING, 9, true);
+        complaint(owner.building(), owner.secondRoom(), "현관 전등", ComplaintStatus.IN_PROGRESS, 5, false);
 
         mvc.perform(get(COMPLAINTS).param("keyword", "  누수  ").with(manager(owner.manager().getId())))
             .andExpect(status().isOk())
@@ -136,8 +136,8 @@ class ManagerComplaintListApiTest {
     @Test
     void usesFixedSortAndPageBoundaries() throws Exception {
         ManagerBuilding owner = managerBuilding();
-        complaint(owner.building(), owner.firstRoom(), "첫 번째", ComplaintStatus.PENDING, 1);
-        complaint(owner.building(), owner.secondRoom(), "두 번째", ComplaintStatus.PENDING, 1);
+        complaint(owner.building(), owner.firstRoom(), "첫 번째", ComplaintStatus.PENDING, 1, false);
+        complaint(owner.building(), owner.secondRoom(), "두 번째", ComplaintStatus.PENDING, 1, false);
 
         mvc.perform(get(COMPLAINTS).param("page", "0").param("size", "1")
                 .with(manager(owner.manager().getId())))
@@ -200,7 +200,8 @@ class ManagerComplaintListApiTest {
         return new ManagerBuilding(manager, building, firstRoom, secondRoom);
     }
 
-    private Complaint complaint(Building building, Room room, String title, ComplaintStatus status, int urgency) {
+    private Complaint complaint(Building building, Room room, String title, ComplaintStatus status, int urgency,
+                                Boolean urgent) {
         User resident = user(UserRole.RESIDENT);
         Conversation conversation = conversationRepository.save(Conversation.builder()
             .user(resident)
@@ -213,6 +214,7 @@ class ManagerComplaintListApiTest {
             .building(building)
             .title(title)
             .urgency(urgency)
+            .urgent(urgent)
             .roomNo(room.getRoomNo())
             .build());
         ReflectionTestUtils.setField(complaint, "status", status);

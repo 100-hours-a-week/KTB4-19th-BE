@@ -144,6 +144,38 @@ class ComplaintServiceCreateTest {
     }
 
     @Test
+    @DisplayName("초안에 남은 AI 긴급도를 민원에 옮긴다")
+    void copiesDraftUrgencyToComplaint() {
+        Conversation conversation = conversation();
+        conversation.applyAiResponse(urgentSummaryCardResponse(80, true, "urgency-v1"));
+        givenConversation(conversation);
+        givenComplaintSaved();
+
+        complaintService.createComplaint(RESIDENT_ID, createRequest());
+
+        Complaint complaint = savedComplaint();
+        assertThat(complaint.getUrgency()).isEqualTo(80);
+        assertThat(complaint.getUrgent()).isTrue();
+        assertThat(complaint.getUrgencyVersion()).isEqualTo("urgency-v1");
+    }
+
+    @Test
+    @DisplayName("긴급도를 받지 못한 QA 카드 민원은 긴급도가 비어 있다")
+    void leavesUrgencyEmptyForQaCard() {
+        Conversation conversation = conversation();
+        conversation.applyAiResponse(qaCardResponse("분리수거는 어디서 하나요?"));
+        givenConversation(conversation);
+        givenComplaintSaved();
+
+        complaintService.createComplaint(RESIDENT_ID, createRequest());
+
+        Complaint complaint = savedComplaint();
+        assertThat(complaint.getUrgency()).isNull();
+        assertThat(complaint.getUrgent()).isNull();
+        assertThat(complaint.getUrgencyVersion()).isNull();
+    }
+
+    @Test
     @DisplayName("요약 카드가 뜨기 전에 접수하면 민원을 저장하지 않는다")
     void savesNothingBeforeSummaryCard() {
         given(conversationService.getOwnedConversation(RESIDENT_ID, CONVERSATION_ID))
@@ -207,6 +239,21 @@ class ComplaintServiceCreateTest {
         return aiResponse(AiRoute.COMPLAINT, AiConverseResponse.Result.builder()
             .complaintDraft(patch)
             .missingFields(missingFields)
+            .build());
+    }
+
+    private static AiConverseResponse urgentSummaryCardResponse(Integer urgencyScore, Boolean isUrgent,
+                                                                String urgencyVersion) {
+        AiConverseResponse.DraftPatch patch = AiConverseResponse.DraftPatch.builder()
+            .location("안방 천장")
+            .symptom("천장에서 물이 샘")
+            .urgencyScore(urgencyScore)
+            .isUrgent(isUrgent)
+            .urgencyVersion(urgencyVersion)
+            .build();
+        return aiResponse(AiRoute.COMPLAINT, AiConverseResponse.Result.builder()
+            .complaintDraft(patch)
+            .missingFields(List.of())
             .build());
     }
 

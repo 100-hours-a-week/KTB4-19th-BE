@@ -83,6 +83,44 @@ class ConversationTest {
     }
 
     @Test
+    @DisplayName("AI가 매긴 긴급도를 초안에 저장한다")
+    void storesDraftUrgency() {
+        Conversation conversation = conversation();
+
+        conversation.applyAiResponse(complaintWithUrgency(80, true, "urgency-v1"));
+
+        assertThat(conversation.getDraftUrgency()).isEqualTo(80);
+        assertThat(conversation.getDraftUrgent()).isTrue();
+        assertThat(conversation.getDraftUrgencyVersion()).isEqualTo("urgency-v1");
+    }
+
+    @Test
+    @DisplayName("긴급도 값이 비어 오면 저장된 값을 유지한다")
+    void keepsDraftUrgencyWhenPatchHasNoValue() {
+        Conversation conversation = conversation();
+        conversation.applyAiResponse(complaintWithUrgency(80, true, "urgency-v1"));
+
+        conversation.applyAiResponse(complaintWithUrgency(null, null, null));
+
+        assertThat(conversation.getDraftUrgency()).isEqualTo(80);
+        assertThat(conversation.getDraftUrgent()).isTrue();
+        assertThat(conversation.getDraftUrgencyVersion()).isEqualTo("urgency-v1");
+    }
+
+    @Test
+    @DisplayName("긴급도는 새로 온 값만 바꾸고 나머지는 유지한다")
+    void replacesOnlyUrgencyValuesInPatch() {
+        Conversation conversation = conversation();
+        conversation.applyAiResponse(complaintWithUrgency(80, true, "urgency-v1"));
+
+        conversation.applyAiResponse(complaintWithUrgency(null, false, "urgency-v2"));
+
+        assertThat(conversation.getDraftUrgency()).isEqualTo(80);
+        assertThat(conversation.getDraftUrgent()).isFalse();
+        assertThat(conversation.getDraftUrgencyVersion()).isEqualTo("urgency-v2");
+    }
+
+    @Test
     @DisplayName("접수 확인을 기다리는 대화에는 메시지를 보낼 수 없다")
     void rejectsMessageWhileAwaitingConfirmation() {
         Conversation conversation = conversation();
@@ -247,6 +285,18 @@ class ConversationTest {
             .issueType(issueType)
             .attachmentIds(attachmentIds)
             .representativeAttachmentId(representativeAttachmentId)
+            .build();
+        return response(AiRoute.COMPLAINT, AiComplaintState.COLLECTING,
+            AiConverseResponse.Result.builder().complaintDraft(patch).missingFields(List.of("location")).build());
+    }
+
+    private static AiConverseResponse complaintWithUrgency(Integer urgencyScore, Boolean isUrgent,
+                                                           String urgencyVersion) {
+        AiConverseResponse.DraftPatch patch = AiConverseResponse.DraftPatch.builder()
+            .symptom("천장 누수")
+            .urgencyScore(urgencyScore)
+            .isUrgent(isUrgent)
+            .urgencyVersion(urgencyVersion)
             .build();
         return response(AiRoute.COMPLAINT, AiComplaintState.COLLECTING,
             AiConverseResponse.Result.builder().complaintDraft(patch).missingFields(List.of("location")).build());

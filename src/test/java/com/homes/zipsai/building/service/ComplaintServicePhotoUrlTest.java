@@ -3,7 +3,6 @@ package com.homes.zipsai.building.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
@@ -176,7 +175,7 @@ class ComplaintServicePhotoUrlTest {
     }
 
     private void givenManagerComplaints(Complaint complaint) {
-        given(complaintRepository.findManagerComplaints(any(), any(), any(), anyBoolean(), anyInt(), any()))
+        given(complaintRepository.findManagerComplaints(any(), any(), any(), anyBoolean(), any()))
             .willReturn(page(complaint));
     }
 

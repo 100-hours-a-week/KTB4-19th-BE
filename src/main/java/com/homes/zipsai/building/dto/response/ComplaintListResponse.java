@@ -35,8 +35,8 @@ public record ComplaintListResponse(
             ComplaintType complaintType,
             ComplaintStatus statusCode,
             String statusLabel,
-            int urgency,
-            boolean isUrgent,
+            Integer urgency,
+            Boolean isUrgent,
             String fileUrl,
             LocalDateTime createdAt
     ) {
@@ -51,7 +51,7 @@ public record ComplaintListResponse(
                 complaint.getStatus(),
                 complaint.getStatus().getLabel(),
                 complaint.getUrgency(),
-                complaint.getUrgency() >= Complaint.URGENCY_THRESHOLD,
+                complaint.getUrgent(),
                 fileUrl.apply(complaint.getAttachment()),
                 complaint.getCreatedAt()
             );

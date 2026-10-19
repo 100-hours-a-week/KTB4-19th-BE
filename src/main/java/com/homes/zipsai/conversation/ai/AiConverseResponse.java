@@ -93,7 +93,8 @@ public record AiConverseResponse(String code, String turnId, Data data) {
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record DraftPatch(String location, String symptom, String occurredAt, String issueType,
                              @JsonProperty("attachmentIds") @JsonAlias("attachment_ids") List<Long> attachmentIds,
-                             Long representativeAttachmentId) {
+                             Long representativeAttachmentId, Integer urgencyScore, Boolean isUrgent,
+                             String urgencyVersion) {
 
         public AiComplaintDraft toDraft() {
             return new AiComplaintDraft(location, symptom, parseOccurredAt(occurredAt));
