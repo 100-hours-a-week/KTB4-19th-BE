@@ -231,6 +231,20 @@ class ComplaintAiFeedbackJobConfigTest {
     }
 
     @Test
+    @DisplayName("증상을 알 수 없는 민원도 답변이 있으면 전송한다")
+    void sendsComplaintWithUnknownSymptom() throws Exception {
+        ComplaintDetail detail = saveComplaintWithDetail(ComplaintType.COMPLAINT, "leak", "지하주차장 B2",
+            "배관 누수를 확인했습니다");
+        ReflectionTestUtils.setField(detail, "symptom", UNKNOWN);
+        complaintDetailRepository.saveAndFlush(detail);
+
+        AiComplaintFeedbackRequest sent = sendAndCaptureSingleItem();
+
+        assertThat(sent.complaintDetailId()).isEqualTo(detail.getId());
+        assertThat(sent.symptom()).isEqualTo(UNKNOWN);
+    }
+
+    @Test
     @DisplayName("전송 후 수정한 답변은 다시 전송한다")
     void resendsEditedFeedback() throws Exception {
         ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");

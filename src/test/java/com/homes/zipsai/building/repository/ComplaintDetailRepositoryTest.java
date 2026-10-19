@@ -73,7 +73,7 @@ class ComplaintDetailRepositoryTest {
         ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
         entityManager.clear();
 
-        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(UNKNOWN, PageRequest.of(0, 10));
+        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10));
 
         assertThat(found.getContent()).singleElement()
             .satisfies(result -> assertThat(result.getId()).isEqualTo(detail.getId()));
@@ -85,7 +85,7 @@ class ComplaintDetailRepositoryTest {
         saveComplaintWithDetail(ComplaintStatus.IN_PROGRESS, "확인 중입니다");
         entityManager.clear();
 
-        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(UNKNOWN, PageRequest.of(0, 10));
+        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10));
 
         assertThat(found.getContent()).isEmpty();
     }
@@ -96,7 +96,7 @@ class ComplaintDetailRepositoryTest {
         saveComplaintWithDetail(ComplaintStatus.DONE, null);
         entityManager.clear();
 
-        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(UNKNOWN, PageRequest.of(0, 10));
+        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10));
 
         assertThat(found.getContent()).isEmpty();
     }
@@ -106,7 +106,7 @@ class ComplaintDetailRepositoryTest {
     void excludesAlreadySentFeedback() {
         sentFeedback("분리수거장은 지하 1층입니다");
 
-        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(UNKNOWN, PageRequest.of(0, 10));
+        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10));
 
         assertThat(found.getContent()).isEmpty();
     }
@@ -117,20 +117,21 @@ class ComplaintDetailRepositoryTest {
         saveComplaintWithDetail(null, "분리수거 위치 문의", ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
         entityManager.clear();
 
-        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(UNKNOWN, PageRequest.of(0, 10));
+        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10));
 
         assertThat(found.getContent()).isEmpty();
     }
 
     @Test
-    @DisplayName("증상을 알 수 없는 민원은 조회 대상에서 제외한다")
-    void excludesUnknownSymptom() {
-        saveComplaintWithDetail(ComplaintType.COMPLAINT, UNKNOWN, ComplaintStatus.DONE, "확인 후 조치했습니다");
+    @DisplayName("증상을 알 수 없는 민원도 답변이 있으면 조회 대상에 포함한다")
+    void includesUnknownSymptom() {
+        ComplaintDetail detail = saveComplaintWithDetail(ComplaintType.COMPLAINT, UNKNOWN, ComplaintStatus.DONE,
+            "확인 후 조치했습니다");
         entityManager.clear();
 
-        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(UNKNOWN, PageRequest.of(0, 10));
+        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10));
 
-        assertThat(found.getContent()).isEmpty();
+        assertThat(found.getContent()).extracting(ComplaintDetail::getId).containsExactly(detail.getId());
     }
 
     @Test
@@ -141,7 +142,7 @@ class ComplaintDetailRepositoryTest {
         entityManager.flush();
         entityManager.clear();
 
-        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(UNKNOWN, PageRequest.of(0, 10));
+        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10));
 
         assertThat(found.getContent()).extracting(ComplaintDetail::getId).containsExactly(detail.getId());
     }
@@ -157,7 +158,7 @@ class ComplaintDetailRepositoryTest {
         complaintDetailRepository.markAiFeedbackSent(detail.getId(), readVersion);
 
         assertThat(reload(detail).getComment()).isEqualTo("분리수거장은 지하 2층으로 옮겼습니다");
-        assertThat(complaintDetailRepository.findPendingAiFeedback(UNKNOWN, PageRequest.of(0, 10)).getContent())
+        assertThat(complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10)).getContent())
             .extracting(ComplaintDetail::getId).containsExactly(detail.getId());
     }
 
@@ -218,7 +219,7 @@ class ComplaintDetailRepositoryTest {
         int marked = complaintDetailRepository.markAiFeedbackDeleted(detail.getId(), readVersion);
 
         assertThat(marked).isZero();
-        assertThat(complaintDetailRepository.findPendingAiFeedback(UNKNOWN, PageRequest.of(0, 10)).getContent())
+        assertThat(complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10)).getContent())
             .extracting(ComplaintDetail::getId).containsExactly(detail.getId());
     }
 

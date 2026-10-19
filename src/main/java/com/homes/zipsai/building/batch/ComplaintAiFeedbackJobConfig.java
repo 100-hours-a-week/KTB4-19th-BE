@@ -93,7 +93,7 @@ public class ComplaintAiFeedbackJobConfig {
     @Bean
     @StepScope
     public ItemReader<ComplaintDetail> complaintAiFeedbackReader(ComplaintDetailRepository complaintDetailRepository) {
-        return new ComplaintAiFeedbackItemReader(complaintDetailRepository, UNKNOWN_VALUE, MAX_BATCH_SIZE);
+        return new ComplaintAiFeedbackItemReader(complaintDetailRepository, MAX_BATCH_SIZE);
     }
 
     private ItemProcessor<ComplaintDetail, FeedbackItem> complaintAiFeedbackProcessor() {
