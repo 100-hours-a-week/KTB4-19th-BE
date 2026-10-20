@@ -35,9 +35,9 @@ public class HttpAiIndexingClient implements AiIndexingClient {
     }
 
     @Override
-    public void index(AiIndexingRequest request) {
+    public AiIndexingResponse index(AiIndexingRequest request) {
         try {
-            restClient.post()
+            AiIndexingResponse body = restClient.post()
                     .uri(indexingPath)
                     .contentType(MediaType.APPLICATION_JSON)
                     .headers(headers -> {
@@ -50,7 +50,8 @@ public class HttpAiIndexingClient implements AiIndexingClient {
                     .onStatus(HttpStatusCode::isError, (httpRequest, response) -> {
                         throw toApiException(response.getStatusCode());
                     })
-                    .toBodilessEntity();
+                    .body(AiIndexingResponse.class);
+            return body == null ? AiIndexingResponse.empty() : body;
         } catch (RestClientException exception) {
             LOGGER.error("AI 문서 색인 요청에 실패했습니다. buildingId={}, docId={}",
                     request.buildingId(), request.docId(), exception);

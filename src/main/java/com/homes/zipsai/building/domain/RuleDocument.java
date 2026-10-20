@@ -2,6 +2,8 @@ package com.homes.zipsai.building.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -49,6 +51,13 @@ public class RuleDocument extends BaseTimeEntity {
     @Column(name = "is_valid", nullable = false)
     private boolean valid;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "indexing_status", nullable = false, length = 20)
+    private RuleDocumentIndexingStatus indexingStatus;
+
+    @Column(name = "indexing_error", length = 500)
+    private String indexingError;
+
     @Builder
     public RuleDocument(Building building, File attachment, String title, String content, int version) {
         this.building = building;
@@ -57,6 +66,7 @@ public class RuleDocument extends BaseTimeEntity {
         this.content = content;
         this.version = version;
         this.valid = true;
+        this.indexingStatus = RuleDocumentIndexingStatus.PENDING;
     }
 
     public void updateTitle(String title) {
@@ -66,6 +76,8 @@ public class RuleDocument extends BaseTimeEntity {
     public void replaceAttachment(File attachment) {
         this.attachment = attachment;
         this.version++;
+        this.indexingStatus = RuleDocumentIndexingStatus.PENDING;
+        this.indexingError = null;
     }
 
     public void delete() {
