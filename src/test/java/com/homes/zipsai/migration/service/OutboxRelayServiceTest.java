@@ -2,6 +2,7 @@ package com.homes.zipsai.migration.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -342,8 +343,8 @@ class OutboxRelayServiceTest {
     }
 
     @Test
-    @DisplayName("처리 중 DRAINING으로 바뀌면 처리 중인 이벤트만 끝내고 멈춘다")
-    void finishesCurrentEventAndStopsWhenDraining() {
+    @DisplayName("처리 중 DRAINING으로 바뀌면 처리 중인 묶음까지만 반영하고 멈춘다")
+    void finishesCurrentBatchAndStopsWhenDraining() {
         given(outboxEntityTables.getIdColumn("Items")).willAnswer(invocation -> {
             migrationSettingsProvider.update(
                 new MigrationSettings(MigrationMode.V1_PRIMARY, null, WorkerMode.DRAINING, true, true, 0, 0));
@@ -353,11 +354,100 @@ class OutboxRelayServiceTest {
         saveEvent(v1, 10L, "V1_TO_V2", "Items", "1");
         saveItem(v1, 2L, "건조기");
         saveEvent(v1, 11L, "V1_TO_V2", "Items", "2");
+        outboxRelayService.relayPendingEvents(NOON);
+        saveItem(v1, 3L, "냉장고");
+        saveEvent(v1, 12L, "V1_TO_V2", "Items", "3");
 
         outboxRelayService.relayPendingEvents(NOON);
 
         assertThat(eventStatus(v1, 10L)).isEqualTo("COMPLETED");
-        assertThat(eventStatus(v1, 11L)).isEqualTo("PENDING");
+        assertThat(eventStatus(v1, 11L)).isEqualTo("COMPLETED");
+        assertThat(eventStatus(v1, 12L)).isEqualTo("PENDING");
+    }
+
+    @Test
+    @DisplayName("같은 행의 이벤트가 여러 개여도 모두 완료로 바꾸고 적용 이력에 남긴다")
+    void completesAllEventsOfSameRow() {
+        saveItem(v1, 1L, "세탁기");
+        saveEvent(v1, 10L, "V1_TO_V2", "Items", "1");
+        saveEvent(v1, 11L, "V1_TO_V2", "Items", "1");
+
+        outboxRelayService.relayPendingEvents(NOON);
+
+        assertThat(itemName(v2, 1L)).containsExactly("세탁기");
+        assertThat(eventStatus(v1, 10L)).isEqualTo("COMPLETED");
+        assertThat(eventStatus(v1, 11L)).isEqualTo("COMPLETED");
+        assertThat(appliedEventCount(v2, "V1_TO_V2", 10L)).isEqualTo(1L);
+        assertThat(appliedEventCount(v2, "V1_TO_V2", 11L)).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("여러 테이블의 이벤트를 한 번에 반영한다")
+    void appliesEventsOfSeveralTablesTogether() {
+        saveItem(v1, 1L, "세탁기");
+        saveEvent(v1, 10L, "V1_TO_V2", "Items", "1");
+        saveNotice(v1, 1L, "점검 안내", NOON.minusMinutes(1));
+        saveEvent(v1, 11L, "V1_TO_V2", "Notices", "1");
+
+        outboxRelayService.relayPendingEvents(NOON);
+
+        assertThat(itemName(v2, 1L)).containsExactly("세탁기");
+        assertThat(noticeTitle(v2, 1L)).containsExactly("점검 안내");
+    }
+
+    @Test
+    @DisplayName("한 번에 반영할 때 원본에 없는 행은 지우고 있는 행은 덮어쓴다")
+    void deletesMissingRowsAndUpsertsExistingRowsTogether() {
+        saveItem(v1, 1L, "세탁기");
+        saveItem(v2, 2L, "건조기");
+        saveEvent(v1, 10L, "V1_TO_V2", "Items", "1");
+        saveEvent(v1, 11L, "V1_TO_V2", "Items", "2");
+
+        outboxRelayService.relayPendingEvents(NOON);
+
+        assertThat(itemName(v2, 1L)).containsExactly("세탁기");
+        assertThat(itemName(v2, 2L)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("한 번에 반영하지 못하면 실패한 이벤트 앞까지 한 건씩 반영한다")
+    void relaysOneByOneUntilFailedEventWhenBatchFails() {
+        given(outboxEntityTables.getIdColumn("Unknown")).willThrow(new IllegalArgumentException("unknown"));
+        saveItem(v1, 1L, "세탁기");
+        saveEvent(v1, 10L, "V1_TO_V2", "Items", "1");
+        saveEvent(v1, 11L, "V1_TO_V2", "Unknown", "1");
+
+        outboxRelayService.relayPendingEvents(NOON);
+
+        assertThat(itemName(v2, 1L)).containsExactly("세탁기");
+        assertThat(eventStatus(v1, 10L)).isEqualTo("COMPLETED");
+        assertThat(retryOf(v1, 11L)).isEqualTo(new Retry("PENDING", 1, NOON.plusSeconds(10)));
+    }
+
+    @Test
+    @DisplayName("한 번에 가져오는 100건을 모두 반영하면 이벤트가 더 남았다고 알린다")
+    void reportsMoreEventsWhenFullBatchIsRelayed() {
+        saveItem(v1, 1L, "세탁기");
+        for (long eventId = 1; eventId <= 101; eventId++) {
+            saveEvent(v1, eventId, "V1_TO_V2", "Items", "1");
+        }
+
+        boolean hasMoreEvents = outboxRelayService.relayPendingEvents(NOON);
+
+        assertThat(hasMoreEvents).isTrue();
+        assertThat(eventStatus(v1, 100L)).isEqualTo("COMPLETED");
+        assertThat(eventStatus(v1, 101L)).isEqualTo("PENDING");
+    }
+
+    @Test
+    @DisplayName("가져온 이벤트가 100건보다 적으면 더 남지 않았다고 알린다")
+    void reportsNoMoreEventsWhenBatchIsNotFull() {
+        saveItem(v1, 1L, "세탁기");
+        saveEvent(v1, 10L, "V1_TO_V2", "Items", "1");
+
+        boolean hasMoreEvents = outboxRelayService.relayPendingEvents(NOON);
+
+        assertThat(hasMoreEvents).isFalse();
     }
 
     @Test
@@ -549,7 +639,7 @@ class OutboxRelayServiceTest {
         outboxRelayService.relayPendingEvents(NOON);
 
         assertThat(workerEvents("V1_TO_V2", "success")).isEqualTo(1);
-        then(migrationEventLogger).should().outboxApplied(any(), anyLong(), anyLong());
+        then(migrationEventLogger).should().outboxApplied(any(), any(), anyInt(), anyLong());
     }
 
     @Test
@@ -576,7 +666,7 @@ class OutboxRelayServiceTest {
 
         outboxRelayService.relayPendingEvents(NOON);
 
-        then(migrationEventLogger).should().outboxApplied(any(), anyLong(), longThat(lag -> lag >= minimumLag));
+        then(migrationEventLogger).should().outboxApplied(any(), any(), anyInt(), longThat(lag -> lag >= minimumLag));
     }
 
     @Test

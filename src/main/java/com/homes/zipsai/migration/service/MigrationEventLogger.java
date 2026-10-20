@@ -1,5 +1,6 @@
 package com.homes.zipsai.migration.service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
@@ -43,9 +44,9 @@ public class MigrationEventLogger {
             .build();
     }
 
-    public void outboxApplied(OutboxEvent event, long durationMs, long lagMs) {
+    public void outboxApplied(OutboxEvent event, Duration batchDuration, int batchSize, long lagMs) {
         log("outbox_applied", "INFO", OutboxLog.of(event, "success", event.retryCount())
-            .withTimes(durationMs, lagMs));
+            .withTimes(batchDuration, batchSize, lagMs));
     }
 
     public void outboxRetry(OutboxEvent event, int retryCount, String error) {
@@ -105,20 +106,27 @@ public class MigrationEventLogger {
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private record OutboxLog(Long eventId, OutboxDirection direction, String entityType, String entityId,
-                             String outcome, int retryCount, Long durationMs, Long lagMs, String error) {
+                             String outcome, int retryCount, Double durationMs, Long batchDurationMs,
+                             Integer batchSize, Long lagMs, String error) {
+
+        private static final double NANOS_PER_MILLI = 1_000_000.0;
+        private static final double HUNDREDTHS = 100.0;
 
         static OutboxLog of(OutboxEvent event, String outcome, int retryCount) {
             return new OutboxLog(event.eventId(), event.direction(), event.entityType(), event.entityId(), outcome,
-                retryCount, null, null, null);
+                retryCount, null, null, null, null, null);
         }
 
-        OutboxLog withTimes(long durationMs, long lagMs) {
-            return new OutboxLog(eventId, direction, entityType, entityId, outcome, retryCount, durationMs, lagMs,
+        OutboxLog withTimes(Duration batchDuration, int batchSize, long lagMs) {
+            double perEventMillis = batchDuration.toNanos() / NANOS_PER_MILLI / batchSize;
+            return new OutboxLog(eventId, direction, entityType, entityId, outcome, retryCount,
+                Math.round(perEventMillis * HUNDREDTHS) / HUNDREDTHS, batchDuration.toMillis(), batchSize, lagMs,
                 null);
         }
 
         OutboxLog withError(String error) {
-            return new OutboxLog(eventId, direction, entityType, entityId, outcome, retryCount, null, null, error);
+            return new OutboxLog(eventId, direction, entityType, entityId, outcome, retryCount, null, null, null,
+                null, error);
         }
     }
 

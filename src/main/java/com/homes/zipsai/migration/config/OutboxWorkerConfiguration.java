@@ -54,6 +54,13 @@ public class OutboxWorkerConfiguration {
         return taskScheduler;
     }
 
+    @Bean(defaultCandidate = false)
+    TaskScheduler migrationMetricsTaskScheduler() {
+        SimpleAsyncTaskScheduler taskScheduler = new SimpleAsyncTaskScheduler();
+        taskScheduler.setThreadNamePrefix("outbox-metrics-");
+        return taskScheduler;
+    }
+
     private static HikariDataSource workerDataSource(String poolName, String url, String username, String password) {
         HikariDataSource dataSource = DataSourceBuilder.create()
             .type(HikariDataSource.class)
