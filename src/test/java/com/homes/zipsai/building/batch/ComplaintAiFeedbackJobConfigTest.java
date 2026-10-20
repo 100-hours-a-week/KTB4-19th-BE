@@ -2,6 +2,7 @@ package com.homes.zipsai.building.batch;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -41,6 +42,7 @@ import com.homes.zipsai.conversation.ai.AiComplaintFeedbackBatchRequest;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackClient;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackDeleteRequest;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackRequest;
+import com.homes.zipsai.conversation.ai.AiComplaintFeedbackResponse;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
@@ -312,6 +314,104 @@ class ComplaintAiFeedbackJobConfigTest {
         jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
 
         assertThat(sentAt(detail)).isNotNull();
+    }
+
+    @Test
+    @DisplayName("AI가 건별 결과를 주면 성공한 답변만 전송 완료로 남기고 실패한 답변은 다음 실행에서 다시 보낸다")
+    void marksOnlySucceededItemsSent() throws Exception {
+        ComplaintDetail succeeded = saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
+        ComplaintDetail failed = saveComplaintWithDetail(ComplaintStatus.DONE, "주차 등록은 관리사무소에서 해요");
+        given(aiComplaintFeedbackClient.send(any(AiComplaintFeedbackBatchRequest.class))).willAnswer(invocation ->
+            results(invocation.<AiComplaintFeedbackBatchRequest>getArgument(0).traceId(),
+                result(succeeded, "succeeded", null), result(failed, "failed", "EMBEDDING_FAILED")));
+
+        JobExecution execution = jobOperatorTestUtils.startJob(
+            jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
+
+        assertThat(execution.getExitStatus()).isEqualTo(ExitStatus.COMPLETED);
+        assertThat(sentAt(succeeded)).isNotNull();
+        assertThat(sentAt(failed)).isNull();
+
+        jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
+
+        ArgumentCaptor<AiComplaintFeedbackBatchRequest> captor =
+            ArgumentCaptor.forClass(AiComplaintFeedbackBatchRequest.class);
+        verify(aiComplaintFeedbackClient, times(2)).send(captor.capture());
+        assertThat(captor.getAllValues().getLast().items())
+            .extracting(AiComplaintFeedbackRequest::complaintDetailId)
+            .containsExactly(failed.getId());
+    }
+
+    @Test
+    @DisplayName("AI가 의도적으로 반영하지 않은 답변은 다시 보내지 않도록 전송 완료로 남긴다")
+    void marksSkippedItemSent() throws Exception {
+        ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, "네");
+        given(aiComplaintFeedbackClient.send(any(AiComplaintFeedbackBatchRequest.class))).willAnswer(invocation ->
+            results(invocation.<AiComplaintFeedbackBatchRequest>getArgument(0).traceId(),
+                result(detail, "skipped", "COMMENT_TOO_SHORT")));
+
+        jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
+
+        assertThat(sentAt(detail)).isNotNull();
+    }
+
+    @Test
+    @DisplayName("AI 응답에 결과가 빠진 답변은 전송 완료로 남기지 않는다")
+    void doesNotMarkItemMissingFromResults() throws Exception {
+        ComplaintDetail answered = saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
+        ComplaintDetail missing = saveComplaintWithDetail(ComplaintStatus.DONE, "주차 등록은 관리사무소에서 해요");
+        given(aiComplaintFeedbackClient.send(any(AiComplaintFeedbackBatchRequest.class))).willAnswer(invocation ->
+            results(invocation.<AiComplaintFeedbackBatchRequest>getArgument(0).traceId(),
+                result(answered, "succeeded", null)));
+
+        jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
+
+        assertThat(sentAt(answered)).isNotNull();
+        assertThat(sentAt(missing)).isNull();
+    }
+
+    @Test
+    @DisplayName("AI가 삭제 실패를 응답하면 전송 기록을 남겨 다음 실행에서 다시 삭제를 요청한다")
+    void keepsSentRecordWhenDeleteResultFailed() throws Exception {
+        ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
+        jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
+        ComplaintDetail reloaded = complaintDetailRepository.findById(detail.getId()).orElseThrow();
+        reloaded.deleteComment();
+        complaintDetailRepository.saveAndFlush(reloaded);
+        given(aiComplaintFeedbackClient.delete(any(AiComplaintFeedbackDeleteRequest.class))).willAnswer(invocation ->
+            results(invocation.<AiComplaintFeedbackDeleteRequest>getArgument(0).traceId(),
+                result(detail, "failed", "VECTOR_STORE_FAILED")));
+
+        JobExecution execution = jobOperatorTestUtils.startJob(
+            jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
+
+        assertThat(execution.getExitStatus()).isEqualTo(ExitStatus.COMPLETED);
+        assertThat(sentAt(detail)).isNotNull();
+    }
+
+    @Test
+    @DisplayName("AI가 삭제 성공을 응답하면 전송 기록을 지운다")
+    void clearsSentRecordWhenDeleteResultSucceeded() throws Exception {
+        ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
+        jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
+        ComplaintDetail reloaded = complaintDetailRepository.findById(detail.getId()).orElseThrow();
+        reloaded.deleteComment();
+        complaintDetailRepository.saveAndFlush(reloaded);
+        given(aiComplaintFeedbackClient.delete(any(AiComplaintFeedbackDeleteRequest.class))).willAnswer(invocation ->
+            results(invocation.<AiComplaintFeedbackDeleteRequest>getArgument(0).traceId(),
+                result(detail, "succeeded", null)));
+
+        jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
+
+        assertThat(sentAt(detail)).isNull();
+    }
+
+    private static AiComplaintFeedbackResponse results(String traceId, AiComplaintFeedbackResponse.Result... results) {
+        return new AiComplaintFeedbackResponse(traceId, List.of(results));
+    }
+
+    private static AiComplaintFeedbackResponse.Result result(ComplaintDetail detail, String status, String reasonCode) {
+        return new AiComplaintFeedbackResponse.Result(detail.getId(), null, status, reasonCode);
     }
 
     private AiComplaintFeedbackRequest sendAndCaptureSingleItem() throws Exception {
