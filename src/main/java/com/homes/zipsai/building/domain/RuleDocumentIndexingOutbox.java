@@ -12,6 +12,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import com.homes.zipsai.global.domain.BaseTimeEntity;
 import com.homes.zipsai.global.util.TextUtils;
 
 import lombok.AccessLevel;
@@ -22,7 +23,7 @@ import lombok.NoArgsConstructor;
 @Table(name = "Rule_document_indexing_outbox")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class RuleDocumentIndexingOutbox {
+public class RuleDocumentIndexingOutbox extends BaseTimeEntity {
 
     private static final int LAST_ERROR_MAX_LENGTH = 500;
 
@@ -60,9 +61,6 @@ public class RuleDocumentIndexingOutbox {
     @Column(name = "last_error", length = LAST_ERROR_MAX_LENGTH)
     private String lastError;
 
-    @Column(name = "created_at", nullable = false, updatable = false)
-    private LocalDateTime createdAt;
-
     @Column(name = "processed_at")
     private LocalDateTime processedAt;
 
@@ -75,7 +73,6 @@ public class RuleDocumentIndexingOutbox {
         this.traceId = TextUtils.truncate(traceId, 64);
         this.status = RuleDocumentIndexingOutboxStatus.PENDING;
         this.nextRetryAt = now;
-        this.createdAt = now;
     }
 
     public static RuleDocumentIndexingOutbox index(RuleDocument document, String traceId, LocalDateTime now) {
