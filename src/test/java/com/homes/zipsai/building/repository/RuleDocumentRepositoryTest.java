@@ -126,8 +126,10 @@ class RuleDocumentRepositoryTest {
     @Test
     @DisplayName("색인 아웃박스는 생성·수정 시각을 남기고 상태가 바뀌면 수정 시각을 갱신한다")
     void recordsOutboxTimestamps() throws InterruptedException {
-        RuleDocumentIndexingOutbox outbox = outboxRepository.saveAndFlush(
-            RuleDocumentIndexingOutbox.cleanup(building.getId(), "trace-1", LocalDateTime.now()));
+        Long id = outboxRepository.saveAndFlush(
+            RuleDocumentIndexingOutbox.cleanup(building.getId(), "trace-1", LocalDateTime.now())).getId();
+        entityManager.clear();
+        RuleDocumentIndexingOutbox outbox = outboxRepository.findById(id).orElseThrow();
         LocalDateTime createdAt = outbox.getCreatedAt();
         LocalDateTime firstUpdatedAt = outbox.getUpdatedAt();
         Thread.sleep(5);
