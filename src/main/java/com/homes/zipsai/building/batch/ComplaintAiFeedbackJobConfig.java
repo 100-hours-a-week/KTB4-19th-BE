@@ -2,8 +2,10 @@ package com.homes.zipsai.building.batch;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -34,6 +36,7 @@ import com.homes.zipsai.conversation.ai.AiComplaintFeedbackBatchRequest;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackClient;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackDeleteRequest;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackRequest;
+import com.homes.zipsai.conversation.ai.AiComplaintFeedbackResponse;
 import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.global.util.TimeUtils;
 
@@ -129,12 +132,15 @@ public class ComplaintAiFeedbackJobConfig {
                 requests.add(item.request());
             }
             String traceId = UUID.randomUUID().toString();
-            client.send(new AiComplaintFeedbackBatchRequest(traceId, requests));
+            AiComplaintFeedbackResponse response = client.send(new AiComplaintFeedbackBatchRequest(traceId, requests));
 
+            ResultTally tally = new ResultTally();
             for (FeedbackItem item : chunk) {
-                complaintDetailRepository.markAiFeedbackSent(item.id(), item.updatedAt());
+                if (tally.handled(response, item.id(), item.updatedAt(), traceId, "전송")) {
+                    complaintDetailRepository.markAiFeedbackSent(item.id(), item.updatedAt());
+                }
             }
-            LOGGER.info("민원 답변 피드백을 AI에 전송했습니다. traceId={}, items={}", traceId, requests.size());
+            LOGGER.info("민원 답변 피드백을 AI에 전송했습니다. traceId={}, items={}, {}", traceId, requests.size(), tally);
         };
     }
 
@@ -171,15 +177,20 @@ public class ComplaintAiFeedbackJobConfig {
                         TimeUtils.toOffsetDateTime(target.updatedAt())));
             }
             String traceId = UUID.randomUUID().toString();
-            client.delete(new AiComplaintFeedbackDeleteRequest(traceId, items));
+            AiComplaintFeedbackResponse response = client.delete(new AiComplaintFeedbackDeleteRequest(traceId, items));
 
+            ResultTally tally = new ResultTally();
+            int handled = 0;
             int marked = 0;
             for (AiFeedbackDeletionTarget target : chunk) {
-                marked += complaintDetailRepository.markAiFeedbackDeleted(
-                        target.complaintDetailId(), target.updatedAt());
+                if (tally.handled(response, target.complaintDetailId(), target.updatedAt(), traceId, "삭제")) {
+                    handled++;
+                    marked += complaintDetailRepository.markAiFeedbackDeleted(
+                            target.complaintDetailId(), target.updatedAt());
+                }
             }
-            LOGGER.info("삭제된 민원 답변을 AI에서 제거했습니다. traceId={}, items={}, changedDuringDelete={}",
-                    traceId, items.size(), items.size() - marked);
+            LOGGER.info("삭제된 민원 답변을 AI에서 제거했습니다. traceId={}, items={}, changedDuringDelete={}, {}",
+                    traceId, items.size(), handled - marked, tally);
         };
     }
 
@@ -194,5 +205,60 @@ public class ComplaintAiFeedbackJobConfig {
     }
 
     private record FeedbackItem(Long id, LocalDateTime updatedAt, AiComplaintFeedbackRequest request) {
+    }
+
+    private static final class ResultTally {
+
+        private int succeeded;
+        private int skipped;
+        private int failed;
+        private int missing;
+        private int versionMismatch;
+        private int acceptedWithoutResult;
+
+        boolean handled(AiComplaintFeedbackResponse response, long complaintDetailId, LocalDateTime sentVersion,
+                        String traceId, String action) {
+            if (response == null || response.results().isEmpty()) {
+                acceptedWithoutResult++;
+                return true;
+            }
+            Optional<AiComplaintFeedbackResponse.Result> found = response.find(complaintDetailId);
+            if (found.isEmpty()) {
+                missing++;
+                LOGGER.warn("AI 응답에 민원 답변 {} 결과가 없어 다음 실행에서 다시 보냅니다. traceId={}, complaintDetailId={}",
+                        action, traceId, complaintDetailId);
+                return false;
+            }
+            AiComplaintFeedbackResponse.Result result = found.get();
+            OffsetDateTime expected = TimeUtils.toOffsetDateTime(sentVersion);
+            if (result.updatedAt() != null && !result.updatedAt().isEqual(expected)) {
+                versionMismatch++;
+                LOGGER.warn("AI 응답의 민원 답변 {} 버전이 보낸 버전과 달라 다음 실행에서 다시 보냅니다. traceId={}, "
+                                + "complaintDetailId={}, sent={}, received={}",
+                        action, traceId, complaintDetailId, expected, result.updatedAt());
+                return false;
+            }
+            if (AiComplaintFeedbackResponse.STATUS_SUCCEEDED.equals(result.status())) {
+                succeeded++;
+                return true;
+            }
+            if (AiComplaintFeedbackResponse.STATUS_SKIPPED.equals(result.status())) {
+                skipped++;
+                LOGGER.info("AI가 민원 답변 {} 요청을 반영하지 않았습니다. traceId={}, complaintDetailId={}, reasonCode={}",
+                        action, traceId, complaintDetailId, result.reasonCode());
+                return true;
+            }
+            failed++;
+            LOGGER.warn("AI가 민원 답변 {} 처리에 실패해 다음 실행에서 다시 보냅니다. traceId={}, complaintDetailId={}, "
+                            + "status={}, reasonCode={}",
+                    action, traceId, complaintDetailId, result.status(), result.reasonCode());
+            return false;
+        }
+
+        @Override
+        public String toString() {
+            return "succeeded=" + succeeded + ", skipped=" + skipped + ", failed=" + failed + ", missing=" + missing
+                    + ", versionMismatch=" + versionMismatch + ", acceptedWithoutResult=" + acceptedWithoutResult;
+        }
     }
 }

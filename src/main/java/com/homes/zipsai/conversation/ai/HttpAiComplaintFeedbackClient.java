@@ -39,18 +39,18 @@ public class HttpAiComplaintFeedbackClient implements AiComplaintFeedbackClient 
     }
 
     @Override
-    public void send(AiComplaintFeedbackBatchRequest request) {
-        post(feedbackPath, request, "접수", request.traceId(), request.items().size());
+    public AiComplaintFeedbackResponse send(AiComplaintFeedbackBatchRequest request) {
+        return post(feedbackPath, request, "접수", request.traceId(), request.items().size());
     }
 
     @Override
-    public void delete(AiComplaintFeedbackDeleteRequest request) {
-        post(deletePath, request, "삭제", request.traceId(), request.items().size());
+    public AiComplaintFeedbackResponse delete(AiComplaintFeedbackDeleteRequest request) {
+        return post(deletePath, request, "삭제", request.traceId(), request.items().size());
     }
 
-    private void post(String path, Object body, String action, String traceId, int items) {
+    private AiComplaintFeedbackResponse post(String path, Object body, String action, String traceId, int items) {
         try {
-            restClient.post()
+            AiComplaintFeedbackResponse response = restClient.post()
                     .uri(path)
                     .contentType(MediaType.APPLICATION_JSON)
                     .headers(headers -> {
@@ -60,12 +60,13 @@ public class HttpAiComplaintFeedbackClient implements AiComplaintFeedbackClient 
                     })
                     .body(body)
                     .retrieve()
-                    .onStatus(HttpStatusCode::isError, (httpRequest, response) -> {
+                    .onStatus(HttpStatusCode::isError, (httpRequest, errorResponse) -> {
                         LOGGER.error("AI가 민원 답변 피드백 {} 요청을 거절했습니다. traceId={}, items={}, status={}",
-                                action, traceId, items, response.getStatusCode().value());
-                        throw toApiException(response.getStatusCode());
+                                action, traceId, items, errorResponse.getStatusCode().value());
+                        throw toApiException(errorResponse.getStatusCode());
                     })
-                    .toBodilessEntity();
+                    .body(AiComplaintFeedbackResponse.class);
+            return response == null ? AiComplaintFeedbackResponse.empty() : response;
         } catch (RestClientException exception) {
             LOGGER.error("AI 민원 답변 피드백 {} 요청에 실패했습니다. traceId={}, items={}",
                     action, traceId, items, exception);
