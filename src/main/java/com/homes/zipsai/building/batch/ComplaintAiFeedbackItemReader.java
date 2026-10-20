@@ -1,5 +1,6 @@
 package com.homes.zipsai.building.batch;
 
+import java.util.Collections;
 import java.util.Iterator;
 
 import org.springframework.batch.infrastructure.item.ItemReader;
@@ -11,19 +12,26 @@ import com.homes.zipsai.building.repository.ComplaintDetailRepository;
 public class ComplaintAiFeedbackItemReader implements ItemReader<ComplaintDetail> {
 
     private final ComplaintDetailRepository complaintDetailRepository;
-    private final int maxBatchSize;
+    private final long minId;
+    private final long maxId;
+    private final int limit;
     private Iterator<ComplaintDetail> items;
 
-    public ComplaintAiFeedbackItemReader(ComplaintDetailRepository complaintDetailRepository, int maxBatchSize) {
+    public ComplaintAiFeedbackItemReader(ComplaintDetailRepository complaintDetailRepository,
+                                         long minId, long maxId, int limit) {
         this.complaintDetailRepository = complaintDetailRepository;
-        this.maxBatchSize = maxBatchSize;
+        this.minId = minId;
+        this.maxId = maxId;
+        this.limit = limit;
     }
 
     @Override
     public ComplaintDetail read() {
         if (items == null) {
-            items = complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, maxBatchSize))
-                    .getContent().iterator();
+            items = limit <= 0
+                    ? Collections.emptyIterator()
+                    : complaintDetailRepository.findPendingAiFeedbackBetween(minId, maxId, PageRequest.of(0, limit))
+                            .getContent().iterator();
         }
         return items.hasNext() ? items.next() : null;
     }
