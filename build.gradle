@@ -28,7 +28,6 @@ ext {
 dependencies {
 	implementation platform("software.amazon.awssdk:bom:${awsSdkVersion}")
 	implementation 'software.amazon.awssdk:s3'
-	implementation 'software.amazon.awssdk:sqs'
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 	implementation "net.javacrumbs.shedlock:shedlock-spring:${shedlockVersion}"
