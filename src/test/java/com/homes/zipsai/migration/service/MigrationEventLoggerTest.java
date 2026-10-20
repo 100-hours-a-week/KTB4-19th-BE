@@ -2,6 +2,7 @@ package com.homes.zipsai.migration.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
@@ -47,10 +48,19 @@ class MigrationEventLoggerTest {
     @Test
     @DisplayName("반영 성공은 이벤트 번호, 방향, 처리 시간을 JSON으로 남긴다")
     void logsAppliedEvent(CapturedOutput output) {
-        migrationEventLogger.outboxApplied(EVENT, 15, 3000);
+        migrationEventLogger.outboxApplied(EVENT, Duration.ofMillis(15), 1, 3000);
 
         assertThat(output.getOut()).contains("\"event\":\"outbox_applied\"", "\"event_id\":10",
-            "\"direction\":\"V1_TO_V2\"", "\"outcome\":\"success\"", "\"duration_ms\":15", "\"lag_ms\":3000");
+            "\"direction\":\"V1_TO_V2\"", "\"outcome\":\"success\"", "\"duration_ms\":15.0", "\"lag_ms\":3000");
+    }
+
+    @Test
+    @DisplayName("묶어서 반영하면 처리 시간은 건당 값으로, 묶음 시간과 건수는 따로 남긴다")
+    void logsPerEventDurationOfBatch(CapturedOutput output) {
+        migrationEventLogger.outboxApplied(EVENT, Duration.ofMillis(66), 100, 3000);
+
+        assertThat(output.getOut()).contains("\"duration_ms\":0.66", "\"batch_duration_ms\":66",
+            "\"batch_size\":100");
     }
 
     @Test

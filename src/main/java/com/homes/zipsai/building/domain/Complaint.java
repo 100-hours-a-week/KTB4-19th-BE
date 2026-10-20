@@ -33,8 +33,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Complaint extends BaseTimeEntity {
 
-    public static final int URGENCY_THRESHOLD = 9;
-
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "complaint_id")
@@ -67,8 +65,14 @@ public class Complaint extends BaseTimeEntity {
     @Column(name = "complaint_status", nullable = false, length = 20)
     private ComplaintStatus status;
 
-    @Column(name = "urgency", nullable = false, columnDefinition = "TINYINT")
-    private int urgency;
+    @Column(name = "urgency", columnDefinition = "TINYINT")
+    private Integer urgency;
+
+    @Column(name = "is_urgent")
+    private Boolean urgent;
+
+    @Column(name = "urgency_version", length = 50)
+    private String urgencyVersion;
 
     @Column(name = "room_no", nullable = false, length = 5)
     private String roomNo;
@@ -78,7 +82,8 @@ public class Complaint extends BaseTimeEntity {
 
     @Builder
     public Complaint(Conversation conversation, User user, Building building, File attachment,
-                     String title, ComplaintType type, int urgency, String roomNo) {
+                     String title, ComplaintType type, Integer urgency, Boolean urgent, String urgencyVersion,
+                     String roomNo) {
         this.conversation = conversation;
         this.user = user;
         this.building = building;
@@ -87,6 +92,8 @@ public class Complaint extends BaseTimeEntity {
         this.type = type;
         this.status = ComplaintStatus.PENDING;
         this.urgency = urgency;
+        this.urgent = urgent;
+        this.urgencyVersion = urgencyVersion;
         this.roomNo = roomNo;
     }
 

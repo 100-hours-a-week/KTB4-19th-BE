@@ -3,6 +3,7 @@ package com.homes.zipsai.building.repository;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -72,7 +73,7 @@ class ComplaintDetailRepositoryTest {
         ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
         entityManager.clear();
 
-        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(UNKNOWN, PageRequest.of(0, 10));
+        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10));
 
         assertThat(found.getContent()).singleElement()
             .satisfies(result -> assertThat(result.getId()).isEqualTo(detail.getId()));
@@ -84,7 +85,7 @@ class ComplaintDetailRepositoryTest {
         saveComplaintWithDetail(ComplaintStatus.IN_PROGRESS, "확인 중입니다");
         entityManager.clear();
 
-        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(UNKNOWN, PageRequest.of(0, 10));
+        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10));
 
         assertThat(found.getContent()).isEmpty();
     }
@@ -95,7 +96,7 @@ class ComplaintDetailRepositoryTest {
         saveComplaintWithDetail(ComplaintStatus.DONE, null);
         entityManager.clear();
 
-        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(UNKNOWN, PageRequest.of(0, 10));
+        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10));
 
         assertThat(found.getContent()).isEmpty();
     }
@@ -103,12 +104,9 @@ class ComplaintDetailRepositoryTest {
     @Test
     @DisplayName("이미 AI로 전송한 민원 상세는 다시 조회하지 않는다")
     void excludesAlreadySentFeedback() {
-        ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
-        detail.markAiFeedbackSent(LocalDateTime.now());
-        entityManager.flush();
-        entityManager.clear();
+        sentFeedback("분리수거장은 지하 1층입니다");
 
-        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(UNKNOWN, PageRequest.of(0, 10));
+        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10));
 
         assertThat(found.getContent()).isEmpty();
     }
@@ -119,20 +117,122 @@ class ComplaintDetailRepositoryTest {
         saveComplaintWithDetail(null, "분리수거 위치 문의", ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
         entityManager.clear();
 
-        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(UNKNOWN, PageRequest.of(0, 10));
+        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10));
 
         assertThat(found.getContent()).isEmpty();
     }
 
     @Test
-    @DisplayName("증상을 알 수 없는 민원은 조회 대상에서 제외한다")
-    void excludesUnknownSymptom() {
-        saveComplaintWithDetail(ComplaintType.COMPLAINT, UNKNOWN, ComplaintStatus.DONE, "확인 후 조치했습니다");
+    @DisplayName("증상을 알 수 없는 민원도 답변이 있으면 조회 대상에 포함한다")
+    void includesUnknownSymptom() {
+        ComplaintDetail detail = saveComplaintWithDetail(ComplaintType.COMPLAINT, UNKNOWN, ComplaintStatus.DONE,
+            "확인 후 조치했습니다");
         entityManager.clear();
 
-        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(UNKNOWN, PageRequest.of(0, 10));
+        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10));
 
-        assertThat(found.getContent()).isEmpty();
+        assertThat(found.getContent()).extracting(ComplaintDetail::getId).containsExactly(detail.getId());
+    }
+
+    @Test
+    @DisplayName("전송 후 답변을 수정하면 다시 전송 대상이 된다")
+    void includesFeedbackEditedAfterSent() {
+        ComplaintDetail detail = sentFeedback("분리수거장은 지하 1층입니다");
+        reload(detail).updateComment("분리수거장은 지하 2층으로 옮겼습니다");
+        entityManager.flush();
+        entityManager.clear();
+
+        Slice<ComplaintDetail> found = complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10));
+
+        assertThat(found.getContent()).extracting(ComplaintDetail::getId).containsExactly(detail.getId());
+    }
+
+    @Test
+    @DisplayName("전송 중 답변이 수정되면 수정본은 유지되고 다시 전송 대상으로 남는다")
+    void keepsEditedCommentWhenEditedDuringSend() {
+        ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
+        LocalDateTime readVersion = reload(detail).getUpdatedAt();
+        reload(detail).updateComment("분리수거장은 지하 2층으로 옮겼습니다");
+        entityManager.flush();
+
+        complaintDetailRepository.markAiFeedbackSent(detail.getId(), readVersion);
+
+        assertThat(reload(detail).getComment()).isEqualTo("분리수거장은 지하 2층으로 옮겼습니다");
+        assertThat(complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10)).getContent())
+            .extracting(ComplaintDetail::getId).containsExactly(detail.getId());
+    }
+
+    @Test
+    @DisplayName("전송 중 답변이 삭제되면 삭제 상태는 유지되고 AI 삭제 대상이 된다")
+    void findsDeletionTargetWhenDeletedDuringSend() {
+        ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
+        LocalDateTime readVersion = reload(detail).getUpdatedAt();
+        reload(detail).deleteComment();
+        entityManager.flush();
+
+        complaintDetailRepository.markAiFeedbackSent(detail.getId(), readVersion);
+
+        assertThat(reload(detail).getComment()).isNull();
+        assertThat(complaintDetailRepository.findPendingAiFeedbackDeletions(PageRequest.of(0, 10)))
+            .extracting(AiFeedbackDeletionTarget::complaintDetailId).containsExactly(detail.getId());
+    }
+
+    @Test
+    @DisplayName("전송한 답변을 삭제하면 AI 삭제 대상이 된다")
+    void findsDeletionTargetWhenSentCommentDeleted() {
+        ComplaintDetail detail = sentFeedback("분리수거장은 지하 1층입니다");
+        reload(detail).deleteComment();
+        entityManager.flush();
+        entityManager.clear();
+
+        List<AiFeedbackDeletionTarget> targets =
+            complaintDetailRepository.findPendingAiFeedbackDeletions(PageRequest.of(0, 10));
+
+        assertThat(targets).singleElement().satisfies(target -> {
+            assertThat(target.complaintDetailId()).isEqualTo(detail.getId());
+            assertThat(target.buildingId()).isEqualTo(building.getId());
+        });
+    }
+
+    @Test
+    @DisplayName("전송한 적 없는 답변을 삭제하면 AI 삭제 대상이 아니다")
+    void excludesNeverSentCommentFromDeletion() {
+        ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
+        reload(detail).deleteComment();
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(complaintDetailRepository.findPendingAiFeedbackDeletions(PageRequest.of(0, 10))).isEmpty();
+    }
+
+    @Test
+    @DisplayName("AI 삭제 요청 중 다시 답변을 달았으면 삭제 완료를 기록하지 않고 다시 전송 대상으로 남는다")
+    void keepsResendWhenCommentWrittenAgainDuringDelete() {
+        ComplaintDetail detail = sentFeedback("분리수거장은 지하 1층입니다");
+        reload(detail).deleteComment();
+        entityManager.flush();
+        LocalDateTime readVersion = complaintDetailRepository.findPendingAiFeedbackDeletions(PageRequest.of(0, 10))
+            .getFirst().updatedAt();
+        reload(detail).updateComment("다시 안내드립니다");
+        entityManager.flush();
+
+        int marked = complaintDetailRepository.markAiFeedbackDeleted(detail.getId(), readVersion);
+
+        assertThat(marked).isZero();
+        assertThat(complaintDetailRepository.findPendingAiFeedback(PageRequest.of(0, 10)).getContent())
+            .extracting(ComplaintDetail::getId).containsExactly(detail.getId());
+    }
+
+    private ComplaintDetail sentFeedback(String comment) {
+        ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, comment);
+        complaintDetailRepository.markAiFeedbackSent(detail.getId(), reload(detail).getUpdatedAt());
+        entityManager.clear();
+        return detail;
+    }
+
+    private ComplaintDetail reload(ComplaintDetail detail) {
+        entityManager.clear();
+        return complaintDetailRepository.findById(detail.getId()).orElseThrow();
     }
 
     private ComplaintDetail saveComplaintWithDetail(ComplaintStatus status, String comment) {

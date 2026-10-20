@@ -45,6 +45,7 @@ public class Conversation extends BaseTimeEntity {
     private static final int LOCATION_MAX_LENGTH = 50;
     private static final int SYMPTOM_MAX_LENGTH = 100;
     private static final int ISSUE_TYPE_MAX_LENGTH = 20;
+    private static final int URGENCY_VERSION_MAX_LENGTH = 50;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -95,6 +96,15 @@ public class Conversation extends BaseTimeEntity {
 
     @Column(name = "draft_representative_attachment_id")
     private Long draftRepresentativeAttachmentId;
+
+    @Column(name = "draft_urgency", columnDefinition = "TINYINT")
+    private Integer draftUrgency;
+
+    @Column(name = "draft_is_urgent")
+    private Boolean draftUrgent;
+
+    @Column(name = "draft_urgency_version", length = URGENCY_VERSION_MAX_LENGTH)
+    private String draftUrgencyVersion;
 
     @Builder
     public Conversation(User user, ConversationType type, String title) {
@@ -156,6 +166,7 @@ public class Conversation extends BaseTimeEntity {
         } else if (draftPatch != null) {
             storeDraft(currentDraft().withEdits(draftPatch.toDraft()));
             storeDraftIssueTypeAndImages(draftPatch);
+            storeDraftUrgency(draftPatch);
         }
 
         this.complaintState = response.isConversationComplete()
@@ -212,6 +223,18 @@ public class Conversation extends BaseTimeEntity {
         }
         if (patch.representativeAttachmentId() != null) {
             this.draftRepresentativeAttachmentId = patch.representativeAttachmentId();
+        }
+    }
+
+    private void storeDraftUrgency(AiConverseResponse.DraftPatch patch) {
+        if (patch.urgencyScore() != null) {
+            this.draftUrgency = patch.urgencyScore();
+        }
+        if (patch.isUrgent() != null) {
+            this.draftUrgent = patch.isUrgent();
+        }
+        if (patch.urgencyVersion() != null) {
+            this.draftUrgencyVersion = TextUtils.truncate(patch.urgencyVersion(), URGENCY_VERSION_MAX_LENGTH);
         }
     }
 

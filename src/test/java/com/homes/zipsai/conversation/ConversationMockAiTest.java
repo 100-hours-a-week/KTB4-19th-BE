@@ -51,6 +51,8 @@ import tools.jackson.databind.ObjectMapper;
 class ConversationMockAiTest {
 
     private static final String CONVERSATIONS = "/api/v1/residents/me/conversations";
+    private static final String RESIDENT_COMPLAINTS = "/api/v1/residents/me/complaints";
+    private static final String MANAGER_COMPLAINTS = "/api/v1/managers/me/complaints";
 
     @Autowired
     MockMvcTester mockMvcTester;
@@ -170,6 +172,42 @@ class ConversationMockAiTest {
         assertThat(messages).extracting(Message::getTurnId).containsExactly(aiRequest.turnId(), aiRequest.turnId());
     }
 
+    @Test
+    @DisplayName("AI가 매긴 긴급도가 민원으로 옮겨져 관리자 긴급 목록에 보인다")
+    void showsAiUrgencyInManagerUrgentList() throws Exception {
+        String email = conversationTestFixture.livingResident("302");
+        RequestPostProcessor resident = conversationTestFixture.authenticatedAs(email);
+        String managerEmail = conversationTestFixture.managerOf(email);
+        RequestPostProcessor manager = conversationTestFixture.authenticatedAs(managerEmail);
+        given(aiConverseClient.converse(any(), any())).willAnswer(ConversationMockAiTest::urgentSummaryCardReply);
+        long conversationId = startConversation(resident, "세탁기 밑으로 물이 새요");
+
+        assertThat(createComplaint(resident, conversationId)).hasStatus(HttpStatus.CREATED);
+
+        MvcTestResult result = mockMvcTester.get().uri(MANAGER_COMPLAINTS).param("urgentOnly", "true")
+            .with(manager).exchange();
+        assertThat(result).hasStatusOk()
+            .bodyJson().isLenientlyEqualTo("""
+                {"data": {"complaints": [{"urgency": 80, "isUrgent": true}]}}
+                """);
+        assertThat(result).bodyJson().doesNotHavePath("$.data.complaints[0].urgencyVersion");
+    }
+
+    private static AiConverseResponse urgentSummaryCardReply(InvocationOnMock invocation) {
+        AiConverseRequest request = invocation.getArgument(0);
+        AiConverseResponse.DraftPatch draft = AiConverseResponse.DraftPatch.builder()
+            .issueType("leak")
+            .location("A동 3층 욕실")
+            .symptom("세탁기 밑으로 물이 샘")
+            .urgencyScore(80)
+            .isUrgent(true)
+            .urgencyVersion("urgency-llm-v1-phase0")
+            .build();
+        return new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, request.turnId(),
+            new AiConverseResponse.Data(AiRoute.COMPLAINT, null, "A동 3층 욕실의 누수 문제로 민원을 접수할까요?",
+                AiConverseResponse.Result.builder().complaintDraft(draft).missingFields(List.of()).build()));
+    }
+
     private static AiConverseResponse collectingReply(InvocationOnMock invocation) {
         AiConverseRequest request = invocation.getArgument(0);
         return new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, request.turnId(),
@@ -195,6 +233,13 @@ class ConversationMockAiTest {
                                       Long... attachmentIds) {
         return mockMvcTester.post().uri(CONVERSATIONS + "/{id}/messages", conversationId).with(resident)
             .contentType(MediaType.APPLICATION_JSON).content(messageBody(content, attachmentIds))
+            .exchange();
+    }
+
+    private MvcTestResult createComplaint(RequestPostProcessor resident, long conversationId) {
+        return mockMvcTester.post().uri(RESIDENT_COMPLAINTS).with(resident)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(Map.of("conversationId", conversationId)))
             .exchange();
     }
 

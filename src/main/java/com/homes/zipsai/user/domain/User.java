@@ -89,6 +89,10 @@ public class User extends BaseTimeEntity {
         this.email = email;
     }
 
+    public void changePassword(String password) {
+        this.password = password;
+    }
+
     public void agree(Terms terms, boolean agreed) {
         agreements.add(new UserAgreement(this, terms, agreed));
     }

@@ -1,10 +1,12 @@
 package com.homes.zipsai.conversation.ai;
 
+import java.util.List;
+
 public interface AiIndexingClient {
 
-    void index(AiIndexingRequest request);
+    AiIndexingResponse index(AiIndexingRequest request);
 
-    default void cleanup(Long buildingId, String traceId, java.util.List<String> validDocumentIds) {
-        index(new AiIndexingRequest(buildingId, traceId, null, null, null, validDocumentIds));
+    default AiIndexingResponse cleanup(Long buildingId, String traceId, List<String> validDocumentIds) {
+        return index(new AiIndexingRequest(buildingId, traceId, null, null, null, validDocumentIds));
     }
 }

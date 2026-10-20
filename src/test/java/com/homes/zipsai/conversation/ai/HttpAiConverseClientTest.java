@@ -219,6 +219,81 @@ class HttpAiConverseClientTest {
     }
 
     @Test
+    @DisplayName("AI 서버가 민원 초안에 매긴 긴급도를 읽는다")
+    void readsDraftUrgency() {
+        mockRestServiceServer.expect(requestTo(CONVERSE_STREAM_URL))
+            .andRespond(withStream(complete("""
+                {
+                  "code": "ai_response_success",
+                  "turn_id": "%s",
+                  "data": {
+                    "route": "complaint",
+                    "next_complaint_state": null,
+                    "reply": "A동 3층 욕실의 누수 문제로 민원을 접수할까요?",
+                    "result": {
+                      "complaint_draft": {
+                        "issue_type": "leak",
+                        "location": "A동 3층 욕실",
+                        "symptom": "세탁기 밑으로 물이 샘",
+                        "urgency_score": 80,
+                        "is_urgent": true,
+                        "urgency_version": "urgency-llm-v1-phase0"
+                      },
+                      "missing_fields": [],
+                      "citations": []
+                    }
+                  }
+                }
+                """.formatted(TURN_ID)), done()));
+
+        AiConverseResponse response = httpAiConverseClient.converse(request(), delta -> { });
+
+        assertThat(response.complaintDraft().urgencyScore()).isEqualTo(80);
+        assertThat(response.complaintDraft().isUrgent()).isTrue();
+        assertThat(response.complaintDraft().urgencyVersion()).isEqualTo("urgency-llm-v1-phase0");
+        mockRestServiceServer.verify();
+    }
+
+    @Test
+    @DisplayName("최종 응답의 사진 필드가 snake_case 이름으로 와도 읽는다")
+    void readsSnakeCaseImageFields() {
+        mockRestServiceServer.expect(requestTo(CONVERSE_STREAM_URL))
+            .andRespond(withStream(complete("""
+                {
+                  "code": "ai_response_success",
+                  "turn_id": "%s",
+                  "data": {
+                    "route": "complaint",
+                    "next_complaint_state": "collecting",
+                    "reply": "사진 확인했어요. 위치가 어디인가요?",
+                    "result": {
+                      "complaint_draft": {
+                        "issue_type": "leak",
+                        "symptom": "천장 누수",
+                        "attachment_ids": [31, 32],
+                        "representative_attachment_id": 32
+                      },
+                      "missing_fields": ["location"],
+                      "citations": [],
+                      "image_analysis": {
+                        "images": [
+                          { "attachment_id": 31, "summary": "천장 얼룩", "ocr_text": "관리실 010" }
+                        ]
+                      }
+                    }
+                  }
+                }
+                """.formatted(TURN_ID)), done()));
+
+        AiConverseResponse response = httpAiConverseClient.converse(request(), delta -> { });
+
+        assertThat(response.complaintDraft().attachmentIds()).containsExactly(31L, 32L);
+        assertThat(response.imageObservations())
+            .containsExactly(new AiConverseResponse.ImageObservation(31L, "천장 얼룩", "관리실 010"));
+        mockRestServiceServer.verify();
+    }
+
+    @Test
     @DisplayName("오프셋 없는 발생 시각이 담긴 응답도 읽는다")
     void readsResponseWithoutOffsetOnOccurredAt() {
         mockRestServiceServer.expect(requestTo(CONVERSE_STREAM_URL))

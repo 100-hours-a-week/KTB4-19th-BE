@@ -9,7 +9,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 
 import java.util.List;
-import java.util.Set;
 import java.util.function.Consumer;
 
 import org.junit.jupiter.api.AfterEach;
@@ -21,25 +20,23 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.MDC;
-import org.springframework.http.MediaType;
 import org.springframework.test.util.ReflectionTestUtils;
-import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter.DataWithMediaType;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import com.homes.zipsai.common.service.SseService;
+import com.homes.zipsai.common.service.RedisMessagePublisher;
 import com.homes.zipsai.conversation.ai.AiComplaintState;
 import com.homes.zipsai.conversation.ai.AiConverseClient;
 import com.homes.zipsai.conversation.ai.AiConverseRequest;
 import com.homes.zipsai.conversation.ai.AiConverseResponse;
 import com.homes.zipsai.conversation.ai.AiRoute;
+import com.homes.zipsai.conversation.config.ChatbotReplyPubSubProperties;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.conversation.domain.MessageType;
 import com.homes.zipsai.conversation.domain.SenderType;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyDeltaResponse;
-import com.homes.zipsai.conversation.dto.response.ConversationReplyFailedResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyResponse;
 import com.homes.zipsai.conversation.dto.response.MessageResponse;
+import com.homes.zipsai.conversation.event.ChatbotReplyEvent;
 import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.global.logging.StructuredLogger;
 
@@ -50,6 +47,7 @@ class ConversationReplyServiceTest {
     private static final long CONVERSATION_ID = 10L;
     private static final String TURN_ID = "turn-1";
     private static final String LOCK_TOKEN = "lock-token";
+    private static final String CHANNEL = "test:chatbot-reply-events";
 
     @Mock
     ConversationService conversationService;
@@ -58,7 +56,7 @@ class ConversationReplyServiceTest {
     AiConverseClient aiConverseClient;
 
     @Mock
-    SseService sseService;
+    RedisMessagePublisher redisMessagePublisher;
 
     @Mock
     ConversationReplyLock conversationReplyLock;
@@ -67,8 +65,8 @@ class ConversationReplyServiceTest {
 
     @BeforeEach
     void setUp() {
-        conversationReplyService = new ConversationReplyService(conversationService, aiConverseClient, sseService,
-            conversationReplyLock);
+        conversationReplyService = new ConversationReplyService(conversationService, aiConverseClient,
+            redisMessagePublisher, new ChatbotReplyPubSubProperties(CHANNEL), conversationReplyLock);
     }
 
     @AfterEach
@@ -77,7 +75,7 @@ class ConversationReplyServiceTest {
     }
 
     @Test
-    @DisplayName("AI가 답하면 답변을 저장하고 chat-done 이벤트로 보낸다")
+    @DisplayName("AI가 답하면 답변을 저장하고 chat-done 이벤트로 발행한다")
     void savesReplyAndSendsDoneEvent() {
         PendingAiReply pendingAiReply = pendingAiReply();
         AiConverseResponse aiResponse = aiResponse(TURN_ID);
@@ -87,14 +85,12 @@ class ConversationReplyServiceTest {
 
         conversationReplyService.reply(RESIDENT_ID, pendingAiReply, LOCK_TOKEN);
 
-        Set<DataWithMediaType> event = sentEvent();
-        assertThat(eventName(event)).isEqualTo(ConversationReplyService.REPLY_EVENT);
-        assertThat(eventData(event)).isEqualTo(reply);
+        assertThat(publishedEvent()).isEqualTo(ChatbotReplyEvent.of(RESIDENT_ID, reply));
         then(conversationService).should(never()).discardUnansweredMessage(any());
     }
 
     @Test
-    @DisplayName("AI가 보낸 답변 조각을 순서 번호와 함께 chat-delta 이벤트로 보낸 뒤 chat-done을 보낸다")
+    @DisplayName("AI가 보낸 답변 조각을 순서 번호와 함께 chat-delta 이벤트로 발행한 뒤 chat-done을 발행한다")
     void sendsReplyDeltasInOrderBeforeDoneEvent() {
         PendingAiReply pendingAiReply = pendingAiReply();
         AiConverseResponse aiResponse = aiResponse(TURN_ID);
@@ -104,22 +100,19 @@ class ConversationReplyServiceTest {
             onReplyDelta.accept("가 ");
             return aiResponse;
         });
-        given(conversationService.saveAiReply(pendingAiReply, aiResponse))
-            .willReturn(new ConversationReplyResponse(CONVERSATION_ID, assistantMessage(), null));
+        ConversationReplyResponse reply = new ConversationReplyResponse(CONVERSATION_ID, assistantMessage(), null);
+        given(conversationService.saveAiReply(pendingAiReply, aiResponse)).willReturn(reply);
 
         conversationReplyService.reply(RESIDENT_ID, pendingAiReply, LOCK_TOKEN);
 
-        List<Set<DataWithMediaType>> events = sentEvents(3);
-        assertThat(events).extracting(ConversationReplyServiceTest::eventName).containsExactly(
-            ConversationReplyService.REPLY_DELTA_EVENT, ConversationReplyService.REPLY_DELTA_EVENT,
-            ConversationReplyService.REPLY_EVENT);
-        assertThat(events.subList(0, 2)).extracting(ConversationReplyServiceTest::eventData).containsExactly(
-            new ConversationReplyDeltaResponse(CONVERSATION_ID, 1, "위치"),
-            new ConversationReplyDeltaResponse(CONVERSATION_ID, 2, "가 "));
+        assertThat(publishedEvents(3)).containsExactly(
+            ChatbotReplyEvent.of(RESIDENT_ID, new ConversationReplyDeltaResponse(CONVERSATION_ID, 1, "위치")),
+            ChatbotReplyEvent.of(RESIDENT_ID, new ConversationReplyDeltaResponse(CONVERSATION_ID, 2, "가 ")),
+            ChatbotReplyEvent.of(RESIDENT_ID, reply));
     }
 
     @Test
-    @DisplayName("AI 호출이 실패하면 답변받지 못한 메시지를 지우고 오류 코드를 chat-error 이벤트로 보낸다")
+    @DisplayName("AI 호출이 실패하면 답변받지 못한 메시지를 지우고 오류 코드를 chat-error 이벤트로 발행한다")
     void discardsUnansweredMessageAndSendsErrorEventWhenAiFails() {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willThrow(new AiUnavailableException());
@@ -128,9 +121,9 @@ class ConversationReplyServiceTest {
 
         then(conversationService).should().discardUnansweredMessage(pendingAiReply);
         then(conversationService).should(never()).saveAiReply(any(), any());
-        Set<DataWithMediaType> event = sentEvent();
-        assertThat(eventName(event)).isEqualTo(ConversationReplyService.REPLY_FAILED_EVENT);
-        assertThat(eventData(event)).isInstanceOf(ConversationReplyFailedResponse.class)
+        ChatbotReplyEvent event = publishedEvent();
+        assertThat(event.eventType()).isEqualTo(ChatbotReplyEvent.Type.FAILED);
+        assertThat(event.failure())
             .hasFieldOrPropertyWithValue("conversationId", CONVERSATION_ID)
             .hasFieldOrPropertyWithValue("code", new AiUnavailableException().code);
     }
@@ -156,7 +149,7 @@ class ConversationReplyServiceTest {
 
         then(conversationService).should().discardUnansweredMessage(pendingAiReply);
         then(conversationService).should(never()).saveAiReply(any(), any());
-        assertThat(eventData(sentEvent())).hasFieldOrPropertyWithValue("code", "INTERNAL_SERVER_ERROR");
+        assertThat(publishedEvent().failure()).hasFieldOrPropertyWithValue("code", "INTERNAL_SERVER_ERROR");
     }
 
     @Test
@@ -169,9 +162,9 @@ class ConversationReplyServiceTest {
         conversationReplyService.reply(RESIDENT_ID, pendingAiReply, LOCK_TOKEN);
 
         then(conversationService).should().discardUnansweredMessage(pendingAiReply);
-        Set<DataWithMediaType> event = sentEvent();
-        assertThat(eventName(event)).isEqualTo(ConversationReplyService.REPLY_FAILED_EVENT);
-        assertThat(eventData(event)).hasFieldOrPropertyWithValue("code", "INTERNAL_SERVER_ERROR");
+        ChatbotReplyEvent event = publishedEvent();
+        assertThat(event.eventType()).isEqualTo(ChatbotReplyEvent.Type.FAILED);
+        assertThat(event.failure()).hasFieldOrPropertyWithValue("code", "INTERNAL_SERVER_ERROR");
     }
 
     @Test
@@ -185,36 +178,16 @@ class ConversationReplyServiceTest {
         then(conversationReplyLock).should().release(CONVERSATION_ID, LOCK_TOKEN);
     }
 
-    private Set<DataWithMediaType> sentEvent() {
-        ArgumentCaptor<SseEmitter.SseEventBuilder> eventCaptor =
-            ArgumentCaptor.forClass(SseEmitter.SseEventBuilder.class);
-        then(sseService).should().send(eq(RESIDENT_ID), eventCaptor.capture());
-        return eventCaptor.getValue().build();
+    private ChatbotReplyEvent publishedEvent() {
+        ArgumentCaptor<ChatbotReplyEvent> eventCaptor = ArgumentCaptor.forClass(ChatbotReplyEvent.class);
+        then(redisMessagePublisher).should().publish(eq(CHANNEL), eventCaptor.capture());
+        return eventCaptor.getValue();
     }
 
-    private List<Set<DataWithMediaType>> sentEvents(int count) {
-        ArgumentCaptor<SseEmitter.SseEventBuilder> eventCaptor =
-            ArgumentCaptor.forClass(SseEmitter.SseEventBuilder.class);
-        then(sseService).should(times(count)).send(eq(RESIDENT_ID), eventCaptor.capture());
-        return eventCaptor.getAllValues().stream()
-            .map(SseEmitter.SseEventBuilder::build)
-            .toList();
-    }
-
-    private static String eventName(Set<DataWithMediaType> event) {
-        return event.iterator().next().getData().toString().lines()
-            .filter(line -> line.startsWith("event:"))
-            .map(line -> line.substring("event:".length()))
-            .findFirst()
-            .orElseThrow();
-    }
-
-    private static Object eventData(Set<DataWithMediaType> event) {
-        return event.stream()
-            .filter(part -> MediaType.APPLICATION_JSON.equals(part.getMediaType()))
-            .map(DataWithMediaType::getData)
-            .findFirst()
-            .orElseThrow();
+    private List<ChatbotReplyEvent> publishedEvents(int count) {
+        ArgumentCaptor<ChatbotReplyEvent> eventCaptor = ArgumentCaptor.forClass(ChatbotReplyEvent.class);
+        then(redisMessagePublisher).should(times(count)).publish(eq(CHANNEL), eventCaptor.capture());
+        return eventCaptor.getAllValues();
     }
 
     private static PendingAiReply pendingAiReply() {

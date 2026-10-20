@@ -17,20 +17,19 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.homes.zipsai.building.domain.Building;
 import com.homes.zipsai.building.domain.RuleDocument;
 import com.homes.zipsai.building.dto.RuleDocumentCreateRequest;
 import com.homes.zipsai.building.repository.BuildingRepository;
+import com.homes.zipsai.building.repository.RuleDocumentIndexingOutboxRepository;
 import com.homes.zipsai.building.repository.RuleDocumentRepository;
 import com.homes.zipsai.common.config.StorageProperties;
 import com.homes.zipsai.common.domain.File;
 import com.homes.zipsai.common.repository.FileRepository;
 import com.homes.zipsai.common.service.PdfFixtures;
 import com.homes.zipsai.common.service.S3StorageService;
-import com.homes.zipsai.conversation.ai.AiIndexingClient;
 import com.homes.zipsai.global.exception.ValidationFailedException;
 import com.homes.zipsai.user.domain.User;
 
@@ -56,7 +55,7 @@ class RuleDocumentServiceEncryptedPdfTest {
     private S3StorageService s3StorageService;
 
     @Mock
-    private ObjectProvider<AiIndexingClient> aiIndexingClientProvider;
+    private RuleDocumentIndexingOutboxRepository outboxRepository;
 
     private RuleDocumentService ruleDocumentService;
     private User manager;
@@ -65,7 +64,7 @@ class RuleDocumentServiceEncryptedPdfTest {
     @BeforeEach
     void setUp() {
         ruleDocumentService = new RuleDocumentService(documentRepository, buildingRepository, fileRepository,
-            new StorageProperties(null, null, "test-bucket", 0, 0), s3StorageService, aiIndexingClientProvider);
+            new StorageProperties(null, null, "test-bucket", 0, 0), s3StorageService, outboxRepository);
 
         manager = new User("manager@zipsai.com", "password", "관리자", "01012345678");
         ReflectionTestUtils.setField(manager, "id", MANAGER_ID);
@@ -86,7 +85,7 @@ class RuleDocumentServiceEncryptedPdfTest {
             new RuleDocumentCreateRequest(ATTACHMENT_ID, "관리규약")));
 
         then(documentRepository).should(never()).save(any());
-        then(aiIndexingClientProvider).should(never()).getIfAvailable();
+        then(outboxRepository).should(never()).save(any());
     }
 
     @Test
@@ -137,7 +136,7 @@ class RuleDocumentServiceEncryptedPdfTest {
 
         assertThat(document.getAttachment().getId()).isEqualTo(ATTACHMENT_ID);
         assertThat(document.getVersion()).isEqualTo(1);
-        then(aiIndexingClientProvider).should(never()).getIfAvailable();
+        then(outboxRepository).should(never()).save(any());
     }
 
     private void assertRejectedAsEncrypted(Runnable action) {

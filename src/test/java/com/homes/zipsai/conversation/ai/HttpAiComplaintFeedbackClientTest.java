@@ -25,6 +25,7 @@ class HttpAiComplaintFeedbackClientTest {
 
     private static final String BASE_URL = "http://ai.test";
     private static final String FEEDBACK_PATH = "/api/v2/ai/indexing/comment";
+    private static final String DELETE_PATH = "/api/v2/ai/indexing/comment/delete";
     private static final String TRACE_ID = "request-trace-id";
 
     private MockRestServiceServer mockRestServiceServer;
@@ -34,7 +35,7 @@ class HttpAiComplaintFeedbackClientTest {
     void setUp() {
         RestClient.Builder builder = RestClient.builder();
         mockRestServiceServer = MockRestServiceServer.bindTo(builder).build();
-        client = new HttpAiComplaintFeedbackClient(builder, BASE_URL, FEEDBACK_PATH, "");
+        client = new HttpAiComplaintFeedbackClient(builder, BASE_URL, FEEDBACK_PATH, DELETE_PATH, "");
     }
 
     @Test
@@ -71,6 +72,24 @@ class HttpAiComplaintFeedbackClientTest {
             .andRespond(withStatus(HttpStatus.UNPROCESSABLE_CONTENT));
 
         assertThatThrownBy(() -> client.send(request())).isInstanceOf(InternalServerException.class);
+    }
+
+    @Test
+    @DisplayName("댓글 삭제 요청을 명세 형식으로 보내고 202 빈 응답을 접수 완료로 처리한다")
+    void sendsDeleteRequest() {
+        mockRestServiceServer.expect(requestTo(BASE_URL + DELETE_PATH))
+            .andExpect(method(HttpMethod.POST))
+            .andExpect(jsonPath("$.trace_id").value(TRACE_ID))
+            .andExpect(jsonPath("$.items[0].building_id").value(101))
+            .andExpect(jsonPath("$.items[0].complaint_detail_id").value(9001))
+            .andExpect(jsonPath("$.items[0].updated_at").value("2026-10-16T09:00:00+09:00"))
+            .andRespond(withStatus(HttpStatus.ACCEPTED));
+
+        assertThatCode(() -> client.delete(new AiComplaintFeedbackDeleteRequest(TRACE_ID,
+            List.of(new AiComplaintFeedbackDeleteRequest.Item(101L, 9001L,
+                OffsetDateTime.parse("2026-10-16T09:00:00+09:00")))))).doesNotThrowAnyException();
+
+        mockRestServiceServer.verify();
     }
 
     private static AiComplaintFeedbackBatchRequest request() {

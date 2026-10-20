@@ -458,4 +458,96 @@ class AuthApiTests {
                 .andExpect(jsonPath("$.data.accessToken").doesNotExist())
                 .andExpect(header().doesNotExist("Set-Cookie"));
     }
+
+    private ResultActions changePassword(MvcResult session, String body) throws Exception {
+        return mvc.perform(
+                patch("/api/v1/auth/password")
+                        .header("Authorization", "Bearer " + access(session))
+                        .cookie(refresh(session))
+                        .contentType("application/json")
+                        .content(body)
+        );
+    }
+
+    private ResultActions loginWith(String email, String password) throws Exception {
+        return mvc.perform(
+                post("/api/v1/auth/login")
+                        .contentType("application/json")
+                        .content("""
+                                {"email":"%s","password":"%s"}
+                                """.formatted(email, password))
+        );
+    }
+
+    @Test
+    void passwordChangeKeepsCurrentSessionAndRevokesOtherSessions() throws Exception {
+        String email = email();
+        signup(email);
+        MvcResult current = login(email);
+        MvcResult other = login(email);
+
+        changePassword(current, """
+                {"currentPassword":"Asdf!12345","newPassword":"Qwer!67890","newPasswordConfirm":"Qwer!67890"}
+                """).andExpect(status().isOk());
+
+        loginWith(email, "Asdf!12345").andExpect(status().isUnauthorized());
+        loginWith(email, "Qwer!67890").andExpect(status().isOk());
+        mvc.perform(post("/api/v1/auth/reissue").cookie(refresh(current)))
+                .andExpect(status().isOk());
+        mvc.perform(post("/api/v1/auth/reissue").cookie(refresh(other)))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void passwordChangeRejectsWrongCurrentPasswordAndKeepsPassword() throws Exception {
+        String email = email();
+        signup(email);
+        MvcResult session = login(email);
+
+        changePassword(session, """
+                {"currentPassword":"Wrong!12345","newPassword":"Qwer!67890","newPasswordConfirm":"Qwer!67890"}
+                """).andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.error.details.violations[0].field").value("currentPassword"));
+
+        loginWith(email, "Asdf!12345").andExpect(status().isOk());
+    }
+
+    @Test
+    void passwordChangeValidatesNewPassword() throws Exception {
+        String email = email();
+        signup(email);
+        MvcResult session = login(email);
+
+        changePassword(session, """
+                {"currentPassword":"Asdf!12345","newPassword":"short","newPasswordConfirm":"short"}
+                """).andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error.details.violations[0].field").value("newPassword"));
+        changePassword(session, """
+                {"currentPassword":"Asdf!12345","newPassword":"Qwer!67890","newPasswordConfirm":"Qwer!67891"}
+                """).andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error.details.violations[0].field").value("newPasswordConfirm"));
+        changePassword(session, """
+                {"currentPassword":"Asdf!12345","newPassword":"Asdf!12345","newPasswordConfirm":"Asdf!12345"}
+                """).andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error.details.violations[0].field").value("newPassword"));
+        changePassword(session, """
+                {"newPassword":"Qwer!67890","newPasswordConfirm":"Qwer!67890"}
+                """).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("MISSING_REQUIRED_FIELD"));
+
+        loginWith(email, "Asdf!12345").andExpect(status().isOk());
+    }
+
+    @Test
+    void passwordChangeRequiresAuthentication() throws Exception {
+        mvc.perform(
+                patch("/api/v1/auth/password")
+                        .contentType("application/json")
+                        .content("""
+                                {"currentPassword":"Asdf!12345","newPassword":"Qwer!67890",
+                                 "newPasswordConfirm":"Qwer!67890"}
+                                """)
+        ).andExpect(status().isUnauthorized());
+    }
 }

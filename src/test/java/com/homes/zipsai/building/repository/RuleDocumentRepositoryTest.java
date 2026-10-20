@@ -2,6 +2,7 @@ package com.homes.zipsai.building.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import jakarta.persistence.EntityManagerFactory;
@@ -15,9 +16,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jpa.test.autoconfigure.TestEntityManager;
+import org.springframework.data.domain.PageRequest;
 
 import com.homes.zipsai.building.domain.Building;
 import com.homes.zipsai.building.domain.RuleDocument;
+import com.homes.zipsai.building.domain.RuleDocumentIndexingOutbox;
+import com.homes.zipsai.building.domain.RuleDocumentIndexingStatus;
 import com.homes.zipsai.common.domain.File;
 import com.homes.zipsai.user.domain.User;
 
@@ -28,6 +32,9 @@ class RuleDocumentRepositoryTest {
 
     @Autowired
     RuleDocumentRepository documentRepository;
+
+    @Autowired
+    RuleDocumentIndexingOutboxRepository outboxRepository;
 
     @Autowired
     TestEntityManager entityManager;
@@ -71,5 +78,48 @@ class RuleDocumentRepositoryTest {
         List<Long> ids = documentRepository.findValidIdsByBuildingId(building.getId());
 
         assertThat(ids).hasSize(DOCUMENT_COUNT);
+    }
+
+    @Test
+    @DisplayName("색인 결과는 같은 버전일 때만 저장하고 문서 수정 시각은 바꾸지 않는다")
+    void updatesIndexingResultOnlyForSameVersion() {
+        RuleDocument document = documentRepository.findValidIdsByBuildingId(building.getId()).stream()
+            .findFirst().flatMap(documentRepository::findById).orElseThrow();
+        LocalDateTime updatedAt = document.getUpdatedAt();
+        entityManager.clear();
+
+        int stale = documentRepository.updateIndexingResult(document.getId(), 2,
+            RuleDocumentIndexingStatus.INDEXED, null);
+        int updated = documentRepository.updateIndexingResult(document.getId(), 1,
+            RuleDocumentIndexingStatus.FAILED, "PARSE_FAILED");
+
+        RuleDocument reloaded = documentRepository.findById(document.getId()).orElseThrow();
+        assertThat(stale).isZero();
+        assertThat(updated).isOne();
+        assertThat(reloaded.getIndexingStatus()).isEqualTo(RuleDocumentIndexingStatus.FAILED);
+        assertThat(reloaded.getIndexingError()).isEqualTo("PARSE_FAILED");
+        assertThat(reloaded.getUpdatedAt()).isEqualTo(updatedAt);
+    }
+
+    @Test
+    @DisplayName("보낼 시각이 된 대기 중 색인만 오래된 순으로 조회한다")
+    void findsDueIndexingOutboxInOrder() {
+        LocalDateTime now = LocalDateTime.of(2026, 10, 19, 12, 0);
+        RuleDocumentIndexingOutbox first = outboxRepository.save(
+            RuleDocumentIndexingOutbox.cleanup(building.getId(), "trace-1", now.minusMinutes(2)));
+        RuleDocumentIndexingOutbox second = outboxRepository.save(
+            RuleDocumentIndexingOutbox.cleanup(building.getId(), "trace-2", now.minusMinutes(1)));
+        RuleDocumentIndexingOutbox later = outboxRepository.save(
+            RuleDocumentIndexingOutbox.cleanup(building.getId(), "trace-3", now.plusMinutes(1)));
+        RuleDocumentIndexingOutbox done = RuleDocumentIndexingOutbox.cleanup(building.getId(), "trace-4",
+            now.minusMinutes(3));
+        done.markDone(now);
+        outboxRepository.save(done);
+        entityManager.flush();
+
+        List<Long> ids = outboxRepository.findDueIds(now, PageRequest.of(0, 10));
+
+        assertThat(ids).containsExactly(first.getId(), second.getId());
+        assertThat(ids).doesNotContain(later.getId(), done.getId());
     }
 }

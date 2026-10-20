@@ -30,8 +30,12 @@ import io.micrometer.core.instrument.Timer;
 public class OutboxWorkerMetrics {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(OutboxWorkerMetrics.class);
-    private static final String COUNT_EVENTS_BY_STATUS = """
-        SELECT COUNT(*) FROM Migration_outbox_events WHERE direction = :direction AND status = :status
+    private static final String COUNT_UNPROCESSED_EVENTS_BY_STATUS = """
+        SELECT COUNT(*) FROM Migration_outbox_events
+        WHERE direction = :direction AND processed_at IS NULL AND status = :status
+        """;
+    private static final String COUNT_PROCESSED_EVENTS = """
+        SELECT COUNT(*) FROM Migration_outbox_events WHERE direction = :direction AND processed_at IS NOT NULL
         """;
     private static final String FIND_OLDEST_PENDING_CREATED_AT = """
         SELECT MIN(created_at) FROM Migration_outbox_events
@@ -127,7 +131,13 @@ public class OutboxWorkerMetrics {
     }
 
     private long countEvents(JdbcClient source, OutboxDirection direction, OutboxStatus status) {
-        return source.sql(COUNT_EVENTS_BY_STATUS)
+        if (status == OutboxStatus.COMPLETED) {
+            return source.sql(COUNT_PROCESSED_EVENTS)
+                .param("direction", direction.name())
+                .query(Long.class)
+                .single();
+        }
+        return source.sql(COUNT_UNPROCESSED_EVENTS_BY_STATUS)
             .param("direction", direction.name())
             .param("status", status.name())
             .query(Long.class)

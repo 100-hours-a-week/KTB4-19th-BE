@@ -134,6 +134,31 @@ public class AuthService {
         });
     }
 
+    public void changePassword(AuthPrincipal principal, String currentPasswordInput, String newPasswordInput,
+                               String newPasswordConfirm, String refreshToken) {
+        if (currentPasswordInput == null || currentPasswordInput.isBlank()) {
+            throw UserInput.missing("currentPassword");
+        }
+        String newPassword = UserInput.password(newPasswordInput, "newPassword");
+        if (!newPassword.equals(newPasswordConfirm)) {
+            throw UserInput.invalid("newPasswordConfirm", Reason.PASSWORD_CONFIRMATION_MISMATCH);
+        }
+        if (newPassword.equals(currentPasswordInput)) {
+            throw UserInput.invalid("newPassword", Reason.SAME_AS_CURRENT_PASSWORD);
+        }
+        User user = userRepository.findById(principal.userId()).orElseThrow(UnauthorizedException::new);
+        if (!passwordEncoder.matches(currentPasswordInput, user.getPassword())) {
+            throw UserInput.invalid("currentPassword", Reason.CURRENT_PASSWORD_MISMATCH);
+        }
+        String hash = passwordEncoder.encode(newPassword);
+        String keepHash = refreshToken == null || refreshToken.isBlank() ? null : TokenService.hash(refreshToken);
+        tx.executeWithoutResult(status -> {
+            User target = userRepository.findById(user.getId()).orElseThrow(UnauthorizedException::new);
+            target.changePassword(hash);
+            refreshSessionRepository.revokeOtherSessions(target.getId(), keepHash);
+        });
+    }
+
     public void logout(AuthPrincipal principal, String refreshToken) {
         if (refreshToken == null || refreshToken.isBlank()) {
             return;

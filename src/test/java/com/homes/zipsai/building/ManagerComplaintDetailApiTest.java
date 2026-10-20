@@ -81,7 +81,7 @@ class ManagerComplaintDetailApiTest {
     @Test
     void returnsComplaintDetailForTheAuthenticatedManagersBuilding() throws Exception {
         ManagerBuilding owner = managerBuilding();
-        Complaint complaint = complaint(owner.building(), owner.room(), "천장 누수", 9);
+        Complaint complaint = complaint(owner.building(), owner.room(), "천장 누수", 9, true);
         detail(complaint);
 
         mvc.perform(get(COMPLAINTS + complaint.getId()).with(manager(owner.manager().getId())))
@@ -109,7 +109,7 @@ class ManagerComplaintDetailApiTest {
     void rejectsComplaintFromAnotherManagersBuilding() throws Exception {
         ManagerBuilding owner = managerBuilding();
         ManagerBuilding other = managerBuilding();
-        Complaint complaint = complaint(other.building(), other.room(), "다른 건물 민원", 5);
+        Complaint complaint = complaint(other.building(), other.room(), "다른 건물 민원", 5, false);
         detail(complaint);
 
         mvc.perform(get(COMPLAINTS + complaint.getId()).with(manager(owner.manager().getId())))
@@ -153,7 +153,7 @@ class ManagerComplaintDetailApiTest {
         return new ManagerBuilding(manager, building, room);
     }
 
-    private Complaint complaint(Building building, Room room, String title, int urgency) {
+    private Complaint complaint(Building building, Room room, String title, int urgency, Boolean urgent) {
         User resident = user(UserRole.RESIDENT);
         Conversation conversation = conversationRepository.save(Conversation.builder()
             .user(resident)
@@ -166,6 +166,7 @@ class ManagerComplaintDetailApiTest {
             .building(building)
             .title(title)
             .urgency(urgency)
+            .urgent(urgent)
             .roomNo(room.getRoomNo())
             .build());
     }
