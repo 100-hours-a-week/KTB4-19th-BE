@@ -5,13 +5,13 @@ name: Backend CD V2 ECS
 # 별도 JSON/SH 없이 이 Workflow만 추가한다. 일반 앱 설정은 아래 APP_SETTINGS에서 관리한다.
 # workflow_run 자동 실행을 위해 이 파일이 기본 브랜치에도 있어야 한다.
 # 적용 전 GitHub Environments staging / production을 생성한다.
-# production에는 Required reviewers와 main 배포 브랜치 제한을 설정한다.
+# 사용자 결정: staging/production 모두 Required reviewers·Wait timer를 사용하지 않는다.
 # 환경별 Variables:
 #   AWS_BACKEND_CD_ROLE_ARN, ECS_CLUSTER_NAME,
 #   ECS_API_SERVICE_NAME, ECS_WORKER_SERVICE_NAME, API_HEALTH_URL
 # OIDC Role Trust Policy의 sub는 각각 아래 GitHub Environment를 허용해야 한다.
-#   repo:100-hours-a-week/KTB4-19th-BE:environment:staging
-#   repo:100-hours-a-week/KTB4-19th-BE:environment:production
+#   repo:100-hours-a-week@167328634/KTB4-19th-BE@1344653975:environment:staging
+#   repo:100-hours-a-week@167328634/KTB4-19th-BE@1344653975:environment:production
 # IAM: 대상 ECS 조회/Task Definition 등록/Service 갱신, 기존 Task Role의
 # iam:PassRole, ECR DescribeImages, 검증 이력 경로의 SSM 읽기/쓰기가 필요하다.
 # Production Role은 staging 검증 이력 읽기만 허용한다. PR에는 AWS 권한을 주지 않는다.
@@ -99,7 +99,7 @@ jobs:
     needs: select
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    # 승인·환경별 Variable·OIDC Environment subject는 이 Job에 적용된다.
+    # 환경별 Variable·OIDC Environment subject는 이 Job에 적용된다. 별도 승인 규칙은 사용하지 않는다.
     environment: ${{ needs.select.outputs.environment }}
     # 같은 환경의 API/Worker 배포를 직렬화하고 진행 중 배포는 취소하지 않는다.
     concurrency:
@@ -261,20 +261,67 @@ jobs:
             exit 0
           fi
 
-          # waiter는 자동 Rollback 후에도 성공할 수 있다. 새 Revision인지 별도 확인한다.
-          if ! aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$service"; then
+          # BEGIN requested-revision-wait
+          # services-stable은 rolloutState를 확인하지 않는다. 단발 jq 검사 대신
+          # 새 Revision의 COMPLETED까지 최대 약 10분, 15초 간격으로 확인한다.
+          wait_for_requested_revision() {
+            local deployment_deadline=$((SECONDS + 600))
+            local observed_requested_revision=false
+            while (( SECONDS < deployment_deadline )); do
+              if ! aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$service" \
+                --cli-connect-timeout 5 --cli-read-timeout 20 > "$task_dir/status.json"; then
+                echo 'ECS 상태 조회 실패. 성공으로 간주하지 않습니다.' >&2
+                return 1
+              fi
+              if ! jq -e '.failures | length == 0' "$task_dir/status.json" > /dev/null ||
+                ! jq -e '.services | length == 1' "$task_dir/status.json" > /dev/null; then
+                echo 'ECS Service 조회 결과가 유효하지 않습니다.' >&2
+                return 1
+              fi
+              # 설정된 Task 수가 중간에 바뀌면 다른 운영 변경을 덮어쓰지 않는다.
+              if ! jq -e --argjson desired "$desired_count" '.services[0] |
+                .status == "ACTIVE" and .desiredCount == $desired and $desired > 0' \
+                "$task_dir/status.json" > /dev/null; then
+                echo 'Service 상태 또는 desiredCount가 변경돼 검증을 중단합니다.' >&2
+                return 1
+              fi
+              if jq -e --arg revision "$revision" 'any(.services[0].deployments[];
+                .taskDefinition == $revision and .rolloutState == "FAILED")' \
+                "$task_dir/status.json" > /dev/null; then
+                echo '새 Revision 배포가 FAILED입니다. ECS Circuit Breaker/이벤트를 확인하세요.' >&2
+                return 1
+              fi
+              if jq -e --arg revision "$revision" '.services[0].taskDefinition == $revision' \
+                "$task_dir/status.json" > /dev/null; then
+                observed_requested_revision=true
+              elif [[ "$observed_requested_revision" == true ]]; then
+                echo 'Service가 새 Revision에서 다른 Revision으로 변경됐습니다. 롤백/다른 배포를 확인하세요.' >&2
+                return 1
+              fi
+              if jq -e --arg revision "$revision" '.services[0] |
+                .taskDefinition == $revision and
+                (.deployments | length == 1) and
+                .deployments[0].taskDefinition == $revision and
+                .deployments[0].status == "PRIMARY" and
+                .deployments[0].rolloutState == "COMPLETED" and
+                .runningCount == .desiredCount and .pendingCount == 0' \
+                "$task_dir/status.json" > /dev/null; then
+                return 0
+              fi
+              jq -c '.services[0] | {taskDefinition,desiredCount,runningCount,pendingCount,
+                deployments:[.deployments[] | {taskDefinition,status,rolloutState}]}' \
+                "$task_dir/status.json"
+              sleep 15
+            done
+            echo '새 Revision 완료 확인 시간 초과(약 10분). 배포는 계속 진행 중일 수 있으므로 상태를 확인하세요.' >&2
+            return 1
+          }
+          if ! wait_for_requested_revision; then
             aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$service" \
-              --query 'services[0].{Deployments:deployments,Events:events[0:10]}'
-            echo '배포 안정화 실패. Circuit Breaker 및 ECS 이벤트를 확인하세요.' >&2
+              --query 'services[0].{Deployments:deployments,Events:events[0:10]}' || true
             exit 1
           fi
-          aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$service" > "$task_dir/status.json"
-          jq -e --arg revision "$revision" '.services[0] |
-            .taskDefinition == $revision and
-            (.deployments | length == 1) and
-            .deployments[0].rolloutState == "COMPLETED" and
-            .runningCount == .desiredCount and .pendingCount == 0' \
-            "$task_dir/status.json" > /dev/null
+          # END requested-revision-wait
 
           if [[ "$SERVICE_ROLE" == api ]]; then
             # ECS/ALB 정상화 뒤 외부 readiness 응답까지 확인한다.
