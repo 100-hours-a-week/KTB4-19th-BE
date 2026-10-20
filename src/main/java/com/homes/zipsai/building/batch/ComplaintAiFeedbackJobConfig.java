@@ -2,6 +2,7 @@ package com.homes.zipsai.building.batch;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -135,7 +136,7 @@ public class ComplaintAiFeedbackJobConfig {
 
             ResultTally tally = new ResultTally();
             for (FeedbackItem item : chunk) {
-                if (tally.handled(response, item.id(), traceId, "전송")) {
+                if (tally.handled(response, item.id(), item.updatedAt(), traceId, "전송")) {
                     complaintDetailRepository.markAiFeedbackSent(item.id(), item.updatedAt());
                 }
             }
@@ -182,7 +183,7 @@ public class ComplaintAiFeedbackJobConfig {
             int handled = 0;
             int marked = 0;
             for (AiFeedbackDeletionTarget target : chunk) {
-                if (tally.handled(response, target.complaintDetailId(), traceId, "삭제")) {
+                if (tally.handled(response, target.complaintDetailId(), target.updatedAt(), traceId, "삭제")) {
                     handled++;
                     marked += complaintDetailRepository.markAiFeedbackDeleted(
                             target.complaintDetailId(), target.updatedAt());
@@ -212,9 +213,11 @@ public class ComplaintAiFeedbackJobConfig {
         private int skipped;
         private int failed;
         private int missing;
+        private int versionMismatch;
         private int acceptedWithoutResult;
 
-        boolean handled(AiComplaintFeedbackResponse response, long complaintDetailId, String traceId, String action) {
+        boolean handled(AiComplaintFeedbackResponse response, long complaintDetailId, LocalDateTime sentVersion,
+                        String traceId, String action) {
             if (response == null || response.results().isEmpty()) {
                 acceptedWithoutResult++;
                 return true;
@@ -227,6 +230,14 @@ public class ComplaintAiFeedbackJobConfig {
                 return false;
             }
             AiComplaintFeedbackResponse.Result result = found.get();
+            OffsetDateTime expected = TimeUtils.toOffsetDateTime(sentVersion);
+            if (result.updatedAt() != null && !result.updatedAt().isEqual(expected)) {
+                versionMismatch++;
+                LOGGER.warn("AI 응답의 민원 답변 {} 버전이 보낸 버전과 달라 다음 실행에서 다시 보냅니다. traceId={}, "
+                                + "complaintDetailId={}, sent={}, received={}",
+                        action, traceId, complaintDetailId, expected, result.updatedAt());
+                return false;
+            }
             if (AiComplaintFeedbackResponse.STATUS_SUCCEEDED.equals(result.status())) {
                 succeeded++;
                 return true;
@@ -247,7 +258,7 @@ public class ComplaintAiFeedbackJobConfig {
         @Override
         public String toString() {
             return "succeeded=" + succeeded + ", skipped=" + skipped + ", failed=" + failed + ", missing=" + missing
-                    + ", acceptedWithoutResult=" + acceptedWithoutResult;
+                    + ", versionMismatch=" + versionMismatch + ", acceptedWithoutResult=" + acceptedWithoutResult;
         }
     }
 }

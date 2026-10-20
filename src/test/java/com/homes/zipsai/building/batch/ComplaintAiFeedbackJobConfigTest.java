@@ -9,6 +9,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.stream.IntStream;
 
@@ -47,6 +49,7 @@ import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.global.exception.InternalServerException;
+import com.homes.zipsai.global.util.TimeUtils;
 import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.repository.UserRepository;
 
@@ -404,6 +407,57 @@ class ComplaintAiFeedbackJobConfigTest {
         jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
 
         assertThat(sentAt(detail)).isNull();
+    }
+
+    @Test
+    @DisplayName("AI 응답의 updated_at이 보낸 버전과 다르면 전송 완료로 남기지 않는다")
+    void doesNotMarkSentWhenVersionDiffers() throws Exception {
+        ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
+        OffsetDateTime otherVersion = sentVersion(detail).minusMinutes(1);
+        given(aiComplaintFeedbackClient.send(any(AiComplaintFeedbackBatchRequest.class))).willAnswer(invocation ->
+            results(invocation.<AiComplaintFeedbackBatchRequest>getArgument(0).traceId(),
+                new AiComplaintFeedbackResponse.Result(detail.getId(), otherVersion, "succeeded", null)));
+
+        jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
+
+        assertThat(sentAt(detail)).isNull();
+    }
+
+    @Test
+    @DisplayName("AI 응답의 updated_at이 다른 시간대여도 같은 시각이면 보낸 버전으로 인정한다")
+    void acceptsSameInstantInOtherOffset() throws Exception {
+        ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
+        OffsetDateTime utcVersion = sentVersion(detail).withOffsetSameInstant(ZoneOffset.UTC);
+        given(aiComplaintFeedbackClient.send(any(AiComplaintFeedbackBatchRequest.class))).willAnswer(invocation ->
+            results(invocation.<AiComplaintFeedbackBatchRequest>getArgument(0).traceId(),
+                new AiComplaintFeedbackResponse.Result(detail.getId(), utcVersion, "succeeded", null)));
+
+        jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
+
+        assertThat(sentAt(detail)).isNotNull();
+    }
+
+    @Test
+    @DisplayName("AI 삭제 응답의 updated_at이 삭제 요청 버전과 다르면 삭제 완료로 남기지 않는다")
+    void keepsSentRecordWhenDeleteVersionDiffers() throws Exception {
+        ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
+        jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
+        ComplaintDetail reloaded = complaintDetailRepository.findById(detail.getId()).orElseThrow();
+        reloaded.deleteComment();
+        complaintDetailRepository.saveAndFlush(reloaded);
+        OffsetDateTime otherVersion = sentVersion(detail).plusSeconds(1);
+        given(aiComplaintFeedbackClient.delete(any(AiComplaintFeedbackDeleteRequest.class))).willAnswer(invocation ->
+            results(invocation.<AiComplaintFeedbackDeleteRequest>getArgument(0).traceId(),
+                new AiComplaintFeedbackResponse.Result(detail.getId(), otherVersion, "succeeded", null)));
+
+        jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
+
+        assertThat(sentAt(detail)).isNotNull();
+    }
+
+    private OffsetDateTime sentVersion(ComplaintDetail detail) {
+        return TimeUtils.toOffsetDateTime(complaintDetailRepository.findById(detail.getId()).orElseThrow()
+            .getUpdatedAt());
     }
 
     private static AiComplaintFeedbackResponse results(String traceId, AiComplaintFeedbackResponse.Result... results) {
