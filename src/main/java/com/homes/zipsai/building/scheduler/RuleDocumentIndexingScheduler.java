@@ -12,7 +12,7 @@ import lombok.RequiredArgsConstructor;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 @Component
-@ConditionalOnBooleanProperty("app.rule-document.indexing-worker.enabled")
+@ConditionalOnBooleanProperty("app.rule-document.indexing-scheduler.enabled")
 @RequiredArgsConstructor
 public class RuleDocumentIndexingScheduler {
 
