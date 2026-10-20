@@ -20,9 +20,13 @@ import org.springframework.batch.infrastructure.item.Chunk;
 import org.springframework.batch.infrastructure.item.ItemProcessor;
 import org.springframework.batch.infrastructure.item.ItemReader;
 import org.springframework.batch.infrastructure.item.ItemWriter;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.retry.RetryPolicy;
+import org.springframework.core.task.SimpleAsyncTaskExecutor;
+import org.springframework.core.task.SyncTaskExecutor;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import com.homes.zipsai.building.domain.Complaint;
@@ -79,10 +83,36 @@ public class ComplaintAiFeedbackJobConfig {
     @Bean
     public Step complaintAiFeedbackStep(
             JobRepository jobRepository,
+            Step complaintAiFeedbackWorkerStep,
+            ComplaintDetailRepository complaintDetailRepository,
+            @Value("${app.complaint.ai-feedback.concurrency:1}") int concurrency) {
+        int gridSize = Math.max(1, concurrency);
+        return new StepBuilder("complaintAiFeedbackStep", jobRepository)
+                .partitioner("complaintAiFeedbackWorkerStep",
+                        new ComplaintAiFeedbackPartitioner(complaintDetailRepository, MAX_BATCH_SIZE))
+                .step(complaintAiFeedbackWorkerStep)
+                .gridSize(gridSize)
+                .taskExecutor(partitionTaskExecutor(gridSize))
+                .build();
+    }
+
+    private static TaskExecutor partitionTaskExecutor(int concurrency) {
+        if (concurrency == 1) {
+            return new SyncTaskExecutor();
+        }
+        SimpleAsyncTaskExecutor taskExecutor = new SimpleAsyncTaskExecutor("complaint-ai-feedback-");
+        taskExecutor.setVirtualThreads(true);
+        taskExecutor.setConcurrencyLimit(concurrency);
+        return taskExecutor;
+    }
+
+    @Bean
+    public Step complaintAiFeedbackWorkerStep(
+            JobRepository jobRepository,
             PlatformTransactionManager transactionManager,
             ItemReader<ComplaintDetail> complaintAiFeedbackReader,
             ItemWriter<FeedbackItem> complaintAiFeedbackWriter) {
-        return new StepBuilder("complaintAiFeedbackStep", jobRepository)
+        return new StepBuilder("complaintAiFeedbackWorkerStep", jobRepository)
                 .<ComplaintDetail, FeedbackItem>chunk(CHUNK_SIZE)
                 .reader(complaintAiFeedbackReader)
                 .processor(complaintAiFeedbackProcessor())
@@ -95,8 +125,12 @@ public class ComplaintAiFeedbackJobConfig {
 
     @Bean
     @StepScope
-    public ItemReader<ComplaintDetail> complaintAiFeedbackReader(ComplaintDetailRepository complaintDetailRepository) {
-        return new ComplaintAiFeedbackItemReader(complaintDetailRepository, MAX_BATCH_SIZE);
+    public ItemReader<ComplaintDetail> complaintAiFeedbackReader(
+            ComplaintDetailRepository complaintDetailRepository,
+            @Value("#{stepExecutionContext['" + ComplaintAiFeedbackPartitioner.MIN_ID + "']}") long minId,
+            @Value("#{stepExecutionContext['" + ComplaintAiFeedbackPartitioner.MAX_ID + "']}") long maxId,
+            @Value("#{stepExecutionContext['" + ComplaintAiFeedbackPartitioner.LIMIT + "']}") int limit) {
+        return new ComplaintAiFeedbackItemReader(complaintDetailRepository, minId, maxId, limit);
     }
 
     private ItemProcessor<ComplaintDetail, FeedbackItem> complaintAiFeedbackProcessor() {

@@ -223,6 +223,42 @@ class ComplaintDetailRepositoryTest {
             .extracting(ComplaintDetail::getId).containsExactly(detail.getId());
     }
 
+    @Test
+    @DisplayName("파티션용 전송 대상 ID는 전송 대상 조회와 같은 조건으로 오래된 순 조회한다")
+    void findsPendingIdsWithSameConditions() {
+        ComplaintDetail pending = saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
+        sentFeedback("이미 보낸 답변입니다");
+        saveComplaintWithDetail(null, "분리수거 위치 문의", ComplaintStatus.DONE, "유형이 없는 답변입니다");
+        saveComplaintWithDetail(ComplaintStatus.IN_PROGRESS, "확인 중입니다");
+        ComplaintDetail edited = sentFeedback("수정 전 답변입니다");
+        reload(edited).updateComment("수정한 답변입니다");
+        entityManager.flush();
+        entityManager.clear();
+
+        List<Long> ids = complaintDetailRepository.findPendingAiFeedbackIds(PageRequest.of(0, 10));
+
+        assertThat(ids).containsExactly(pending.getId(), edited.getId());
+    }
+
+    @Test
+    @DisplayName("파티션 구간 조회는 구간 안의 전송 대상만 건수 제한까지 읽는다")
+    void findsPendingFeedbackBetweenIds() {
+        ComplaintDetail first = saveComplaintWithDetail(ComplaintStatus.DONE, "첫 번째 답변입니다");
+        ComplaintDetail second = saveComplaintWithDetail(ComplaintStatus.DONE, "두 번째 답변입니다");
+        ComplaintDetail third = saveComplaintWithDetail(ComplaintStatus.DONE, "세 번째 답변입니다");
+        entityManager.clear();
+
+        Slice<ComplaintDetail> range = complaintDetailRepository.findPendingAiFeedbackBetween(
+            second.getId(), third.getId(), PageRequest.of(0, 10));
+        Slice<ComplaintDetail> limited = complaintDetailRepository.findPendingAiFeedbackBetween(
+            first.getId(), third.getId(), PageRequest.of(0, 2));
+
+        assertThat(range.getContent()).extracting(ComplaintDetail::getId)
+            .containsExactly(second.getId(), third.getId());
+        assertThat(limited.getContent()).extracting(ComplaintDetail::getId)
+            .containsExactly(first.getId(), second.getId());
+    }
+
     private ComplaintDetail sentFeedback(String comment) {
         ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, comment);
         complaintDetailRepository.markAiFeedbackSent(detail.getId(), reload(detail).getUpdatedAt());

@@ -29,6 +29,34 @@ public interface ComplaintDetailRepository extends JpaRepository<ComplaintDetail
     Slice<ComplaintDetail> findPendingAiFeedback(Pageable pageable);
 
     @Query("""
+            select cd.id from ComplaintDetail cd
+                join cd.complaint c
+            where c.status = com.homes.zipsai.building.domain.ComplaintStatus.DONE
+                and c.deletedAt is null
+                and c.type is not null
+                and cd.comment is not null
+                and (cd.aiFeedbackSentAt is null or cd.updatedAt > cd.aiFeedbackSentAt)
+            order by cd.id
+            """)
+    List<Long> findPendingAiFeedbackIds(Pageable pageable);
+
+    @Query("""
+            select cd from ComplaintDetail cd
+                join fetch cd.complaint c
+                join fetch c.building
+                join fetch c.conversation
+            where c.status = com.homes.zipsai.building.domain.ComplaintStatus.DONE
+                and c.deletedAt is null
+                and c.type is not null
+                and cd.comment is not null
+                and (cd.aiFeedbackSentAt is null or cd.updatedAt > cd.aiFeedbackSentAt)
+                and cd.id between :minId and :maxId
+            order by cd.id
+            """)
+    Slice<ComplaintDetail> findPendingAiFeedbackBetween(@Param("minId") long minId, @Param("maxId") long maxId,
+                                                        Pageable pageable);
+
+    @Query("""
             select new com.homes.zipsai.building.repository.AiFeedbackDeletionTarget(cd.id, c.building.id, cd.updatedAt)
             from ComplaintDetail cd
                 join cd.complaint c
