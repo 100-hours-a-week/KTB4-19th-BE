@@ -1,11 +1,13 @@
 package com.homes.zipsai.conversation.ai;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -15,6 +17,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
@@ -97,5 +100,35 @@ class HttpAiComplaintFeedbackClientTest {
             9001L, 101L, "COMPLAINT", "leak", "지하주차장 B2", "천장에서 물이 떨어집니다",
             OffsetDateTime.parse("2026-10-14T00:00:12+09:00"), "배관 누수를 확인했습니다",
             OffsetDateTime.parse("2026-10-15T00:00:12+09:00"))));
+    }
+
+    @Test
+    @DisplayName("AI가 건별 처리 결과를 응답하면 결과를 읽어 돌려준다")
+    void readsPerItemResults() {
+        mockRestServiceServer.expect(requestTo(BASE_URL + FEEDBACK_PATH))
+            .andRespond(withSuccess("""
+                {"trace_id":"request-trace-id","results":[
+                  {"complaint_detail_id":9001,"updated_at":"2026-10-15T00:00:12+09:00",
+                   "status":"failed","reason_code":"EMBEDDING_FAILED"}
+                ]}
+                """, MediaType.APPLICATION_JSON));
+
+        AiComplaintFeedbackResponse response = client.send(request());
+
+        assertThat(response.traceId()).isEqualTo(TRACE_ID);
+        assertThat(response.find(9001L)).hasValueSatisfying(result -> {
+            assertThat(result.status()).isEqualTo("failed");
+            assertThat(result.reasonCode()).isEqualTo("EMBEDDING_FAILED");
+            assertThat(result.updatedAt()).isEqualTo(OffsetDateTime.parse("2026-10-15T00:00:12+09:00"));
+        });
+    }
+
+    @Test
+    @DisplayName("본문 없이 202만 오면 빈 결과를 돌려준다")
+    void returnsEmptyResultWhenAcceptedWithoutBody() {
+        mockRestServiceServer.expect(requestTo(BASE_URL + FEEDBACK_PATH))
+            .andRespond(withStatus(HttpStatus.ACCEPTED));
+
+        assertThat(client.send(request()).results()).isEmpty();
     }
 }
