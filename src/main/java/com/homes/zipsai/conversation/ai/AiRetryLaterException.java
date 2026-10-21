@@ -9,9 +9,6 @@ import org.springframework.http.HttpHeaders;
 
 import com.homes.zipsai.global.exception.AiUnavailableException;
 
-/**
- * AI가 429·503으로 잠시 뒤 다시 보내라고 응답한 경우. Retry-After 헤더가 있으면 기다릴 시간을 담는다.
- */
 public class AiRetryLaterException extends AiUnavailableException {
 
     private final Duration retryAfter;
