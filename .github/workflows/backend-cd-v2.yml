@@ -60,7 +60,7 @@ jobs:
     outputs:
       environment: ${{ steps.select.outputs.environment }}
       image_tag: ${{ steps.select.outputs.image_tag }}
-      service: ${{ steps.select.outputs.service }}
+      services: ${{ steps.select.outputs.services }}
     steps:
       - name: Select environment and image
         id: select
@@ -75,28 +75,33 @@ jobs:
           if [[ "$EVENT_NAME" == workflow_run ]]; then
             deployment_environment=staging
             image_tag="${CI_SHA:0:7}"
-            service=api
+            services='["api","worker"]'
           else
             deployment_environment=production
             image_tag="$INPUT_SHA"
-            service="$INPUT_SERVICE"
+            [[ "$INPUT_SERVICE" == api || "$INPUT_SERVICE" == worker ]] || {
+              echo '배포 대상은 api 또는 worker만 허용합니다.' >&2
+              exit 1
+            }
+            services="[\"$INPUT_SERVICE\"]"
           fi
           [[ "$deployment_environment" == staging || "$deployment_environment" == production ]] || exit 1
-          [[ "$service" == api || "$service" == worker ]] || {
-            echo '배포 대상은 api 또는 worker만 허용합니다.' >&2
-            exit 1
-          }
           [[ "$image_tag" =~ ^[0-9a-f]{7}$ ]] || {
             echo 'SHA 앞 7자리 소문자 16진수 태그를 입력하세요.' >&2
             exit 1
           }
           echo "environment=$deployment_environment" >> "$GITHUB_OUTPUT"
           echo "image_tag=$image_tag" >> "$GITHUB_OUTPUT"
-          echo "service=$service" >> "$GITHUB_OUTPUT"
+          echo "services=$services" >> "$GITHUB_OUTPUT"
 
   deploy:
-    name: Deploy selected ECS service
+    name: Deploy ${{ matrix.service }} ECS service
     needs: select
+    strategy:
+      max-parallel: 1
+      fail-fast: true
+      matrix:
+        service: ${{ fromJSON(needs.select.outputs.services) }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     # 승인·환경별 Variable·OIDC Environment subject는 이 Job에 적용된다.
@@ -111,7 +116,7 @@ jobs:
     env:
       DEPLOYMENT_ENVIRONMENT: ${{ needs.select.outputs.environment }}
       IMAGE_TAG: ${{ needs.select.outputs.image_tag }}
-      SERVICE_ROLE: ${{ needs.select.outputs.service }}
+      SERVICE_ROLE: ${{ matrix.service }}
       ECS_CLUSTER: ${{ vars.ECS_CLUSTER_NAME }}
       API_SERVICE: ${{ vars.ECS_API_SERVICE_NAME }}
       WORKER_SERVICE: ${{ vars.ECS_WORKER_SERVICE_NAME }}
