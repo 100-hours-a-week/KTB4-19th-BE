@@ -28,7 +28,7 @@ public class ComplaintAiFeedbackScheduler {
     private final JobOperator jobOperator;
     private final Job complaintAiFeedbackJob;
 
-    @Scheduled(cron = "0 0 22 * * *", zone = "Asia/Seoul")
+    @Scheduled(cron = "0 0 18 * * *", zone = "Asia/Seoul")
     @SchedulerLock(name = ComplaintAiFeedbackJobRunner.LOCK_NAME, lockAtLeastFor = "1m", lockAtMostFor = "30m")
     public void runDailyComplaintAiFeedbackJob() {
         try {
