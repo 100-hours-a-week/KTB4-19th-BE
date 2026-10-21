@@ -34,7 +34,6 @@ public class AiRetryLaterException extends AiUnavailableException {
             long seconds = Long.parseLong(trimmed);
             return seconds < 0 ? null : Duration.ofSeconds(seconds);
         } catch (NumberFormatException ignored) {
-            // HTTP-date 형식이면 아래에서 처리한다
         }
         try {
             Duration untilThen = Duration.between(ZonedDateTime.now(),

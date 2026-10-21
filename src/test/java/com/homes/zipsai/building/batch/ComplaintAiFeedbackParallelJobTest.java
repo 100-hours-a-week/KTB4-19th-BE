@@ -44,7 +44,6 @@ import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.repository.UserRepository;
 
-// 파티션은 다른 스레드에서 실행되므로 데이터를 커밋해 두고 테스트가 끝나면 직접 지운다.
 @SpringBootTest(properties = "app.complaint.ai-feedback.concurrency=3")
 @SpringBatchTest
 class ComplaintAiFeedbackParallelJobTest {
