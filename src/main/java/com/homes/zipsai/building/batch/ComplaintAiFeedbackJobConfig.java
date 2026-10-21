@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,6 +42,7 @@ import com.homes.zipsai.conversation.ai.AiComplaintFeedbackClient;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackDeleteRequest;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackRequest;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackResponse;
+import com.homes.zipsai.conversation.ai.AiRetryLaterException;
 import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.global.util.TimeUtils;
 
@@ -56,6 +58,7 @@ public class ComplaintAiFeedbackJobConfig {
     private static final Duration INITIAL_DELAY = Duration.ofSeconds(1);
     private static final double DELAY_MULTIPLIER = 2.0;
     private static final Duration MAX_DELAY = Duration.ofSeconds(4);
+    private static final Duration MAX_RETRY_AFTER_WAIT = Duration.ofSeconds(30);
 
     @Bean
     public Job complaintAiFeedbackJob(JobRepository jobRepository, Step complaintAiFeedbackStep,
@@ -166,7 +169,8 @@ public class ComplaintAiFeedbackJobConfig {
                 requests.add(item.request());
             }
             String traceId = UUID.randomUUID().toString();
-            AiComplaintFeedbackResponse response = client.send(new AiComplaintFeedbackBatchRequest(traceId, requests));
+            AiComplaintFeedbackResponse response = waitIfAskedToRetryLater(
+                    () -> client.send(new AiComplaintFeedbackBatchRequest(traceId, requests)));
 
             ResultTally tally = new ResultTally();
             for (FeedbackItem item : chunk) {
@@ -211,7 +215,8 @@ public class ComplaintAiFeedbackJobConfig {
                         TimeUtils.toOffsetDateTime(target.updatedAt())));
             }
             String traceId = UUID.randomUUID().toString();
-            AiComplaintFeedbackResponse response = client.delete(new AiComplaintFeedbackDeleteRequest(traceId, items));
+            AiComplaintFeedbackResponse response = waitIfAskedToRetryLater(
+                    () -> client.delete(new AiComplaintFeedbackDeleteRequest(traceId, items)));
 
             ResultTally tally = new ResultTally();
             int handled = 0;
@@ -239,6 +244,29 @@ public class ComplaintAiFeedbackJobConfig {
     }
 
     private record FeedbackItem(Long id, LocalDateTime updatedAt, AiComplaintFeedbackRequest request) {
+    }
+
+    /**
+     * AI가 429·503과 Retry-After로 잠시 뒤 다시 보내라고 하면, 청크 재시도 전에 그 시간(최대 30초)만큼 기다린다.
+     * 기다린 뒤 예외를 다시 던져 기존 재시도 규칙(1초 → 2초 → 4초, 3번)을 그대로 따른다.
+     */
+    private static AiComplaintFeedbackResponse waitIfAskedToRetryLater(
+            Supplier<AiComplaintFeedbackResponse> call) {
+        try {
+            return call.get();
+        } catch (AiRetryLaterException exception) {
+            Duration retryAfter = exception.retryAfter();
+            if (retryAfter != null && !retryAfter.isZero()) {
+                Duration wait = retryAfter.compareTo(MAX_RETRY_AFTER_WAIT) > 0 ? MAX_RETRY_AFTER_WAIT : retryAfter;
+                LOGGER.warn("AI가 잠시 뒤 다시 보내라고 응답해 {}초 기다린 뒤 재시도합니다.", wait.toSeconds());
+                try {
+                    Thread.sleep(wait);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            throw exception;
+        }
     }
 
     private static final class ResultTally {
@@ -280,6 +308,13 @@ public class ComplaintAiFeedbackJobConfig {
                 skipped++;
                 LOGGER.info("AI가 민원 답변 {} 요청을 반영하지 않았습니다. traceId={}, complaintDetailId={}, reasonCode={}",
                         action, traceId, complaintDetailId, result.reasonCode());
+                return true;
+            }
+            if (Boolean.FALSE.equals(result.retryable())) {
+                skipped++;
+                LOGGER.warn("AI가 다시 보내도 같은 결과라고 알려 와 민원 답변 {} 요청을 다시 보내지 않습니다. traceId={}, "
+                                + "complaintDetailId={}, status={}, reasonCode={}",
+                        action, traceId, complaintDetailId, result.status(), result.reasonCode());
                 return true;
             }
             failed++;

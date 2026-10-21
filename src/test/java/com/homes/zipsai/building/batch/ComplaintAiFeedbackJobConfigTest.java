@@ -8,6 +8,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -45,6 +46,7 @@ import com.homes.zipsai.conversation.ai.AiComplaintFeedbackClient;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackDeleteRequest;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackRequest;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackResponse;
+import com.homes.zipsai.conversation.ai.AiRetryLaterException;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
@@ -458,6 +460,35 @@ class ComplaintAiFeedbackJobConfigTest {
     private OffsetDateTime sentVersion(ComplaintDetail detail) {
         return TimeUtils.toOffsetDateTime(complaintDetailRepository.findById(detail.getId()).orElseThrow()
             .getUpdatedAt());
+    }
+
+    @Test
+    @DisplayName("AI가 다시 보내도 같은 실패라고 알려 주면 전송 완료로 남겨 다시 보내지 않는다")
+    void marksNonRetryableFailureSent() throws Exception {
+        ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
+        given(aiComplaintFeedbackClient.send(any(AiComplaintFeedbackBatchRequest.class))).willAnswer(invocation ->
+            results(invocation.<AiComplaintFeedbackBatchRequest>getArgument(0).traceId(),
+                new AiComplaintFeedbackResponse.Result(detail.getId(), null, "failed", "MASK_FAILED", false)));
+
+        jobOperatorTestUtils.startJob(jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
+
+        assertThat(sentAt(detail)).isNotNull();
+    }
+
+    @Test
+    @DisplayName("AI가 Retry-After로 기다리라고 하면 기다린 뒤 같은 청크를 다시 보낸다")
+    void retriesChunkAfterRetryAfter() throws Exception {
+        ComplaintDetail detail = saveComplaintWithDetail(ComplaintStatus.DONE, "분리수거장은 지하 1층입니다");
+        given(aiComplaintFeedbackClient.send(any(AiComplaintFeedbackBatchRequest.class)))
+            .willThrow(new AiRetryLaterException(Duration.ofMillis(200)))
+            .willReturn(null);
+
+        JobExecution execution = jobOperatorTestUtils.startJob(
+            jobOperatorTestUtils.getUniqueJobParametersBuilder().toJobParameters());
+
+        assertThat(execution.getExitStatus()).isEqualTo(ExitStatus.COMPLETED);
+        verify(aiComplaintFeedbackClient, times(2)).send(any(AiComplaintFeedbackBatchRequest.class));
+        assertThat(sentAt(detail)).isNotNull();
     }
 
     private static AiComplaintFeedbackResponse results(String traceId, AiComplaintFeedbackResponse.Result... results) {
