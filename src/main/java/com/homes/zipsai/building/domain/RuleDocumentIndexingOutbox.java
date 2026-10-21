@@ -101,9 +101,6 @@ public class RuleDocumentIndexingOutbox extends BaseTimeEntity {
         return scheduleRetry(error, maxRetryCount, baseDelay, maxDelay, null, now);
     }
 
-    /**
-     * 백오프 간격과 AI가 알려 준 대기 시간(Retry-After) 중 긴 쪽만큼 기다렸다가 다시 보낸다. 최대 간격은 넘기지 않는다.
-     */
     public boolean scheduleRetry(String error, int maxRetryCount, Duration baseDelay, Duration maxDelay,
                                  Duration minDelay, LocalDateTime now) {
         if (retryCount >= maxRetryCount) {

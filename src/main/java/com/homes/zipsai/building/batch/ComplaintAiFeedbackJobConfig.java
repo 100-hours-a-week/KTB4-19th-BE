@@ -246,10 +246,6 @@ public class ComplaintAiFeedbackJobConfig {
     private record FeedbackItem(Long id, LocalDateTime updatedAt, AiComplaintFeedbackRequest request) {
     }
 
-    /**
-     * AI가 429·503과 Retry-After로 잠시 뒤 다시 보내라고 하면, 청크 재시도 전에 그 시간(최대 30초)만큼 기다린다.
-     * 기다린 뒤 예외를 다시 던져 기존 재시도 규칙(1초 → 2초 → 4초, 3번)을 그대로 따른다.
-     */
     private static AiComplaintFeedbackResponse waitIfAskedToRetryLater(
             Supplier<AiComplaintFeedbackResponse> call) {
         try {
