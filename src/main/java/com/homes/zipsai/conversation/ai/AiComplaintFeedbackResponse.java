@@ -41,7 +41,12 @@ public record AiComplaintFeedbackResponse(
             Long complaintDetailId,
             OffsetDateTime updatedAt,
             String status,
-            String reasonCode
+            String reasonCode,
+            Boolean retryable
     ) {
+
+        public Result(Long complaintDetailId, OffsetDateTime updatedAt, String status, String reasonCode) {
+            this(complaintDetailId, updatedAt, status, reasonCode, null);
+        }
     }
 }

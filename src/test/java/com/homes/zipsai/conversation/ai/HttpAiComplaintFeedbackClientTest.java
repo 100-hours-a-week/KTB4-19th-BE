@@ -9,12 +9,14 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -130,5 +132,27 @@ class HttpAiComplaintFeedbackClientTest {
             .andRespond(withStatus(HttpStatus.ACCEPTED));
 
         assertThat(client.send(request()).results()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("503과 Retry-After를 받으면 기다릴 시간을 담은 재시도 예외로 알리고, 결과의 retryable을 읽는다")
+    void handlesRetryAfterAndRetryable() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.RETRY_AFTER, "5");
+        mockRestServiceServer.expect(requestTo(BASE_URL + FEEDBACK_PATH))
+            .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE).headers(headers));
+        mockRestServiceServer.expect(requestTo(BASE_URL + FEEDBACK_PATH))
+            .andRespond(withSuccess("""
+                {"trace_id":"request-trace-id","results":[
+                  {"complaint_detail_id":9001,"updated_at":"2026-10-15T00:00:12+09:00",
+                   "status":"failed","reason_code":"EMBEDDING_FAILED","retryable":true}
+                ]}
+                """, MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> client.send(request()))
+            .isInstanceOfSatisfying(AiRetryLaterException.class,
+                exception -> assertThat(exception.retryAfter()).isEqualTo(Duration.ofSeconds(5)));
+        assertThat(client.send(request()).find(9001L))
+            .hasValueSatisfying(result -> assertThat(result.retryable()).isTrue());
     }
 }

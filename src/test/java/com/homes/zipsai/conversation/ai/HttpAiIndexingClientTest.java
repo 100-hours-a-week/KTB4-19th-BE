@@ -8,11 +8,13 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import java.time.Duration;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -107,5 +109,36 @@ class HttpAiIndexingClientTest {
 
         assertThatThrownBy(() -> httpAiIndexingClient.cleanup(10L, TRACE_ID, List.of()))
             .isInstanceOf(AiUnavailableException.class);
+    }
+
+    @Test
+    @DisplayName("결과의 retryable 값을 읽는다")
+    void readsRetryable() {
+        mockRestServiceServer.expect(requestTo(BASE_URL + INDEXING_PATH))
+            .andRespond(withSuccess("""
+                {"trace_id":"t","results":[
+                  {"kind":"document_index","doc_id":"100","status":"failed",
+                   "reason_code":"EMBEDDING_FAILED","retryable":true}
+                ]}
+                """, MediaType.APPLICATION_JSON));
+
+        AiIndexingResponse response = httpAiIndexingClient.index(new AiIndexingRequest(10L, TRACE_ID, "100",
+            "관리규약", "s3://test-bucket/documents/rule.pdf", List.of("100")));
+
+        assertThat(response.indexResult("100")).hasValueSatisfying(result ->
+            assertThat(result.isRetryable()).isTrue());
+    }
+
+    @Test
+    @DisplayName("429와 Retry-After를 받으면 기다릴 시간을 담은 재시도 예외로 알린다")
+    void throwsRetryLaterWithRetryAfter() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.RETRY_AFTER, "30");
+        mockRestServiceServer.expect(requestTo(BASE_URL + INDEXING_PATH))
+            .andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS).headers(headers));
+
+        assertThatThrownBy(() -> httpAiIndexingClient.cleanup(10L, TRACE_ID, List.of()))
+            .isInstanceOfSatisfying(AiRetryLaterException.class,
+                exception -> assertThat(exception.retryAfter()).isEqualTo(Duration.ofSeconds(30)));
     }
 }

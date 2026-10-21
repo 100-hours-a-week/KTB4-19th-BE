@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -63,7 +64,7 @@ public class HttpAiComplaintFeedbackClient implements AiComplaintFeedbackClient 
                     .onStatus(HttpStatusCode::isError, (httpRequest, errorResponse) -> {
                         LOGGER.error("AI가 민원 답변 피드백 {} 요청을 거절했습니다. traceId={}, items={}, status={}",
                                 action, traceId, items, errorResponse.getStatusCode().value());
-                        throw toApiException(errorResponse.getStatusCode());
+                        throw toApiException(errorResponse.getStatusCode(), errorResponse.getHeaders());
                     })
                     .body(AiComplaintFeedbackResponse.class);
             return response == null ? AiComplaintFeedbackResponse.empty() : response;
@@ -74,10 +75,12 @@ public class HttpAiComplaintFeedbackClient implements AiComplaintFeedbackClient 
         }
     }
 
-    private ApiException toApiException(HttpStatusCode status) {
+    private ApiException toApiException(HttpStatusCode status, HttpHeaders headers) {
         if (status.isSameCodeAs(HttpStatus.SERVICE_UNAVAILABLE)
-                || status.isSameCodeAs(HttpStatus.GATEWAY_TIMEOUT)
                 || status.isSameCodeAs(HttpStatus.TOO_MANY_REQUESTS)) {
+            return AiRetryLaterException.from(headers);
+        }
+        if (status.isSameCodeAs(HttpStatus.GATEWAY_TIMEOUT)) {
             return new AiUnavailableException();
         }
         return new InternalServerException();
