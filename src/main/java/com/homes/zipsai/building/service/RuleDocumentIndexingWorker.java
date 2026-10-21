@@ -26,6 +26,7 @@ import com.homes.zipsai.conversation.ai.AiIndexingClient;
 import com.homes.zipsai.conversation.ai.AiIndexingRequest;
 import com.homes.zipsai.conversation.ai.AiIndexingResponse;
 import com.homes.zipsai.conversation.ai.AiIndexingResponse.Result;
+import com.homes.zipsai.conversation.ai.AiRetryLaterException;
 import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.global.util.TimeUtils;
 
@@ -34,7 +35,7 @@ public class RuleDocumentIndexingWorker {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RuleDocumentIndexingWorker.class);
 
-    static final int BATCH_SIZE = 10;
+    static final int BATCH_SIZE = 5;
     static final int MAX_RETRY_COUNT = 5;
     static final Duration BASE_RETRY_DELAY = Duration.ofSeconds(10);
     static final Duration MAX_RETRY_DELAY = Duration.ofMinutes(10);
@@ -93,8 +94,11 @@ public class RuleDocumentIndexingWorker {
             AiIndexingResponse response;
             try {
                 response = client.index(task.request());
+            } catch (AiRetryLaterException exception) {
+                retry(task, AI_UNAVAILABLE, exception.retryAfter());
+                return;
             } catch (AiUnavailableException exception) {
-                retry(task);
+                retry(task, AI_UNAVAILABLE, null);
                 return;
             } catch (RuntimeException exception) {
                 fail(task, AI_REJECTED);
@@ -147,7 +151,12 @@ public class RuleDocumentIndexingWorker {
         if (task.operation() == RuleDocumentIndexingOperation.CLEANUP) {
             Optional<Result> cleanup = response.cleanupResult();
             if (cleanup.isPresent() && AiIndexingResponse.STATUS_FAILED.equals(cleanup.get().status())) {
-                complete(task.outboxId(), outbox -> outbox.markFailed(cleanup.get().reasonCode(), TimeUtils.now()));
+                if (cleanup.get().isRetryable()) {
+                    retry(task, cleanup.get().reasonCode(), null);
+                } else {
+                    complete(task.outboxId(),
+                            outbox -> outbox.markFailed(cleanup.get().reasonCode(), TimeUtils.now()));
+                }
             } else {
                 complete(task.outboxId(), outbox -> outbox.markDone(TimeUtils.now()));
             }
@@ -165,7 +174,13 @@ public class RuleDocumentIndexingWorker {
             case AiIndexingResponse.STATUS_SUCCEEDED -> succeed(task, RuleDocumentIndexingStatus.INDEXED, null);
             case AiIndexingResponse.STATUS_SKIPPED ->
                     succeed(task, RuleDocumentIndexingStatus.SKIPPED, result.reasonCode());
-            case AiIndexingResponse.STATUS_FAILED -> fail(task, result.reasonCode());
+            case AiIndexingResponse.STATUS_FAILED -> {
+                if (result.isRetryable()) {
+                    retry(task, result.reasonCode(), null);
+                } else {
+                    fail(task, result.reasonCode());
+                }
+            }
             case null, default -> fail(task, UNKNOWN_STATUS);
         }
         LOGGER.info("운영규칙 문서 색인 결과를 저장했습니다. outboxId={}, documentId={}, status={}, reasonCode={}",
@@ -187,25 +202,27 @@ public class RuleDocumentIndexingWorker {
         });
     }
 
-    private void retry(Task task) {
+    private void retry(Task task, String reason, Duration retryAfter) {
         Boolean retrying = tx.execute(transaction -> {
             RuleDocumentIndexingOutbox outbox = outboxRepository.findById(task.outboxId()).orElse(null);
             if (outbox == null) {
                 return false;
             }
-            boolean scheduled = outbox.scheduleRetry(AI_UNAVAILABLE, MAX_RETRY_COUNT, BASE_RETRY_DELAY,
-                    MAX_RETRY_DELAY, TimeUtils.now());
+            boolean scheduled = outbox.scheduleRetry(reason, MAX_RETRY_COUNT, BASE_RETRY_DELAY,
+                    MAX_RETRY_DELAY, retryAfter, TimeUtils.now());
             if (!scheduled) {
-                markDocumentFailed(task, AI_UNAVAILABLE);
+                markDocumentFailed(task, reason);
             }
             return scheduled;
         });
         if (Boolean.TRUE.equals(retrying)) {
-            LOGGER.warn("AI에 연결하지 못해 운영규칙 문서 색인을 다시 시도합니다. outboxId={}, operation={}, documentId={}",
-                    task.outboxId(), task.operation(), task.documentId());
+            LOGGER.warn("운영규칙 문서 색인을 다시 시도합니다. outboxId={}, operation={}, documentId={}, reason={}, "
+                            + "retryAfter={}",
+                    task.outboxId(), task.operation(), task.documentId(), reason, retryAfter);
         } else {
-            LOGGER.error("운영규칙 문서 색인 재시도 횟수를 넘겨 실패로 남깁니다. outboxId={}, operation={}, documentId={}",
-                    task.outboxId(), task.operation(), task.documentId());
+            LOGGER.error("운영규칙 문서 색인 재시도 횟수를 넘겨 실패로 남깁니다. outboxId={}, operation={}, documentId={}, "
+                            + "reason={}",
+                    task.outboxId(), task.operation(), task.documentId(), reason);
         }
     }
 

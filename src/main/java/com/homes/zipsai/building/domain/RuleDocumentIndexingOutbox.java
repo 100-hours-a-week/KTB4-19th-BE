@@ -98,6 +98,14 @@ public class RuleDocumentIndexingOutbox extends BaseTimeEntity {
 
     public boolean scheduleRetry(String error, int maxRetryCount, Duration baseDelay, Duration maxDelay,
                                  LocalDateTime now) {
+        return scheduleRetry(error, maxRetryCount, baseDelay, maxDelay, null, now);
+    }
+
+    /**
+     * 백오프 간격과 AI가 알려 준 대기 시간(Retry-After) 중 긴 쪽만큼 기다렸다가 다시 보낸다. 최대 간격은 넘기지 않는다.
+     */
+    public boolean scheduleRetry(String error, int maxRetryCount, Duration baseDelay, Duration maxDelay,
+                                 Duration minDelay, LocalDateTime now) {
         if (retryCount >= maxRetryCount) {
             markFailed(error, now);
             return false;
@@ -105,6 +113,9 @@ public class RuleDocumentIndexingOutbox extends BaseTimeEntity {
         retryCount++;
         lastError = TextUtils.truncate(error, LAST_ERROR_MAX_LENGTH);
         Duration delay = baseDelay.multipliedBy(1L << (retryCount - 1));
+        if (minDelay != null && minDelay.compareTo(delay) > 0) {
+            delay = minDelay;
+        }
         nextRetryAt = now.plus(delay.compareTo(maxDelay) > 0 ? maxDelay : delay);
         return true;
     }

@@ -8,6 +8,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -40,6 +41,7 @@ import com.homes.zipsai.conversation.ai.AiIndexingClient;
 import com.homes.zipsai.conversation.ai.AiIndexingRequest;
 import com.homes.zipsai.conversation.ai.AiIndexingResponse;
 import com.homes.zipsai.conversation.ai.AiIndexingResponse.Result;
+import com.homes.zipsai.conversation.ai.AiRetryLaterException;
 import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.global.exception.InternalServerException;
 import com.homes.zipsai.user.domain.User;
@@ -216,6 +218,73 @@ class RuleDocumentIndexingWorkerTest {
         assertThat(outbox.getRetryCount()).isZero();
         then(documentRepository).should().updateIndexingResult(DOCUMENT_ID, 1, RuleDocumentIndexingStatus.FAILED,
             RuleDocumentIndexingWorker.AI_REJECTED);
+    }
+
+    @Test
+    @DisplayName("AI가 다시 보내면 성공할 수 있는 실패라고 알려 주면 문서 상태는 그대로 두고 다시 보낸다")
+    void retriesRetryableIndexFailure() {
+        RuleDocumentIndexingOutbox outbox = givenIndexOutbox();
+        givenResponse(new Result(AiIndexingResponse.KIND_INDEX, DOC_ID, "failed", "EMBEDDING_FAILED", true));
+
+        worker.processDue();
+
+        assertThat(outbox.getStatus()).isEqualTo(RuleDocumentIndexingOutboxStatus.PENDING);
+        assertThat(outbox.getRetryCount()).isEqualTo(1);
+        assertThat(outbox.getLastError()).isEqualTo("EMBEDDING_FAILED");
+        then(documentRepository).should(never()).updateIndexingResult(anyLong(), anyInt(), any(), any());
+    }
+
+    @Test
+    @DisplayName("다시 보낼 수 있는 실패도 재시도 횟수를 넘기면 그 사유로 실패를 남긴다")
+    void failsRetryableIndexFailureAfterMaxRetries() {
+        RuleDocumentIndexingOutbox outbox = givenIndexOutbox();
+        ReflectionTestUtils.setField(outbox, "retryCount", RuleDocumentIndexingWorker.MAX_RETRY_COUNT);
+        givenResponse(new Result(AiIndexingResponse.KIND_INDEX, DOC_ID, "failed", "EMBEDDING_FAILED", true));
+
+        worker.processDue();
+
+        assertThat(outbox.getStatus()).isEqualTo(RuleDocumentIndexingOutboxStatus.FAILED);
+        then(documentRepository).should()
+            .updateIndexingResult(DOCUMENT_ID, 1, RuleDocumentIndexingStatus.FAILED, "EMBEDDING_FAILED");
+    }
+
+    @Test
+    @DisplayName("다시 보내도 같은 실패는 바로 실패로 남긴다")
+    void failsNonRetryableIndexFailure() {
+        RuleDocumentIndexingOutbox outbox = givenIndexOutbox();
+        givenResponse(new Result(AiIndexingResponse.KIND_INDEX, DOC_ID, "failed", "PARSE_FAILED", false));
+
+        worker.processDue();
+
+        assertThat(outbox.getStatus()).isEqualTo(RuleDocumentIndexingOutboxStatus.FAILED);
+        assertThat(outbox.getRetryCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("AI가 Retry-After로 기다리라고 하면 백오프보다 길게 기다렸다가 다시 보낸다")
+    void waitsRetryAfterBeforeRetry() {
+        RuleDocumentIndexingOutbox outbox = givenIndexOutbox();
+        given(aiIndexingClient.index(any())).willThrow(new AiRetryLaterException(Duration.ofMinutes(3)));
+        LocalDateTime before = LocalDateTime.now();
+
+        worker.processDue();
+
+        assertThat(outbox.getStatus()).isEqualTo(RuleDocumentIndexingOutboxStatus.PENDING);
+        assertThat(outbox.getNextRetryAt()).isAfterOrEqualTo(before.plusMinutes(3));
+    }
+
+    @Test
+    @DisplayName("다시 보낼 수 있는 정리 실패는 다시 보낸다")
+    void retriesRetryableCleanupFailure() {
+        RuleDocumentIndexingOutbox outbox = RuleDocumentIndexingOutbox.cleanup(BUILDING_ID, TRACE_ID,
+            LocalDateTime.now().minusSeconds(1));
+        givenOutbox(outbox);
+        givenResponse(new Result(AiIndexingResponse.KIND_CLEANUP, null, "failed", "CLEANUP_FAILED", true));
+
+        worker.processDue();
+
+        assertThat(outbox.getStatus()).isEqualTo(RuleDocumentIndexingOutboxStatus.PENDING);
+        assertThat(outbox.getLastError()).isEqualTo("CLEANUP_FAILED");
     }
 
     @Test
