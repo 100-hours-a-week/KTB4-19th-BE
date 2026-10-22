@@ -33,9 +33,9 @@ class KakaoAddressClientTest {
          "x":"127.0276","y":"37.4979","road_address":{"building_name":"테스트빌"}}
         """;
 
-    private HttpServer server;
-    private ExecutorService executor;
-    private KakaoAddressClient client;
+    private HttpServer httpServer;
+    private ExecutorService executorService;
+    private KakaoAddressClient kakaoAddressClient;
     private String baseUrl;
     private volatile int responseStatus;
     private volatile String responseBody;
@@ -52,20 +52,20 @@ class KakaoAddressClientTest {
         responseBody = response(1, DOCUMENT);
         requestReceived = new CountDownLatch(1);
         releaseResponse = new CountDownLatch(1);
-        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        executor = Executors.newVirtualThreadPerTaskExecutor();
-        server.setExecutor(executor);
-        server.createContext("/v2/local/search/address.json", this::respond);
-        server.start();
-        baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
-        client = client("test-kakao-key", Duration.ofSeconds(1));
+        httpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        executorService = Executors.newVirtualThreadPerTaskExecutor();
+        httpServer.setExecutor(executorService);
+        httpServer.createContext("/v2/local/search/address.json", this::respond);
+        httpServer.start();
+        baseUrl = "http://127.0.0.1:" + httpServer.getAddress().getPort();
+        kakaoAddressClient = client("test-kakao-key", Duration.ofSeconds(1));
     }
 
     @AfterEach
     void tearDown() {
         releaseResponse.countDown();
-        server.stop(0);
-        executor.shutdownNow();
+        httpServer.stop(0);
+        executorService.shutdownNow();
     }
 
     @ParameterizedTest
@@ -74,64 +74,81 @@ class KakaoAddressClientTest {
     void resolvesOneBuildingAddress(String addressType) {
         responseBody = response(1, DOCUMENT.replace("ROAD_ADDR", addressType));
 
-        var coordinates = client.findCoordinates(ADDRESS);
+        KakaoAddressResult result = kakaoAddressClient.findCoordinates(ADDRESS);
 
-        assertThat(coordinates).isPresent();
-        assertThat(coordinates.orElseThrow().getX()).isEqualTo(127.0276);
-        assertThat(coordinates.orElseThrow().getY()).isEqualTo(37.4979);
-        assertThat(coordinates.orElseThrow().getSRID()).isEqualTo(4326);
+        assertThat(result).isInstanceOfSatisfying(KakaoAddressResult.Success.class, success -> {
+            assertThat(success.coordinates().getX()).isEqualTo(127.0276);
+
+            assertThat(success.coordinates().getY()).isEqualTo(37.4979);
+
+            assertThat(success.coordinates().getSRID()).isEqualTo(4326);
+        });
+
         assertThat(requestMethod).isEqualTo("GET");
+
         assertThat(authorization).isEqualTo("KakaoAK test-kakao-key");
+
         assertThat(URLDecoder.decode(requestUri.getRawQuery(), StandardCharsets.UTF_8))
             .isEqualTo("query=" + ADDRESS + "&analyze_type=exact&size=2");
+
         assertThat(requestUri.getRawQuery()).contains("%26");
     }
 
     @Test
-    @DisplayName("검색 결과가 없으면 좌표 없이 반환한다")
-    void returnsEmptyForNoResults() {
+    @DisplayName("검색 결과가 없으면 주소 없음으로 분류한다")
+    void classifiesNoResults() {
         responseBody = response(0, "");
 
-        assertThat(client.findCoordinates(ADDRESS)).isEmpty();
+        assertThat(kakaoAddressClient.findCoordinates(ADDRESS)).isEqualTo(
+            new KakaoAddressResult.Failure(KakaoAddressErrorType.ADDRESS_NOT_FOUND));
+
         assertRequestSent();
     }
 
     @Test
     @DisplayName("여러 주소가 검색되면 첫 번째 결과를 임의로 선택하지 않는다")
-    void returnsEmptyForAmbiguousResults() {
+    void classifiesAmbiguousResults() {
         responseBody = response(2, DOCUMENT + "," + DOCUMENT);
 
-        assertThat(client.findCoordinates(ADDRESS)).isEmpty();
+        assertThat(kakaoAddressClient.findCoordinates(ADDRESS)).isEqualTo(
+            new KakaoAddressResult.Failure(KakaoAddressErrorType.AMBIGUOUS_ADDRESS));
+
         assertRequestSent();
     }
 
     @Test
     @DisplayName("응답 문서가 하나여도 전체 검색 결과가 여러 개면 좌표를 반환하지 않는다")
-    void returnsEmptyForMoreResultsThanReturnedDocuments() {
+    void classifiesMoreResultsThanReturnedDocuments() {
         responseBody = response(2, DOCUMENT);
 
-        assertThat(client.findCoordinates(ADDRESS)).isEmpty();
+        assertThat(kakaoAddressClient.findCoordinates(ADDRESS)).isEqualTo(
+            new KakaoAddressResult.Failure(KakaoAddressErrorType.AMBIGUOUS_ADDRESS));
+
         assertRequestSent();
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"REGION", "ROAD", "UNKNOWN"})
     @DisplayName("건물 주소가 아닌 지역명이나 도로명 결과는 좌표로 저장하지 않는다")
-    void returnsEmptyForNonBuildingAddress(String addressType) {
+    void classifiesNonBuildingAddress(String addressType) {
         responseBody = response(1, DOCUMENT.replace("ROAD_ADDR", addressType));
 
-        assertThat(client.findCoordinates(ADDRESS)).isEmpty();
+        assertThat(kakaoAddressClient.findCoordinates(ADDRESS)).isEqualTo(
+            new KakaoAddressResult.Failure(KakaoAddressErrorType.NON_BUILDING_ADDRESS));
+
         assertRequestSent();
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {401, 403, 429, 500, 503})
-    @DisplayName("Kakao HTTP 오류는 좌표 없이 반환한다")
-    void returnsEmptyForHttpErrors(int status) {
+    @CsvSource({"401,AUTHENTICATION_ERROR", "403,PERMISSION_ERROR", "429,QUOTA_EXCEEDED",
+        "500,KAKAO_SERVER_ERROR", "503,KAKAO_SERVER_ERROR"})
+    @DisplayName("Kakao HTTP 오류는 원인별 오류 유형으로 반환한다")
+    void classifiesHttpErrors(int status, KakaoAddressErrorType errorType) {
         responseStatus = status;
         responseBody = "{\"message\":\"test error\"}";
 
-        assertThat(client.findCoordinates(ADDRESS)).isEmpty();
+        assertThat(kakaoAddressClient.findCoordinates(ADDRESS)).isEqualTo(new KakaoAddressResult.Failure(errorType));
+
         assertRequestSent();
     }
 
@@ -142,42 +159,50 @@ class KakaoAddressClientTest {
         "{\"meta\":{\"total_count\":1},\"documents\":[]}",
         "{\"meta\":{\"total_count\":1},\"documents\":[{\"address_type\":\"ROAD_ADDR\"}]}"
     })
-    @DisplayName("손상되거나 필수 값이 없는 응답은 좌표 없이 반환한다")
-    void returnsEmptyForMalformedResponse(String body) {
+    @DisplayName("손상되거나 필수 값이 없는 응답은 형식 이상으로 분류한다")
+    void classifiesMalformedResponse(String body) {
         responseBody = body;
 
-        assertThat(client.findCoordinates(ADDRESS)).isEmpty();
+        assertThat(kakaoAddressClient.findCoordinates(ADDRESS)).isEqualTo(
+            new KakaoAddressResult.Failure(KakaoAddressErrorType.INVALID_RESPONSE));
+
         assertRequestSent();
     }
 
     @ParameterizedTest
     @CsvSource({"bad,37", "NaN,37", "Infinity,37", "127,NaN", "181,37", "127,91", "-180,37"})
     @DisplayName("숫자가 아니거나 유효 범위를 벗어난 좌표는 저장 대상에서 제외한다")
-    void returnsEmptyForInvalidCoordinates(String longitude, String latitude) {
+    void classifiesInvalidCoordinates(String longitude, String latitude) {
         responseBody = response(1, DOCUMENT.replace("127.0276", longitude).replace("37.4979", latitude));
 
-        assertThat(client.findCoordinates(ADDRESS)).isEmpty();
+        assertThat(kakaoAddressClient.findCoordinates(ADDRESS)).isEqualTo(
+            new KakaoAddressResult.Failure(KakaoAddressErrorType.INVALID_RESPONSE));
+
         assertRequestSent();
     }
 
     @Test
-    @DisplayName("응답 대기 시간이 초과되면 예외를 전파하지 않고 좌표 없이 반환한다")
-    void returnsEmptyOnReadTimeout() throws InterruptedException {
+    @DisplayName("응답 대기 시간이 초과되면 예외를 전파하지 않고 네트워크 오류로 반환한다")
+    void classifiesReadTimeout() throws InterruptedException {
         blockResponse = true;
-        client = client("test-kakao-key", Duration.ofMillis(100));
+        kakaoAddressClient = client("test-kakao-key", Duration.ofMillis(100));
 
-        assertThat(client.findCoordinates(ADDRESS)).isEmpty();
+        assertThat(kakaoAddressClient.findCoordinates(ADDRESS)).isEqualTo(
+            new KakaoAddressResult.Failure(KakaoAddressErrorType.NETWORK_ERROR));
+
         assertThat(requestReceived.await(1, TimeUnit.SECONDS)).isTrue();
     }
 
     @Test
-    @DisplayName("API 키가 없어도 HTTP 요청을 보내고 오류 응답이면 좌표 없이 반환한다")
-    void sendsRequestWithoutApiKeyAndReturnsEmptyOnHttpError() {
+    @DisplayName("API 키가 없어도 HTTP 요청을 보내고 인증 오류를 구분한다")
+    void sendsRequestWithoutApiKeyAndClassifiesHttpError() {
         responseStatus = 401;
         responseBody = "{\"message\":\"test error\"}";
-        client = client("", Duration.ofSeconds(1));
+        kakaoAddressClient = client("", Duration.ofSeconds(1));
 
-        assertThat(client.findCoordinates(ADDRESS)).isEmpty();
+        assertThat(kakaoAddressClient.findCoordinates(ADDRESS)).isEqualTo(
+            new KakaoAddressResult.Failure(KakaoAddressErrorType.AUTHENTICATION_ERROR));
+
         assertRequestSent();
     }
 

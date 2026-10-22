@@ -1,5 +1,7 @@
 package com.homes.zipsai.building;
 
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -8,16 +10,21 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import com.homes.zipsai.ZipsaiBackendApplication;
+import com.homes.zipsai.building.client.KakaoAddressClient;
+import com.homes.zipsai.building.client.KakaoAddressErrorType;
+import com.homes.zipsai.building.client.KakaoAddressResult;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -27,10 +34,19 @@ class BuildingRegistrationApiTests {
     private static final AtomicInteger REMOTE_IP = new AtomicInteger(1);
 
     @Autowired
-    MockMvc mvc;
+    MockMvc mockMvc;
 
     @Autowired
-    ObjectMapper json;
+    ObjectMapper objectMapper;
+
+    @MockitoBean
+    KakaoAddressClient kakaoAddressClient;
+
+    @BeforeEach
+    void setUp() {
+        when(kakaoAddressClient.findCoordinates(anyString()))
+            .thenReturn(new KakaoAddressResult.Failure(KakaoAddressErrorType.NETWORK_ERROR));
+    }
 
     @Test
     @DisplayName("관리자는 건물명 없이 건물을 등록할 수 있다")
@@ -38,7 +54,7 @@ class BuildingRegistrationApiTests {
         String ip = nextRemoteIp();
         String token = managerToken(ip);
 
-        mvc.perform(withIp(post("/api/v1/managers/me/building")
+        mockMvc.perform(withIp(post("/api/v1/managers/me/building")
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content("""
@@ -62,8 +78,8 @@ class BuildingRegistrationApiTests {
                         {"buildingName":"역삼래미안 아파트","roadAddress":"서울 강남구 역삼동 123-4"}
                         """);
 
-        mvc.perform(withIp(request, ip)).andExpect(status().isCreated());
-        mvc.perform(withIp(request, ip))
+        mockMvc.perform(withIp(request, ip)).andExpect(status().isCreated());
+        mockMvc.perform(withIp(request, ip))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("BUILDING_ALREADY_EXISTS"));
     }
@@ -73,14 +89,14 @@ class BuildingRegistrationApiTests {
     void unauthorizedBuildingRegistrationIsRejected() throws Exception {
         String ip = nextRemoteIp();
 
-        mvc.perform(withIp(post("/api/v1/managers/me/building")
+        mockMvc.perform(withIp(post("/api/v1/managers/me/building")
                         .contentType("application/json")
                         .content("""
                                 {"roadAddress":"서울 강남구 역삼동 123-4"}
                                 """), ip))
                 .andExpect(status().isUnauthorized());
 
-        mvc.perform(withIp(post("/api/v1/managers/me/building")
+        mockMvc.perform(withIp(post("/api/v1/managers/me/building")
                         .header("Authorization", "Bearer " + userToken(ip, "RESIDENT"))
                         .contentType("application/json")
                         .content("""
@@ -96,14 +112,14 @@ class BuildingRegistrationApiTests {
         String ip = nextRemoteIp();
         String token = managerToken(ip);
 
-        mvc.perform(withIp(post("/api/v1/managers/me/building")
+        mockMvc.perform(withIp(post("/api/v1/managers/me/building")
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content("{}"), ip))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("MISSING_REQUIRED_FIELD"));
 
-        mvc.perform(withIp(post("/api/v1/managers/me/building")
+        mockMvc.perform(withIp(post("/api/v1/managers/me/building")
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content("""
@@ -112,7 +128,7 @@ class BuildingRegistrationApiTests {
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
 
-        mvc.perform(withIp(post("/api/v1/managers/me/building")
+        mockMvc.perform(withIp(post("/api/v1/managers/me/building")
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content("""
@@ -129,7 +145,7 @@ class BuildingRegistrationApiTests {
         String token = managerToken(ip);
         long buildingId = registerBuilding(ip, token);
 
-        mvc.perform(withIp(post("/api/v1/managers/me/building/rooms")
+        mockMvc.perform(withIp(post("/api/v1/managers/me/building/rooms")
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content("""
@@ -152,14 +168,14 @@ class BuildingRegistrationApiTests {
         String token = managerToken(ip);
         registerBuilding(ip, token);
 
-        mvc.perform(withIp(roomRequest(token, "101"), ip))
+        mockMvc.perform(withIp(roomRequest(token, "101"), ip))
                 .andExpect(status().isCreated());
 
-        mvc.perform(withIp(roomRequest(token, "102", "101"), ip))
+        mockMvc.perform(withIp(roomRequest(token, "102", "101"), ip))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("ROOM_ALREADY_EXISTS"));
 
-        mvc.perform(withIp(roomRequest(token, "102"), ip))
+        mockMvc.perform(withIp(roomRequest(token, "102"), ip))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.createdCount").value(1));
     }
@@ -171,14 +187,14 @@ class BuildingRegistrationApiTests {
         String token = managerToken(ip);
         registerBuilding(ip, token);
 
-        mvc.perform(withIp(post("/api/v1/managers/me/building/rooms")
+        mockMvc.perform(withIp(post("/api/v1/managers/me/building/rooms")
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content("{}"), ip))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("MISSING_REQUIRED_FIELD"));
 
-        mvc.perform(withIp(roomRequest(token, "123456"), ip))
+        mockMvc.perform(withIp(roomRequest(token, "123456"), ip))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
     }
@@ -188,7 +204,7 @@ class BuildingRegistrationApiTests {
     void residentRoomRegistrationIsRejected() throws Exception {
         String residentIp = nextRemoteIp();
         String residentToken = userToken(residentIp, "RESIDENT");
-        mvc.perform(withIp(roomRequest(residentToken, "101"), residentIp))
+        mockMvc.perform(withIp(roomRequest(residentToken, "101"), residentIp))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
     }
@@ -199,13 +215,13 @@ class BuildingRegistrationApiTests {
         String ip = nextRemoteIp();
         String token = managerToken(ip);
 
-        mvc.perform(withIp(roomRequest(token, "101"), ip))
+        mockMvc.perform(withIp(roomRequest(token, "101"), ip))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error.code").value("BUILDING_NOT_FOUND"));
     }
 
     private long registerBuilding(String ip, String token) throws Exception {
-        MvcResult response = mvc.perform(withIp(post("/api/v1/managers/me/building")
+        MvcResult response = mockMvc.perform(withIp(post("/api/v1/managers/me/building")
                         .header("Authorization", "Bearer " + token)
                         .contentType("application/json")
                         .content("""
@@ -213,7 +229,7 @@ class BuildingRegistrationApiTests {
                                 """), ip))
                 .andExpect(status().isCreated())
                 .andReturn();
-        return json.readTree(response.getResponse().getContentAsString())
+        return objectMapper.readTree(response.getResponse().getContentAsString())
                 .path("data")
                 .path("buildingId")
                 .asLong();
@@ -235,7 +251,7 @@ class BuildingRegistrationApiTests {
 
     private String userToken(String ip, String role) throws Exception {
         String email = UUID.randomUUID() + "@example.com";
-        mvc.perform(withIp(post("/api/v1/auth/signup")
+        mockMvc.perform(withIp(post("/api/v1/auth/signup")
                         .contentType("application/json")
                         .content("""
                                 {"email":"%s","password":"Asdf!12345","passwordConfirm":"Asdf!12345",
@@ -246,7 +262,7 @@ class BuildingRegistrationApiTests {
                                 """.formatted(email)), ip))
                 .andExpect(status().isCreated());
 
-        MvcResult login = mvc.perform(withIp(post("/api/v1/auth/login")
+        MvcResult login = mockMvc.perform(withIp(post("/api/v1/auth/login")
                         .contentType("application/json")
                         .content("""
                                 {"email":"%s","password":"Asdf!12345"}
@@ -255,7 +271,7 @@ class BuildingRegistrationApiTests {
                 .andReturn();
         String originalToken = accessToken(login);
 
-        MvcResult selected = mvc.perform(withIp(patch("/api/v1/users/me")
+        MvcResult selected = mockMvc.perform(withIp(patch("/api/v1/users/me")
                         .header("Authorization", "Bearer " + originalToken)
                         .contentType("application/json")
                         .content("""
@@ -267,7 +283,7 @@ class BuildingRegistrationApiTests {
     }
 
     private String accessToken(MvcResult result) throws Exception {
-        return json.readTree(result.getResponse().getContentAsString())
+        return objectMapper.readTree(result.getResponse().getContentAsString())
                 .path("data")
                 .path("accessToken")
                 .asText();

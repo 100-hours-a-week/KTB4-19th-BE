@@ -60,6 +60,39 @@ public class StructuredLogger {
         }
     }
 
+    public void coordinateRetryResult(long buildingId, long claimVersion, String status, short retryFailureCount,
+                                      String errorType, String failureReason) {
+        try {
+            Map<String, Object> fields = new LinkedHashMap<>();
+            fields.put("building_id", buildingId);
+            fields.put("claim_version", claimVersion);
+            fields.put("status", status);
+            fields.put("retry_failure_count", retryFailureCount);
+            fields.put("error_type", errorType);
+            fields.put("failure_reason", failureReason);
+            fields.put("outcome", errorType == null ? "ok" : "fail");
+            fields.put("level", errorType == null ? "INFO" : "WARN");
+            log(event("building_coordinate_retry_result", MDC.get("traceId"), null, fields));
+        } catch (RuntimeException ignored) {
+
+        }
+    }
+
+    public void coordinateRetryFailed(Long buildingId, Long claimVersion, Throwable exception) {
+        try {
+            Map<String, Object> fields = new LinkedHashMap<>();
+            fields.put("building_id", buildingId);
+            fields.put("claim_version", claimVersion);
+            fields.put("outcome", "fail");
+            fields.put("exception_type", exception.getClass().getName());
+            fields.put("root_cause_type", NestedExceptionUtils.getMostSpecificCause(exception).getClass().getName());
+            fields.put("level", "ERROR");
+            log(event("building_coordinate_retry_error", MDC.get("traceId"), null, fields));
+        } catch (RuntimeException ignored) {
+
+        }
+    }
+
     public void stageDone(String traceId, String route, String stage, long durationMs,
                           String outcome, String errorCode) {
         if ("mysql".equals(stage)) {
@@ -118,7 +151,9 @@ public class StructuredLogger {
     private void log(Map<String, Object> event) {
         try {
             String logMessage = objectMapper.writeValueAsString(event);
-            if ("WARN".equals(event.get("level"))) {
+            if ("ERROR".equals(event.get("level"))) {
+                LOGGER.error(logMessage);
+            } else if ("WARN".equals(event.get("level"))) {
                 LOGGER.warn(logMessage);
             } else {
                 LOGGER.info(logMessage);
