@@ -61,7 +61,7 @@ class ConversationMessageServiceTest {
     @Test
     @DisplayName("첫 메시지를 저장하면 AI 답변을 맡기고 대화 ID를 바로 돌려준다")
     void handsOverReplyAndReturnsConversationId() {
-        PendingAiReply pendingAiReply = pendingAiReply(true);
+        PendingAiReply pendingAiReply = pendingAiReply();
         given(conversationService.saveFirstMessage(RESIDENT_ID, "천장에서 물이 새요", List.of()))
             .willReturn(pendingAiReply);
 
@@ -76,7 +76,7 @@ class ConversationMessageServiceTest {
     @Test
     @DisplayName("메시지를 저장하면 AI 답변을 맡기고 저장한 메시지를 바로 돌려준다")
     void handsOverReplyAndReturnsSavedMessage() {
-        PendingAiReply pendingAiReply = pendingAiReply(false);
+        PendingAiReply pendingAiReply = pendingAiReply();
         given(conversationReplyLock.acquire(CONVERSATION_ID)).willReturn(LOCK_TOKEN);
         given(conversationService.saveNextMessage(RESIDENT_ID, CONVERSATION_ID, "안방이요", List.of(), LOCK_TOKEN))
             .willReturn(pendingAiReply);
@@ -122,7 +122,7 @@ class ConversationMessageServiceTest {
         then(conversationReplyService).should(never()).reply(any());
     }
 
-    private static PendingAiReply pendingAiReply(boolean newConversation) {
+    private static PendingAiReply pendingAiReply() {
         Conversation conversation = Conversation.builder()
             .type(ConversationType.INQUIRY)
             .title("천장에서 물이 새요")
@@ -132,7 +132,6 @@ class ConversationMessageServiceTest {
             new MessageResponse(20L, SenderType.RESIDENT, MessageType.TEXT, "천장에서 물이 새요", List.of(), null, null);
         AiConverseRequest aiRequest =
             new AiConverseRequest(null, null, null, null, "turn-1", null, null, null, null, List.of(), null);
-        return new PendingAiReply(900L, 0, LOCK_TOKEN, RESIDENT_ID, conversation, residentMessage, newConversation,
-            null, aiRequest);
+        return new PendingAiReply(900L, 0, LOCK_TOKEN, RESIDENT_ID, conversation, residentMessage, aiRequest);
     }
 }

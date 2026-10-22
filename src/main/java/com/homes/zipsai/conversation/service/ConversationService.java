@@ -241,25 +241,17 @@ public class ConversationService {
     }
 
     @Transactional
-    public boolean discardUnansweredMessage(PendingAiReply pendingReply) {
-        ChatbotReplyOutbox outbox = getOutboxForUpdate(pendingReply.eventId());
-        if (!outbox.isProcessingBy(pendingReply.attempt())) {
-            warnHandledByAnotherAttempt(outbox, pendingReply.attempt());
-            return false;
+    public Optional<DiscardedMessage> discardUnansweredMessage(Long eventId, int attempt) {
+        ChatbotReplyOutbox outbox = getOutboxForUpdate(eventId);
+        if (!outbox.isProcessingBy(attempt)) {
+            warnHandledByAnotherAttempt(outbox, attempt);
+            return Optional.empty();
         }
 
-        outbox.fail();
-        Long conversationId = pendingReply.conversation().getId();
-        Long residentMessageId = pendingReply.residentMessage().messageId();
-        messageFileGroupRepository.deleteAllByMessageId(residentMessageId);
-        messageRepository.deleteById(residentMessageId);
-        if (pendingReply.newConversation()) {
-            conversationRepository.deleteById(conversationId);
-            return true;
-        }
-        conversationRepository.findById(conversationId)
-            .ifPresent(conversation -> conversation.updateLastMessageAt(pendingReply.previousLastMessageAt()));
-        return true;
+        Message residentMessage = messageRepository.findById(outbox.getMessageId()).orElseThrow();
+        Long conversationId = residentMessage.getConversation().getId();
+        deleteUnansweredMessage(outbox, conversationId);
+        return Optional.of(new DiscardedMessage(outbox.getUserId(), conversationId));
     }
 
     @Transactional(readOnly = true)
@@ -332,6 +324,18 @@ public class ConversationService {
                 fileGroup.recordAnalysis(observation.summary(), observation.ocrText());
             }
         }
+    }
+
+    private void deleteUnansweredMessage(ChatbotReplyOutbox outbox, Long conversationId) {
+        outbox.fail();
+        messageFileGroupRepository.deleteAllByMessageId(outbox.getMessageId());
+        messageRepository.deleteById(outbox.getMessageId());
+        if (outbox.isNewConversation()) {
+            conversationRepository.deleteById(conversationId);
+            return;
+        }
+        conversationRepository.findById(conversationId)
+            .ifPresent(conversation -> conversation.updateLastMessageAt(outbox.getPreviousLastMessageAt()));
     }
 
     private ChatbotReplyOutbox getOutboxForUpdate(Long eventId) {

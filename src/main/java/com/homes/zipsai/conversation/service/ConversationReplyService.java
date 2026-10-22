@@ -46,6 +46,13 @@ public class ConversationReplyService {
         });
     }
 
+    public void failReply(Long eventId, int attempt, String lockToken) {
+        conversationService.discardUnansweredMessage(eventId, attempt).ifPresent(discarded -> {
+            conversationReplyLock.release(discarded.conversationId(), lockToken);
+            publish(failedEvent(discarded.userId(), discarded.conversationId(), new InternalServerException()));
+        });
+    }
+
     private Optional<ChatbotReplyEvent> askAiForReply(Long userId, PendingAiReply pendingReply) {
         Long conversationId = pendingReply.conversation().getId();
         try {
@@ -75,7 +82,9 @@ public class ConversationReplyService {
                 LOGGER.warn("서버가 종료되는 중이라 답변 이벤트를 처리 중으로 남깁니다. eventId={}", pendingReply.eventId(), e);
                 return Optional.empty();
             }
-            if (!conversationService.discardUnansweredMessage(pendingReply)) {
+            Optional<DiscardedMessage> discarded =
+                conversationService.discardUnansweredMessage(pendingReply.eventId(), pendingReply.attempt());
+            if (discarded.isEmpty()) {
                 return Optional.empty();
             }
             throw e;

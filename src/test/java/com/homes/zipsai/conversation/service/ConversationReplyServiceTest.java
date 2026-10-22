@@ -2,6 +2,7 @@ package com.homes.zipsai.conversation.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
@@ -46,6 +47,7 @@ class ConversationReplyServiceTest {
 
     private static final long RESIDENT_ID = 1L;
     private static final long CONVERSATION_ID = 10L;
+    private static final long EVENT_ID = 900L;
     private static final String TURN_ID = "turn-1";
     private static final String LOCK_TOKEN = "lock-token";
     private static final String CHANNEL = "test:chatbot-reply-events";
@@ -91,7 +93,7 @@ class ConversationReplyServiceTest {
         conversationReplyService.reply(pendingAiReply);
 
         assertThat(publishedEvent()).isEqualTo(ChatbotReplyEvent.of(RESIDENT_ID, reply));
-        then(conversationService).should(never()).discardUnansweredMessage(any());
+        then(conversationService).should(never()).discardUnansweredMessage(any(), anyInt());
     }
 
     @Test
@@ -121,11 +123,11 @@ class ConversationReplyServiceTest {
     void discardsUnansweredMessageAndSendsErrorEventWhenAiFails() {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willThrow(new AiUnavailableException());
-        givenDiscarded(pendingAiReply);
+        givenDiscarded();
 
         conversationReplyService.reply(pendingAiReply);
 
-        then(conversationService).should().discardUnansweredMessage(pendingAiReply);
+        then(conversationService).should().discardUnansweredMessage(EVENT_ID, 0);
         then(conversationService).should(never()).saveAiReply(any(), any());
         ChatbotReplyEvent event = publishedEvent();
         assertThat(event.eventType()).isEqualTo(ChatbotReplyEvent.Type.FAILED);
@@ -139,7 +141,7 @@ class ConversationReplyServiceTest {
     void recordsErrorCodeForTaskLogWhenReplyFails() {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willThrow(new AiUnavailableException());
-        givenDiscarded(pendingAiReply);
+        givenDiscarded();
 
         conversationReplyService.reply(pendingAiReply);
 
@@ -151,11 +153,11 @@ class ConversationReplyServiceTest {
     void rejectsReplyWithAnotherTurnId() {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willReturn(aiResponse("other-turn"));
-        givenDiscarded(pendingAiReply);
+        givenDiscarded();
 
         conversationReplyService.reply(pendingAiReply);
 
-        then(conversationService).should().discardUnansweredMessage(pendingAiReply);
+        then(conversationService).should().discardUnansweredMessage(EVENT_ID, 0);
         then(conversationService).should(never()).saveAiReply(any(), any());
         assertThat(publishedEvent().failure()).hasFieldOrPropertyWithValue("code", "INTERNAL_SERVER_ERROR");
     }
@@ -166,11 +168,11 @@ class ConversationReplyServiceTest {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any()))
             .willThrow(new IllegalStateException("AI timeout"));
-        givenDiscarded(pendingAiReply);
+        givenDiscarded();
 
         conversationReplyService.reply(pendingAiReply);
 
-        then(conversationService).should().discardUnansweredMessage(pendingAiReply);
+        then(conversationService).should().discardUnansweredMessage(EVENT_ID, 0);
         ChatbotReplyEvent event = publishedEvent();
         assertThat(event.eventType()).isEqualTo(ChatbotReplyEvent.Type.FAILED);
         assertThat(event.failure()).hasFieldOrPropertyWithValue("code", "INTERNAL_SERVER_ERROR");
@@ -181,7 +183,7 @@ class ConversationReplyServiceTest {
     void releasesLockWhenReplyFails() {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willThrow(new AiUnavailableException());
-        givenDiscarded(pendingAiReply);
+        givenDiscarded();
 
         conversationReplyService.reply(pendingAiReply);
 
@@ -207,7 +209,7 @@ class ConversationReplyServiceTest {
     void skipsLockReleaseAndEventWhenAnotherAttemptOwnsFailure() {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willThrow(new AiUnavailableException());
-        given(conversationService.discardUnansweredMessage(pendingAiReply)).willReturn(false);
+        given(conversationService.discardUnansweredMessage(EVENT_ID, 0)).willReturn(Optional.empty());
 
         conversationReplyService.reply(pendingAiReply);
 
@@ -224,13 +226,42 @@ class ConversationReplyServiceTest {
 
         conversationReplyService.reply(pendingAiReply);
 
-        then(conversationService).should(never()).discardUnansweredMessage(any());
+        then(conversationService).should(never()).discardUnansweredMessage(any(), anyInt());
         then(conversationReplyLock).should(never()).release(any(), any());
         then(redisMessagePublisher).should(never()).publish(any(), any());
     }
 
-    private void givenDiscarded(PendingAiReply pendingAiReply) {
-        given(conversationService.discardUnansweredMessage(pendingAiReply)).willReturn(true);
+    @Test
+    @DisplayName("워커가 답변을 포기하면 메시지를 지운 뒤 잠금을 풀고 서버 오류를 chat-error 이벤트로 발행한다")
+    void releasesLockAndSendsErrorEventWhenWorkerGivesUp() {
+        given(conversationService.discardUnansweredMessage(EVENT_ID, 2))
+            .willReturn(Optional.of(new DiscardedMessage(RESIDENT_ID, CONVERSATION_ID)));
+
+        conversationReplyService.failReply(EVENT_ID, 2, LOCK_TOKEN);
+
+        then(conversationReplyLock).should().release(CONVERSATION_ID, LOCK_TOKEN);
+        ChatbotReplyEvent event = publishedEvent();
+        assertThat(event.eventType()).isEqualTo(ChatbotReplyEvent.Type.FAILED);
+        assertThat(event.userId()).isEqualTo(RESIDENT_ID);
+        assertThat(event.failure())
+            .hasFieldOrPropertyWithValue("conversationId", CONVERSATION_ID)
+            .hasFieldOrPropertyWithValue("code", "INTERNAL_SERVER_ERROR");
+    }
+
+    @Test
+    @DisplayName("워커가 포기하려는 이벤트를 다른 시도가 맡았으면 잠금을 풀지 않고 알리지 않는다")
+    void skipsLockReleaseAndEventWhenAnotherAttemptOwnsGivenUpReply() {
+        given(conversationService.discardUnansweredMessage(EVENT_ID, 2)).willReturn(Optional.empty());
+
+        conversationReplyService.failReply(EVENT_ID, 2, LOCK_TOKEN);
+
+        then(conversationReplyLock).should(never()).release(any(), any());
+        then(redisMessagePublisher).should(never()).publish(any(), any());
+    }
+
+    private void givenDiscarded() {
+        given(conversationService.discardUnansweredMessage(EVENT_ID, 0))
+            .willReturn(Optional.of(new DiscardedMessage(RESIDENT_ID, CONVERSATION_ID)));
     }
 
     private ChatbotReplyEvent publishedEvent() {
@@ -255,8 +286,7 @@ class ConversationReplyServiceTest {
             new MessageResponse(20L, SenderType.RESIDENT, MessageType.TEXT, "천장에서 물이 새요", List.of(), null, null);
         AiConverseRequest aiRequest =
             new AiConverseRequest(null, null, null, null, TURN_ID, null, null, null, null, List.of(), null);
-        return new PendingAiReply(900L, 0, LOCK_TOKEN, RESIDENT_ID, conversation, residentMessage, false, null,
-            aiRequest);
+        return new PendingAiReply(EVENT_ID, 0, LOCK_TOKEN, RESIDENT_ID, conversation, residentMessage, aiRequest);
     }
 
     private static MessageResponse assistantMessage() {
