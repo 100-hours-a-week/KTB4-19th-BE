@@ -188,12 +188,27 @@ public class ConversationService {
         return prepareReply(outbox, lockToken, room, residentMessage, attachments);
     }
 
+    @Transactional(readOnly = true)
+    public Optional<PendingAiReply> prepareReply(Long eventId, int attempt, String lockToken) {
+        ChatbotReplyOutbox outbox = chatbotReplyOutboxRepository.findById(eventId).orElseThrow();
+        if (!outbox.isProcessingBy(attempt)) {
+            warnHandledByAnotherAttempt(outbox, attempt);
+            return Optional.empty();
+        }
+
+        Message residentMessage = messageRepository.findById(outbox.getMessageId()).orElseThrow();
+        Room room = residentRoomService.getLivingRoom(outbox.getUserId());
+        List<AttachmentResponse> attachments =
+            findAttachments(List.of(residentMessage)).getOrDefault(residentMessage.getId(), List.of());
+        return Optional.of(prepareReply(outbox, lockToken, room, residentMessage, attachments));
+    }
+
     @Transactional
     public Optional<ConversationReplyResponse> saveAiReply(PendingAiReply pendingReply,
                                                            AiConverseResponse aiResponse) {
         ChatbotReplyOutbox outbox = getOutboxForUpdate(pendingReply.eventId());
         if (!outbox.isProcessingBy(pendingReply.attempt())) {
-            warnHandledByAnotherAttempt(outbox, pendingReply);
+            warnHandledByAnotherAttempt(outbox, pendingReply.attempt());
             return Optional.empty();
         }
 
@@ -229,7 +244,7 @@ public class ConversationService {
     public boolean discardUnansweredMessage(PendingAiReply pendingReply) {
         ChatbotReplyOutbox outbox = getOutboxForUpdate(pendingReply.eventId());
         if (!outbox.isProcessingBy(pendingReply.attempt())) {
-            warnHandledByAnotherAttempt(outbox, pendingReply);
+            warnHandledByAnotherAttempt(outbox, pendingReply.attempt());
             return false;
         }
 
@@ -323,9 +338,9 @@ public class ConversationService {
         return chatbotReplyOutboxRepository.findByIdForUpdate(eventId).orElseThrow();
     }
 
-    private void warnHandledByAnotherAttempt(ChatbotReplyOutbox outbox, PendingAiReply pendingReply) {
+    private void warnHandledByAnotherAttempt(ChatbotReplyOutbox outbox, int attempt) {
         LOGGER.warn("다른 시도가 맡은 답변 이벤트라 처리하지 않습니다. eventId={}, attempt={}, currentAttempt={}, status={}",
-            outbox.getId(), pendingReply.attempt(), outbox.getAttemptCount(), outbox.getStatus());
+            outbox.getId(), attempt, outbox.getAttemptCount(), outbox.getStatus());
     }
 
     private PendingAiReply prepareReply(ChatbotReplyOutbox outbox, String lockToken, Room room,

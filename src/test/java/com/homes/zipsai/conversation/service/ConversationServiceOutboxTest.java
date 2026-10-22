@@ -5,7 +5,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 import org.junit.jupiter.api.AfterEach;
@@ -30,6 +32,8 @@ import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.conversation.domain.Message;
+import com.homes.zipsai.conversation.domain.MessageType;
+import com.homes.zipsai.conversation.domain.SenderType;
 import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
@@ -84,7 +88,6 @@ class ConversationServiceOutboxTest {
             new StorageProperties(null, null, null, 300, 0), outboxRecorder, chatbotReplyOutboxRepository,
             conversationReplyLock);
         resident = withId(new User("resident@example.com", "password", "입주민", null), RESIDENT_ID);
-        given(residentRoomService.getLivingRoom(RESIDENT_ID)).willReturn(livingRoom(resident));
         MDC.put("traceId", TRACE_ID);
     }
 
@@ -96,6 +99,7 @@ class ConversationServiceOutboxTest {
     @Test
     @DisplayName("후속 메시지의 답변 이벤트에 받은 락 토큰을 남기고 같은 값을 응답 처리에 넘긴다")
     void savesProcessingEventWithLockTokenForNextMessage() {
+        givenLivingRoom();
         givenOwnedConversation();
         givenSavedMessageAndEvent();
 
@@ -117,6 +121,7 @@ class ConversationServiceOutboxTest {
     @Test
     @DisplayName("새 대화방은 대화방을 저장한 직후 답변 잠금을 잡고 그 뒤에 메시지를 저장한다")
     void acquiresReplyLockRightAfterSavingNewConversation() {
+        givenLivingRoom();
         givenSavedConversation();
         given(conversationReplyLock.acquire(CONVERSATION_ID)).willReturn(LOCK_TOKEN);
         givenSavedMessageAndEvent();
@@ -129,6 +134,53 @@ class ConversationServiceOutboxTest {
         inOrder.verify(messageRepository).save(any(Message.class));
         assertThat(savedEvent().getLockToken()).isEqualTo(LOCK_TOKEN);
         assertThat(pendingReply.lockToken()).isEqualTo(LOCK_TOKEN);
+    }
+
+    @Test
+    @DisplayName("재시도는 이벤트에 남은 메시지와 사용자로 AI 요청을 다시 만들고 넘겨받은 시도 번호와 락 토큰을 담는다")
+    void preparesRetryFromStoredEvent() {
+        givenLivingRoom();
+        ChatbotReplyOutbox outbox = givenStoredEvent(1);
+        given(messageRepository.findById(MESSAGE_ID)).willReturn(Optional.of(storedResidentMessage()));
+
+        PendingAiReply pendingReply = conversationService.prepareReply(EVENT_ID, 1, "retry-token").orElseThrow();
+
+        assertThat(pendingReply)
+            .hasFieldOrPropertyWithValue("eventId", EVENT_ID)
+            .hasFieldOrPropertyWithValue("attempt", 1)
+            .hasFieldOrPropertyWithValue("lockToken", "retry-token")
+            .hasFieldOrPropertyWithValue("userId", RESIDENT_ID);
+        assertThat(pendingReply.aiRequest().turnId()).isEqualTo("turn-1");
+        assertThat(pendingReply.aiRequest().traceId()).isEqualTo(outbox.getTraceId());
+        then(messageRepository).should().findAllByConversationIdBefore(CONVERSATION_ID, MESSAGE_ID);
+    }
+
+    @Test
+    @DisplayName("재시도할 이벤트를 다른 시도가 맡았으면 재료를 읽지 않고 빈 값을 돌려준다")
+    void preparesNothingWhenAnotherAttemptOwnsEvent() {
+        givenStoredEvent(2);
+
+        assertThat(conversationService.prepareReply(EVENT_ID, 1, "retry-token")).isEmpty();
+        then(messageRepository).should(never()).findById(any());
+    }
+
+    private void givenLivingRoom() {
+        given(residentRoomService.getLivingRoom(RESIDENT_ID)).willReturn(livingRoom(resident));
+    }
+
+    private ChatbotReplyOutbox givenStoredEvent(int attemptCount) {
+        ChatbotReplyOutbox outbox = withId(ChatbotReplyOutbox.startNextMessage(storedResidentMessage(), RESIDENT_ID,
+            "trace-retry", "old-token", null, LocalDateTime.of(2026, 10, 22, 10, 7)), EVENT_ID);
+        ReflectionTestUtils.setField(outbox, "attemptCount", attemptCount);
+        given(chatbotReplyOutboxRepository.findById(EVENT_ID)).willReturn(Optional.of(outbox));
+        return outbox;
+    }
+
+    private Message storedResidentMessage() {
+        Conversation conversation =
+            withId(new Conversation(resident, ConversationType.INQUIRY, "보일러가 안 켜져요"), CONVERSATION_ID);
+        return withId(new Message(conversation, "기사님 언제 오세요?", SenderType.RESIDENT, MessageType.TEXT, "turn-1"),
+            MESSAGE_ID);
     }
 
     private void givenOwnedConversation() {
