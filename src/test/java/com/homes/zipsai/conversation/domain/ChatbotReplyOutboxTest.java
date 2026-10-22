@@ -49,6 +49,27 @@ class ChatbotReplyOutboxTest {
             .hasFieldOrPropertyWithValue("processingStartedAt", NOW);
     }
 
+    @Test
+    @DisplayName("시도 번호가 다르면 처리 중인 이벤트로 보지 않는다")
+    void isNotProcessingByAnotherAttempt() {
+        ChatbotReplyOutbox outbox =
+            ChatbotReplyOutbox.startFirstMessage(residentMessage(500L), 7L, "trace-1", "lock-1", NOW);
+
+        assertThat(outbox.isProcessingBy(0)).isTrue();
+        assertThat(outbox.isProcessingBy(1)).isFalse();
+    }
+
+    @Test
+    @DisplayName("끝난 이벤트는 같은 시도 번호여도 처리 중으로 보지 않는다")
+    void isNotProcessingAfterCompleted() {
+        ChatbotReplyOutbox outbox =
+            ChatbotReplyOutbox.startFirstMessage(residentMessage(500L), 7L, "trace-1", "lock-1", NOW);
+
+        outbox.complete();
+
+        assertThat(outbox.isProcessingBy(0)).isFalse();
+    }
+
     private static Message residentMessage(long id) {
         Message message = new Message(null, "보일러가 안 켜져요", SenderType.RESIDENT, MessageType.TEXT, "turn-1");
         ReflectionTestUtils.setField(message, "id", id);

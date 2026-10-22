@@ -9,6 +9,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 import org.junit.jupiter.api.AfterEach;
@@ -81,7 +82,7 @@ class ConversationReplyServiceTest {
         AiConverseResponse aiResponse = aiResponse(TURN_ID);
         ConversationReplyResponse reply = new ConversationReplyResponse(CONVERSATION_ID, assistantMessage(), null);
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willReturn(aiResponse);
-        given(conversationService.saveAiReply(pendingAiReply, aiResponse)).willReturn(reply);
+        given(conversationService.saveAiReply(pendingAiReply, aiResponse)).willReturn(Optional.of(reply));
 
         conversationReplyService.reply(pendingAiReply);
 
@@ -101,7 +102,7 @@ class ConversationReplyServiceTest {
             return aiResponse;
         });
         ConversationReplyResponse reply = new ConversationReplyResponse(CONVERSATION_ID, assistantMessage(), null);
-        given(conversationService.saveAiReply(pendingAiReply, aiResponse)).willReturn(reply);
+        given(conversationService.saveAiReply(pendingAiReply, aiResponse)).willReturn(Optional.of(reply));
 
         conversationReplyService.reply(pendingAiReply);
 
@@ -116,6 +117,7 @@ class ConversationReplyServiceTest {
     void discardsUnansweredMessageAndSendsErrorEventWhenAiFails() {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willThrow(new AiUnavailableException());
+        givenDiscarded(pendingAiReply);
 
         conversationReplyService.reply(pendingAiReply);
 
@@ -133,6 +135,7 @@ class ConversationReplyServiceTest {
     void recordsErrorCodeForTaskLogWhenReplyFails() {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willThrow(new AiUnavailableException());
+        givenDiscarded(pendingAiReply);
 
         conversationReplyService.reply(pendingAiReply);
 
@@ -144,6 +147,7 @@ class ConversationReplyServiceTest {
     void rejectsReplyWithAnotherTurnId() {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willReturn(aiResponse("other-turn"));
+        givenDiscarded(pendingAiReply);
 
         conversationReplyService.reply(pendingAiReply);
 
@@ -158,6 +162,7 @@ class ConversationReplyServiceTest {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any()))
             .willThrow(new IllegalStateException("AI timeout"));
+        givenDiscarded(pendingAiReply);
 
         conversationReplyService.reply(pendingAiReply);
 
@@ -172,10 +177,42 @@ class ConversationReplyServiceTest {
     void releasesLockWhenReplyFails() {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willThrow(new AiUnavailableException());
+        givenDiscarded(pendingAiReply);
 
         conversationReplyService.reply(pendingAiReply);
 
         then(conversationReplyLock).should().release(CONVERSATION_ID, LOCK_TOKEN);
+    }
+
+    @Test
+    @DisplayName("다른 시도가 이미 맡은 이벤트면 답변을 저장해도 잠금을 풀지 않고 알리지 않는다")
+    void skipsLockReleaseAndEventWhenAnotherAttemptOwnsReply() {
+        PendingAiReply pendingAiReply = pendingAiReply();
+        AiConverseResponse aiResponse = aiResponse(TURN_ID);
+        given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willReturn(aiResponse);
+        given(conversationService.saveAiReply(pendingAiReply, aiResponse)).willReturn(Optional.empty());
+
+        conversationReplyService.reply(pendingAiReply);
+
+        then(conversationReplyLock).should(never()).release(any(), any());
+        then(redisMessagePublisher).should(never()).publish(any(), any());
+    }
+
+    @Test
+    @DisplayName("다른 시도가 이미 맡은 이벤트면 AI가 실패해도 잠금을 풀지 않고 알리지 않는다")
+    void skipsLockReleaseAndEventWhenAnotherAttemptOwnsFailure() {
+        PendingAiReply pendingAiReply = pendingAiReply();
+        given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willThrow(new AiUnavailableException());
+        given(conversationService.discardUnansweredMessage(pendingAiReply)).willReturn(false);
+
+        conversationReplyService.reply(pendingAiReply);
+
+        then(conversationReplyLock).should(never()).release(any(), any());
+        then(redisMessagePublisher).should(never()).publish(any(), any());
+    }
+
+    private void givenDiscarded(PendingAiReply pendingAiReply) {
+        given(conversationService.discardUnansweredMessage(pendingAiReply)).willReturn(true);
     }
 
     private ChatbotReplyEvent publishedEvent() {

@@ -1,5 +1,6 @@
 package com.homes.zipsai.conversation.service;
 
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -38,20 +39,21 @@ public class ConversationReplyService {
 
     @Async(AsyncConfig.CHATBOT_REPLY_EXECUTOR)
     public void reply(PendingAiReply pendingReply) {
-        ChatbotReplyEvent event = askAiForReply(pendingReply.userId(), pendingReply);
-        conversationReplyLock.release(pendingReply.conversation().getId(), pendingReply.lockToken());
-        publish(event);
+        askAiForReply(pendingReply.userId(), pendingReply).ifPresent(event -> {
+            conversationReplyLock.release(pendingReply.conversation().getId(), pendingReply.lockToken());
+            publish(event);
+        });
     }
 
-    private ChatbotReplyEvent askAiForReply(Long userId, PendingAiReply pendingReply) {
+    private Optional<ChatbotReplyEvent> askAiForReply(Long userId, PendingAiReply pendingReply) {
         Long conversationId = pendingReply.conversation().getId();
         try {
-            return ChatbotReplyEvent.of(userId, askAiAndSaveReply(userId, pendingReply));
+            return askAiAndSaveReply(userId, pendingReply).map(reply -> ChatbotReplyEvent.of(userId, reply));
         } catch (ApiException e) {
-            return failedEvent(userId, conversationId, e);
+            return Optional.of(failedEvent(userId, conversationId, e));
         } catch (RuntimeException e) {
             LOGGER.error("AI 답변을 처리하지 못했습니다. conversationId={}", conversationId, e);
-            return failedEvent(userId, conversationId, new InternalServerException());
+            return Optional.of(failedEvent(userId, conversationId, new InternalServerException()));
         }
     }
 
@@ -60,7 +62,7 @@ public class ConversationReplyService {
         return ChatbotReplyEvent.of(userId, ConversationReplyFailedResponse.of(conversationId, exception));
     }
 
-    private ConversationReplyResponse askAiAndSaveReply(Long userId, PendingAiReply pendingReply) {
+    private Optional<ConversationReplyResponse> askAiAndSaveReply(Long userId, PendingAiReply pendingReply) {
         try {
             String turnId = pendingReply.aiRequest().turnId();
             Consumer<String> onReplyDelta = replyDeltaSender(userId, pendingReply.conversation().getId());
@@ -68,7 +70,9 @@ public class ConversationReplyService {
             verifyPairedWithRequest(turnId, aiResponse);
             return conversationService.saveAiReply(pendingReply, aiResponse);
         } catch (RuntimeException e) {
-            conversationService.discardUnansweredMessage(pendingReply);
+            if (!conversationService.discardUnansweredMessage(pendingReply)) {
+                return Optional.empty();
+            }
             throw e;
         }
     }

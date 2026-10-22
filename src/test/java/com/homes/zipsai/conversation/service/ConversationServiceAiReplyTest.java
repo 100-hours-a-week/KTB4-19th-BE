@@ -27,6 +27,8 @@ import com.homes.zipsai.common.service.S3StorageService;
 import com.homes.zipsai.conversation.ai.AiConverseRequest;
 import com.homes.zipsai.conversation.ai.AiConverseResponse;
 import com.homes.zipsai.conversation.ai.AiRoute;
+import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
+import com.homes.zipsai.conversation.domain.ChatbotReplyOutboxStatus;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.conversation.domain.Message;
@@ -35,6 +37,7 @@ import com.homes.zipsai.conversation.domain.MessageType;
 import com.homes.zipsai.conversation.domain.SenderType;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyResponse;
 import com.homes.zipsai.conversation.dto.response.MessageResponse;
+import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
@@ -45,6 +48,7 @@ class ConversationServiceAiReplyTest {
 
     private static final long CONVERSATION_ID = 10L;
     private static final long RESIDENT_MESSAGE_ID = 20L;
+    private static final long EVENT_ID = 900L;
     private static final String TURN_ID = "turn-1";
     private static final LocalDateTime REPLIED_AT = LocalDateTime.of(2026, 9, 29, 12, 0);
     private static final List<AiConverseResponse.Citation> CITATIONS = List.of(
@@ -71,19 +75,24 @@ class ConversationServiceAiReplyTest {
     @Mock
     OutboxRecorder outboxRecorder;
 
+    @Mock
+    ChatbotReplyOutboxRepository chatbotReplyOutboxRepository;
+
     ConversationService conversationService;
     Conversation conversation;
+    ChatbotReplyOutbox outbox;
 
     @BeforeEach
     void setUp() {
         conversationService = new ConversationService(conversationRepository, messageRepository,
             messageFileGroupRepository, fileRepository, residentRoomService, s3StorageService,
-            new StorageProperties(null, null, null, 300, 0), outboxRecorder, null, null);
+            new StorageProperties(null, null, null, 300, 0), outboxRecorder, chatbotReplyOutboxRepository, null);
         conversation = Conversation.builder()
             .type(ConversationType.INQUIRY)
             .title("분리수거 요일이 언제인가요?")
             .build();
         ReflectionTestUtils.setField(conversation, "id", CONVERSATION_ID);
+        outbox = processingOutbox();
     }
 
     @Test
@@ -112,7 +121,8 @@ class ConversationServiceAiReplyTest {
         givenReplySaved();
 
         ConversationReplyResponse reply =
-            conversationService.saveAiReply(pendingAiReply(true, null), knowledge("화요일과 금요일입니다.", CITATIONS));
+            conversationService.saveAiReply(pendingAiReply(true, null), knowledge("화요일과 금요일입니다.", CITATIONS))
+                .orElseThrow();
 
         assertThat(reply.assistantMessage().messageType()).isEqualTo(MessageType.TEXT);
         assertThat(reply.assistantMessage().summaryCard()).isNull();
@@ -124,7 +134,8 @@ class ConversationServiceAiReplyTest {
         givenReplySaved();
 
         ConversationReplyResponse reply =
-            conversationService.saveAiReply(pendingAiReply(true, null), knowledge("답변드리기 어렵습니다.", List.of()));
+            conversationService.saveAiReply(pendingAiReply(true, null), knowledge("답변드리기 어렵습니다.", List.of()))
+                .orElseThrow();
 
         assertThat(reply.assistantMessage().messageType()).isEqualTo(MessageType.SUMMARY_CARD);
         assertThat(reply.assistantMessage().summaryCard()).isNotNull();
@@ -136,7 +147,8 @@ class ConversationServiceAiReplyTest {
         givenReplySaved();
 
         ConversationReplyResponse reply =
-            conversationService.saveAiReply(pendingAiReply(true, null), knowledge("화요일과 금요일입니다.", CITATIONS));
+            conversationService.saveAiReply(pendingAiReply(true, null), knowledge("화요일과 금요일입니다.", CITATIONS))
+                .orElseThrow();
 
         assertThat(reply.closesAt().toLocalDateTime()).isEqualTo(REPLIED_AT.plusMinutes(5));
     }
@@ -147,7 +159,8 @@ class ConversationServiceAiReplyTest {
         givenReplySaved();
 
         ConversationReplyResponse reply =
-            conversationService.saveAiReply(pendingAiReply(true, null), knowledge("답변드리기 어렵습니다.", List.of()));
+            conversationService.saveAiReply(pendingAiReply(true, null), knowledge("답변드리기 어렵습니다.", List.of()))
+                .orElseThrow();
 
         assertThat(reply.closesAt()).isNull();
     }
@@ -189,8 +202,54 @@ class ConversationServiceAiReplyTest {
     }
 
     @Test
+    @DisplayName("AI 답변을 저장하면 답변 이벤트를 완료로 바꾼다")
+    void completesEventWhenReplyIsSaved() {
+        givenReplySaved();
+
+        conversationService.saveAiReply(pendingAiReply(true, null), knowledge("화요일과 금요일입니다.", CITATIONS));
+
+        assertThat(outbox.getStatus()).isEqualTo(ChatbotReplyOutboxStatus.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("다른 시도가 맡은 답변 이벤트면 AI 답변을 저장하지 않는다")
+    void savesNoReplyWhenAnotherAttemptOwnsEvent() {
+        givenEventTakenByAnotherAttempt();
+
+        Optional<ConversationReplyResponse> reply =
+            conversationService.saveAiReply(pendingAiReply(true, null), knowledge("화요일과 금요일입니다.", CITATIONS));
+
+        assertThat(reply).isEmpty();
+        then(messageRepository).should(never()).save(any());
+        assertThat(outbox.getStatus()).isEqualTo(ChatbotReplyOutboxStatus.PROCESSING);
+    }
+
+    @Test
+    @DisplayName("답변받지 못한 메시지를 지우면 답변 이벤트를 실패로 바꾼다")
+    void failsEventWhenUnansweredMessageIsDiscarded() {
+        givenEvent();
+
+        conversationService.discardUnansweredMessage(pendingAiReply(true, null));
+
+        assertThat(outbox.getStatus()).isEqualTo(ChatbotReplyOutboxStatus.FAILED);
+    }
+
+    @Test
+    @DisplayName("다른 시도가 맡은 답변 이벤트면 메시지를 지우지 않는다")
+    void keepsMessageWhenAnotherAttemptOwnsEvent() {
+        givenEventTakenByAnotherAttempt();
+
+        boolean discarded = conversationService.discardUnansweredMessage(pendingAiReply(true, null));
+
+        assertThat(discarded).isFalse();
+        then(messageRepository).should(never()).deleteById(any());
+        then(conversationRepository).should(never()).deleteById(any());
+    }
+
+    @Test
     @DisplayName("첫 메시지의 답변을 받지 못하면 사진 연결, 메시지, 대화를 모두 지운다")
     void deletesConversationWhenFirstMessageIsUnanswered() {
+        givenEvent();
         conversationService.discardUnansweredMessage(pendingAiReply(true, null));
 
         then(messageFileGroupRepository).should().deleteAllByMessageId(RESIDENT_MESSAGE_ID);
@@ -204,6 +263,7 @@ class ConversationServiceAiReplyTest {
         LocalDateTime previousLastMessageAt = LocalDateTime.of(2026, 9, 27, 14, 0);
         conversation.updateLastMessageAt(LocalDateTime.of(2026, 9, 27, 15, 0));
         given(conversationRepository.findById(CONVERSATION_ID)).willReturn(Optional.of(conversation));
+        givenEvent();
 
         conversationService.discardUnansweredMessage(pendingAiReply(false, previousLastMessageAt));
 
@@ -212,7 +272,17 @@ class ConversationServiceAiReplyTest {
         assertThat(conversation.getLastMessageAt()).isEqualTo(previousLastMessageAt);
     }
 
+    private void givenEvent() {
+        given(chatbotReplyOutboxRepository.findByIdForUpdate(EVENT_ID)).willReturn(Optional.of(outbox));
+    }
+
+    private void givenEventTakenByAnotherAttempt() {
+        ReflectionTestUtils.setField(outbox, "attemptCount", 1);
+        givenEvent();
+    }
+
     private void givenReplySaved() {
+        givenEvent();
         given(conversationRepository.getReferenceById(CONVERSATION_ID)).willReturn(conversation);
         given(messageRepository.save(any(Message.class))).willAnswer(invocation -> {
             Message message = invocation.getArgument(0);
@@ -242,8 +312,17 @@ class ConversationServiceAiReplyTest {
             MessageType.TEXT, "분리수거 요일이 언제인가요?", List.of(), null, null);
         AiConverseRequest aiRequest =
             new AiConverseRequest(null, null, null, null, TURN_ID, null, null, null, null, List.of(), null);
-        return new PendingAiReply(900L, 0, "lock-token", 1L, conversation, residentMessage, newConversation,
+        return new PendingAiReply(EVENT_ID, 0, "lock-token", 1L, conversation, residentMessage, newConversation,
             previousLastMessageAt, aiRequest);
+    }
+
+    private static ChatbotReplyOutbox processingOutbox() {
+        Message residentMessage = new Message(null, "분리수거 요일이 언제인가요?", SenderType.RESIDENT, MessageType.TEXT, TURN_ID);
+        ReflectionTestUtils.setField(residentMessage, "id", RESIDENT_MESSAGE_ID);
+        ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startFirstMessage(residentMessage, 1L, "trace-1", "lock-token",
+            REPLIED_AT);
+        ReflectionTestUtils.setField(outbox, "id", EVENT_ID);
+        return outbox;
     }
 
     private static AiConverseResponse complaintWithImageAnalysis(AiConverseResponse.ImageObservation observation) {
