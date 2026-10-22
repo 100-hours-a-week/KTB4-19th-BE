@@ -46,7 +46,7 @@ public class HttpAiConverseClient implements AiConverseClient {
     public HttpAiConverseClient(RestClient.Builder builder, @Value("${app.ai.base-url}") String baseUrl,
                                 @Value("${app.ai.converse-stream-path}") String converseStreamPath,
                                 @Value("${app.ai.converse-connect-timeout:PT3S}") Duration connectTimeout,
-                                @Value("${app.ai.converse-read-timeout:PT60S}") Duration readTimeout,
+                                @Value("${app.ai.converse-read-timeout:PT120S}") Duration readTimeout,
                                 ObjectMapper objectMapper) {
         this(builder.baseUrl(baseUrl).requestFactory(requestFactory(connectTimeout, readTimeout)).build(),
             converseStreamPath, objectMapper);
