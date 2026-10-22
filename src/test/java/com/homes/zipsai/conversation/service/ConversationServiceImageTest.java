@@ -30,6 +30,7 @@ import com.homes.zipsai.common.domain.File;
 import com.homes.zipsai.common.repository.FileRepository;
 import com.homes.zipsai.common.service.S3StorageService;
 import com.homes.zipsai.conversation.ai.AiConverseRequest;
+import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.conversation.domain.Message;
@@ -37,6 +38,7 @@ import com.homes.zipsai.conversation.domain.MessageFileGroup;
 import com.homes.zipsai.conversation.domain.MessageType;
 import com.homes.zipsai.conversation.domain.SenderType;
 import com.homes.zipsai.conversation.dto.response.AttachmentResponse;
+import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
@@ -74,6 +76,12 @@ class ConversationServiceImageTest {
     @Mock
     OutboxRecorder outboxRecorder;
 
+    @Mock
+    ChatbotReplyOutboxRepository chatbotReplyOutboxRepository;
+
+    @Mock
+    ConversationReplyLock conversationReplyLock;
+
     ConversationService conversationService;
     User resident;
 
@@ -81,7 +89,8 @@ class ConversationServiceImageTest {
     void setUp() {
         conversationService = new ConversationService(conversationRepository, messageRepository,
             messageFileGroupRepository, fileRepository, residentRoomService, s3StorageService,
-            new StorageProperties(null, null, null, 300, 0), outboxRecorder);
+            new StorageProperties(null, null, null, 300, 0), outboxRecorder, chatbotReplyOutboxRepository,
+            conversationReplyLock);
         resident = user(RESIDENT_ID);
         given(residentRoomService.getLivingRoom(RESIDENT_ID)).willReturn(livingRoom(resident));
     }
@@ -221,7 +230,8 @@ class ConversationServiceImageTest {
         given(conversationRepository.findByIdAndDeletedAtIsNull(10L)).willReturn(Optional.of(conversation));
         givenFiles(uploaded(4L, user(OTHER_USER_ID), "jpg"));
 
-        assertThatThrownBy(() -> conversationService.saveNextMessage(RESIDENT_ID, 10L, "안방이요", List.of(4L)))
+        assertThatThrownBy(() ->
+            conversationService.saveNextMessage(RESIDENT_ID, 10L, "안방이요", List.of(4L), "lock-token"))
             .isInstanceOf(ForbiddenException.class);
         then(messageRepository).should(never()).save(any());
     }
@@ -240,12 +250,14 @@ class ConversationServiceImageTest {
             .build();
         fileGroup.recordAnalysis("천장 얼룩", "관리실 010");
         given(conversationRepository.findByIdAndDeletedAtIsNull(10L)).willReturn(Optional.of(conversation));
-        given(messageRepository.findAllByConversationId(10L)).willReturn(List.of(firstMessage));
+        given(messageRepository.findAllByConversationIdBefore(10L, 22L)).willReturn(List.of(firstMessage));
         given(messageFileGroupRepository.findAllByMessageIds(List.of(21L))).willReturn(List.of(fileGroup));
         given(messageRepository.save(any(Message.class)))
             .willAnswer(invocation -> withId(invocation.getArgument(0), 22L));
+        givenSavedOutbox();
 
-        PendingAiReply pendingAiReply = conversationService.saveNextMessage(RESIDENT_ID, 10L, "안방이요", null);
+        PendingAiReply pendingAiReply =
+            conversationService.saveNextMessage(RESIDENT_ID, 10L, "안방이요", null, "lock-token");
 
         assertThat(pendingAiReply.aiRequest().conversationHistory().getFirst().images())
             .containsExactly(new AiConverseRequest.HistoryImage(4L, "천장 얼룩", "관리실 010"));
@@ -255,8 +267,15 @@ class ConversationServiceImageTest {
     private void givenSavedMessage() {
         given(conversationRepository.save(any(Conversation.class)))
             .willAnswer(invocation -> withId(invocation.getArgument(0), 10L));
+        given(conversationReplyLock.acquire(10L)).willReturn("lock-token");
         given(messageRepository.save(any(Message.class)))
             .willAnswer(invocation -> withId(invocation.getArgument(0), 20L));
+        givenSavedOutbox();
+    }
+
+    private void givenSavedOutbox() {
+        given(chatbotReplyOutboxRepository.save(any(ChatbotReplyOutbox.class)))
+            .willAnswer(invocation -> withId(invocation.getArgument(0), 900L));
     }
 
     private void givenAttachedImages() {

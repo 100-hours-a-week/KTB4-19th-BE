@@ -20,6 +20,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.task.SyncTaskExecutor;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -37,6 +38,7 @@ import com.homes.zipsai.conversation.ai.AiConverseRequest;
 import com.homes.zipsai.conversation.ai.AiConverseResponse;
 import com.homes.zipsai.conversation.ai.AiRoute;
 import com.homes.zipsai.conversation.domain.Message;
+import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
 import com.homes.zipsai.conversation.service.ConversationReplyLock;
@@ -69,6 +71,9 @@ class ConversationMockAiTest {
     @Autowired
     MessageRepository messageRepository;
 
+    @Autowired
+    ChatbotReplyOutboxRepository chatbotReplyOutboxRepository;
+
     @MockitoBean
     AiConverseClient aiConverseClient;
 
@@ -90,6 +95,7 @@ class ConversationMockAiTest {
         given(s3StorageService.prepareDownload(anyString(), any()))
             .willAnswer(invocation ->
                 new S3StorageService.PresignedDownload("https://s3.test/" + invocation.getArgument(0)));
+        given(conversationReplyLock.acquire(any())).willReturn("lock-token");
     }
 
     @Test
@@ -213,6 +219,25 @@ class ConversationMockAiTest {
         return new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, request.turnId(),
             new AiConverseResponse.Data(AiRoute.COMPLAINT, AiComplaintState.COLLECTING, "위치가 어디인가요?",
                 AiConverseResponse.Result.builder().missingFields(List.of("location")).build()));
+    }
+
+    @Test
+    @DisplayName("새 대화방의 답변 잠금을 잡지 못하면 대화방, 메시지, 답변 이벤트를 모두 남기지 않는다")
+    void rollsBackFirstMessageWhenReplyLockCannotBeAcquired() {
+        String email = conversationTestFixture.livingResident("302");
+        RequestPostProcessor resident = conversationTestFixture.authenticatedAs(email);
+        long conversations = conversationRepository.count();
+        long messages = messageRepository.count();
+        long events = chatbotReplyOutboxRepository.count();
+        given(conversationReplyLock.acquire(any())).willThrow(new RedisConnectionFailureException("Redis 연결 실패"));
+
+        MvcTestResult result = postConversation(resident, "천장에서 물이 새요");
+
+        assertThat(result).hasStatus5xxServerError();
+        assertThat(conversationRepository.count()).isEqualTo(conversations);
+        assertThat(messageRepository.count()).isEqualTo(messages);
+        assertThat(chatbotReplyOutboxRepository.count()).isEqualTo(events);
+        then(aiConverseClient).shouldHaveNoInteractions();
     }
 
     private long startConversation(RequestPostProcessor resident, String content, Long... attachmentIds)
