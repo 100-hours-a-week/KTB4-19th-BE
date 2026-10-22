@@ -145,7 +145,7 @@ jobs:
           },
           "environments": {
             "staging": {"CORS_ALLOWED_ORIGINS": "https://v2.zipsai.co.kr", "COMPLAINT_AI_FEEDBACK_OPERATOR_IDS": "4"},
-            "production": {"CORS_ALLOWED_ORIGINS": "https://zipsai.co.kr"}
+            "production": {"CORS_ALLOWED_ORIGINS": "https://zipsai.co.kr", "COMPLAINT_AI_FEEDBACK_OPERATOR_IDS": "4"}
           },
           "services": {"api": {"enabled": true}, "worker": {"enabled": true}}
         }
