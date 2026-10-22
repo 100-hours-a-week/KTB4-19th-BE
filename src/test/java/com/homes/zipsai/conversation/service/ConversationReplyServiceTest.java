@@ -62,12 +62,16 @@ class ConversationReplyServiceTest {
     @Mock
     ConversationReplyLock conversationReplyLock;
 
+    @Mock
+    ChatbotReplyShutdownSignal chatbotReplyShutdownSignal;
+
     ConversationReplyService conversationReplyService;
 
     @BeforeEach
     void setUp() {
         conversationReplyService = new ConversationReplyService(conversationService, aiConverseClient,
-            redisMessagePublisher, new ChatbotReplyPubSubProperties(CHANNEL), conversationReplyLock);
+            redisMessagePublisher, new ChatbotReplyPubSubProperties(CHANNEL), conversationReplyLock,
+            chatbotReplyShutdownSignal);
     }
 
     @AfterEach
@@ -207,6 +211,20 @@ class ConversationReplyServiceTest {
 
         conversationReplyService.reply(pendingAiReply);
 
+        then(conversationReplyLock).should(never()).release(any(), any());
+        then(redisMessagePublisher).should(never()).publish(any(), any());
+    }
+
+    @Test
+    @DisplayName("서버가 종료되는 중에 AI 호출이 끊기면 메시지를 지우지 않고 잠금도 풀지 않는다")
+    void keepsMessageAndLockWhenAiIsInterruptedByShutdown() {
+        PendingAiReply pendingAiReply = pendingAiReply();
+        given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willThrow(new AiUnavailableException());
+        given(chatbotReplyShutdownSignal.isShuttingDown()).willReturn(true);
+
+        conversationReplyService.reply(pendingAiReply);
+
+        then(conversationService).should(never()).discardUnansweredMessage(any());
         then(conversationReplyLock).should(never()).release(any(), any());
         then(redisMessagePublisher).should(never()).publish(any(), any());
     }

@@ -36,6 +36,7 @@ public class ConversationReplyService {
     private final RedisMessagePublisher redisMessagePublisher;
     private final ChatbotReplyPubSubProperties chatbotReplyPubSubProperties;
     private final ConversationReplyLock conversationReplyLock;
+    private final ChatbotReplyShutdownSignal chatbotReplyShutdownSignal;
 
     @Async(AsyncConfig.CHATBOT_REPLY_EXECUTOR)
     public void reply(PendingAiReply pendingReply) {
@@ -70,6 +71,10 @@ public class ConversationReplyService {
             verifyPairedWithRequest(turnId, aiResponse);
             return conversationService.saveAiReply(pendingReply, aiResponse);
         } catch (RuntimeException e) {
+            if (chatbotReplyShutdownSignal.isShuttingDown()) {
+                LOGGER.warn("서버가 종료되는 중이라 답변 이벤트를 처리 중으로 남깁니다. eventId={}", pendingReply.eventId(), e);
+                return Optional.empty();
+            }
             if (!conversationService.discardUnansweredMessage(pendingReply)) {
                 return Optional.empty();
             }
