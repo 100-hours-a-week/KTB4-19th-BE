@@ -37,9 +37,9 @@ public class ConversationReplyService {
     private final ConversationReplyLock conversationReplyLock;
 
     @Async(AsyncConfig.CHATBOT_REPLY_EXECUTOR)
-    public void reply(Long userId, PendingAiReply pendingReply, String lockToken) {
-        ChatbotReplyEvent event = askAiForReply(userId, pendingReply);
-        conversationReplyLock.release(pendingReply.conversation().getId(), lockToken);
+    public void reply(PendingAiReply pendingReply) {
+        ChatbotReplyEvent event = askAiForReply(pendingReply.userId(), pendingReply);
+        conversationReplyLock.release(pendingReply.conversation().getId(), pendingReply.lockToken());
         publish(event);
     }
 

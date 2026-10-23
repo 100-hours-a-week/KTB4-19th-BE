@@ -19,16 +19,8 @@ public class ConversationMessageService {
 
     public ConversationCreateResponse createConversation(Long userId, String content, List<Long> attachmentIds) {
         PendingAiReply pendingReply = conversationService.saveFirstMessage(userId, content, attachmentIds);
-        Long conversationId = pendingReply.conversation().getId();
-        String lockToken;
-        try {
-            lockToken = conversationReplyLock.acquire(conversationId);
-        } catch (RuntimeException e) {
-            conversationService.discardUnansweredMessage(pendingReply);
-            throw e;
-        }
-        conversationReplyService.reply(userId, pendingReply, lockToken);
-        return new ConversationCreateResponse(conversationId);
+        conversationReplyService.reply(pendingReply);
+        return new ConversationCreateResponse(pendingReply.conversation().getId());
     }
 
     public MessageSendResponse sendMessage(Long userId, Long conversationId, String content,
@@ -36,12 +28,13 @@ public class ConversationMessageService {
         String lockToken = conversationReplyLock.acquire(conversationId);
         PendingAiReply pendingReply;
         try {
-            pendingReply = conversationService.saveNextMessage(userId, conversationId, content, attachmentIds);
+            pendingReply = conversationService.saveNextMessage(userId, conversationId, content, attachmentIds,
+                lockToken);
         } catch (RuntimeException e) {
             conversationReplyLock.release(conversationId, lockToken);
             throw e;
         }
-        conversationReplyService.reply(userId, pendingReply, lockToken);
+        conversationReplyService.reply(pendingReply);
         return MessageSendResponse.of(conversationId, pendingReply.residentMessage());
     }
 }

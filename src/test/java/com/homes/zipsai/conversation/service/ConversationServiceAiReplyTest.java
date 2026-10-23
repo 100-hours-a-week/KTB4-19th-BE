@@ -78,7 +78,7 @@ class ConversationServiceAiReplyTest {
     void setUp() {
         conversationService = new ConversationService(conversationRepository, messageRepository,
             messageFileGroupRepository, fileRepository, residentRoomService, s3StorageService,
-            new StorageProperties(null, null, null, 300, 0), outboxRecorder);
+            new StorageProperties(null, null, null, 300, 0), outboxRecorder, null, null);
         conversation = Conversation.builder()
             .type(ConversationType.INQUIRY)
             .title("분리수거 요일이 언제인가요?")
@@ -242,7 +242,8 @@ class ConversationServiceAiReplyTest {
             MessageType.TEXT, "분리수거 요일이 언제인가요?", List.of(), null, null);
         AiConverseRequest aiRequest =
             new AiConverseRequest(null, null, null, null, TURN_ID, null, null, null, null, List.of(), null);
-        return new PendingAiReply(conversation, residentMessage, newConversation, previousLastMessageAt, aiRequest);
+        return new PendingAiReply(900L, 0, "lock-token", 1L, conversation, residentMessage, newConversation,
+            previousLastMessageAt, aiRequest);
     }
 
     private static AiConverseResponse complaintWithImageAnalysis(AiConverseResponse.ImageObservation observation) {

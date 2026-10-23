@@ -83,7 +83,7 @@ class ConversationReplyServiceTest {
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willReturn(aiResponse);
         given(conversationService.saveAiReply(pendingAiReply, aiResponse)).willReturn(reply);
 
-        conversationReplyService.reply(RESIDENT_ID, pendingAiReply, LOCK_TOKEN);
+        conversationReplyService.reply(pendingAiReply);
 
         assertThat(publishedEvent()).isEqualTo(ChatbotReplyEvent.of(RESIDENT_ID, reply));
         then(conversationService).should(never()).discardUnansweredMessage(any());
@@ -103,7 +103,7 @@ class ConversationReplyServiceTest {
         ConversationReplyResponse reply = new ConversationReplyResponse(CONVERSATION_ID, assistantMessage(), null);
         given(conversationService.saveAiReply(pendingAiReply, aiResponse)).willReturn(reply);
 
-        conversationReplyService.reply(RESIDENT_ID, pendingAiReply, LOCK_TOKEN);
+        conversationReplyService.reply(pendingAiReply);
 
         assertThat(publishedEvents(3)).containsExactly(
             ChatbotReplyEvent.of(RESIDENT_ID, new ConversationReplyDeltaResponse(CONVERSATION_ID, 1, "위치")),
@@ -117,7 +117,7 @@ class ConversationReplyServiceTest {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willThrow(new AiUnavailableException());
 
-        conversationReplyService.reply(RESIDENT_ID, pendingAiReply, LOCK_TOKEN);
+        conversationReplyService.reply(pendingAiReply);
 
         then(conversationService).should().discardUnansweredMessage(pendingAiReply);
         then(conversationService).should(never()).saveAiReply(any(), any());
@@ -134,7 +134,7 @@ class ConversationReplyServiceTest {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willThrow(new AiUnavailableException());
 
-        conversationReplyService.reply(RESIDENT_ID, pendingAiReply, LOCK_TOKEN);
+        conversationReplyService.reply(pendingAiReply);
 
         assertThat(MDC.get(StructuredLogger.ERROR_CODE)).isEqualTo(new AiUnavailableException().code);
     }
@@ -145,7 +145,7 @@ class ConversationReplyServiceTest {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willReturn(aiResponse("other-turn"));
 
-        conversationReplyService.reply(RESIDENT_ID, pendingAiReply, LOCK_TOKEN);
+        conversationReplyService.reply(pendingAiReply);
 
         then(conversationService).should().discardUnansweredMessage(pendingAiReply);
         then(conversationService).should(never()).saveAiReply(any(), any());
@@ -159,7 +159,7 @@ class ConversationReplyServiceTest {
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any()))
             .willThrow(new IllegalStateException("AI timeout"));
 
-        conversationReplyService.reply(RESIDENT_ID, pendingAiReply, LOCK_TOKEN);
+        conversationReplyService.reply(pendingAiReply);
 
         then(conversationService).should().discardUnansweredMessage(pendingAiReply);
         ChatbotReplyEvent event = publishedEvent();
@@ -173,7 +173,7 @@ class ConversationReplyServiceTest {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willThrow(new AiUnavailableException());
 
-        conversationReplyService.reply(RESIDENT_ID, pendingAiReply, LOCK_TOKEN);
+        conversationReplyService.reply(pendingAiReply);
 
         then(conversationReplyLock).should().release(CONVERSATION_ID, LOCK_TOKEN);
     }
@@ -200,7 +200,8 @@ class ConversationReplyServiceTest {
             new MessageResponse(20L, SenderType.RESIDENT, MessageType.TEXT, "천장에서 물이 새요", List.of(), null, null);
         AiConverseRequest aiRequest =
             new AiConverseRequest(null, null, null, null, TURN_ID, null, null, null, null, List.of(), null);
-        return new PendingAiReply(conversation, residentMessage, false, null, aiRequest);
+        return new PendingAiReply(900L, 0, LOCK_TOKEN, RESIDENT_ID, conversation, residentMessage, false, null,
+            aiRequest);
     }
 
     private static MessageResponse assistantMessage() {

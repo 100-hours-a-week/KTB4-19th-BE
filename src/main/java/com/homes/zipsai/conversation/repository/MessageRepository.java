@@ -20,6 +20,14 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
 
     @Query("""
         select m from Message m
+        where m.conversation.id = :conversationId and m.id < :messageId and m.deletedAt is null
+        order by m.id asc
+        """)
+    List<Message> findAllByConversationIdBefore(@Param("conversationId") Long conversationId,
+                                                @Param("messageId") Long messageId);
+
+    @Query("""
+        select m from Message m
         where m.conversation.id = :conversationId and m.deletedAt is null
         order by m.id desc
         """)

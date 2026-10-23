@@ -73,7 +73,7 @@ class ConversationServiceManagerReadTest {
     void setUp() {
         conversationService = new ConversationService(conversationRepository, messageRepository,
             messageFileGroupRepository, fileRepository, residentRoomService, s3StorageService,
-            new StorageProperties(null, null, null, 300, 0), outboxRecorder);
+            new StorageProperties(null, null, null, 300, 0), outboxRecorder, null, null);
         conversation = conversation();
     }
 

@@ -1,6 +1,8 @@
 package com.homes.zipsai.conversation;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.given;
 
 import java.util.Map;
 
@@ -54,6 +56,7 @@ class ResidentConversationApiTest {
     @BeforeEach
     void setUp() {
         resident = conversationTestFixture.authenticatedAs(conversationTestFixture.livingResident("302"));
+        given(conversationReplyLock.acquire(any())).willReturn("lock-token");
     }
 
     @Test

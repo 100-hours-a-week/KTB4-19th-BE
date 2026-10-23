@@ -30,6 +30,7 @@ import com.homes.zipsai.conversation.ai.AiConverseRequest.HistoryMessage;
 import com.homes.zipsai.conversation.ai.AiConverseRequest.MessageImage;
 import com.homes.zipsai.conversation.ai.AiConverseResponse;
 import com.homes.zipsai.conversation.ai.AiConverseResponse.ImageObservation;
+import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.conversation.domain.Message;
@@ -43,6 +44,7 @@ import com.homes.zipsai.conversation.dto.response.ConversationMessagesResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyResponse;
 import com.homes.zipsai.conversation.dto.response.MessageResponse;
 import com.homes.zipsai.conversation.dto.response.SummaryCardResponse;
+import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
@@ -72,6 +74,8 @@ public class ConversationService {
     private final S3StorageService s3StorageService;
     private final StorageProperties storageProperties;
     private final OutboxRecorder outboxRecorder;
+    private final ChatbotReplyOutboxRepository chatbotReplyOutboxRepository;
+    private final ConversationReplyLock conversationReplyLock;
 
     @Transactional(readOnly = true)
     public ConversationListResponse getConversations(Long userId, String keyword, String cursor, int size) {
@@ -154,32 +158,30 @@ public class ConversationService {
             .type(ConversationType.INQUIRY)
             .title(content.isEmpty() ? IMAGE_ONLY_TITLE : TextUtils.truncate(content, TITLE_MAX_LENGTH))
             .build());
+        String lockToken = conversationReplyLock.acquire(conversation.getId());
         Message residentMessage = saveResidentMessage(conversation, content);
         List<AttachmentResponse> attachments = attachImages(residentMessage, images);
+        ChatbotReplyOutbox outbox = chatbotReplyOutboxRepository.save(ChatbotReplyOutbox.startFirstMessage(
+            residentMessage, userId, MDC.get("traceId"), lockToken, LocalDateTime.now()));
 
-        AiConverseRequest aiRequest = AiConverseRequest.of(room, conversation, residentMessage,
-            messageImages(attachments), List.of(), MDC.get("traceId"));
-        return new PendingAiReply(conversation, MessageResponse.of(residentMessage, attachments), true, null,
-            aiRequest);
+        return prepareReply(outbox, lockToken, room, residentMessage, attachments);
     }
 
     @Transactional
     public PendingAiReply saveNextMessage(Long userId, Long conversationId, String content,
-                                          List<Long> attachmentIds) {
+                                          List<Long> attachmentIds, String lockToken) {
         Conversation conversation = getOwnedConversation(userId, conversationId);
         conversation.verifyCanSendMessage(LocalDateTime.now());
         Room room = residentRoomService.getLivingRoom(userId);
         List<File> images = getAttachableImages(userId, attachmentIds);
-        List<HistoryMessage> history = getHistory(conversationId);
         LocalDateTime previousLastMessageAt = conversation.getLastMessageAt();
 
         Message residentMessage = saveResidentMessage(conversation, content);
         List<AttachmentResponse> attachments = attachImages(residentMessage, images);
+        ChatbotReplyOutbox outbox = chatbotReplyOutboxRepository.save(ChatbotReplyOutbox.startNextMessage(
+            residentMessage, userId, MDC.get("traceId"), lockToken, previousLastMessageAt, LocalDateTime.now()));
 
-        AiConverseRequest aiRequest = AiConverseRequest.of(room, conversation, residentMessage,
-            messageImages(attachments), history, MDC.get("traceId"));
-        return new PendingAiReply(conversation, MessageResponse.of(residentMessage, attachments), false,
-            previousLastMessageAt, aiRequest);
+        return prepareReply(outbox, lockToken, room, residentMessage, attachments);
     }
 
     @Transactional
@@ -296,8 +298,20 @@ public class ConversationService {
         }
     }
 
-    private List<HistoryMessage> getHistory(Long conversationId) {
-        List<Message> messages = messageRepository.findAllByConversationId(conversationId);
+    private PendingAiReply prepareReply(ChatbotReplyOutbox outbox, String lockToken, Room room,
+                                        Message residentMessage, List<AttachmentResponse> attachments) {
+        Conversation conversation = residentMessage.getConversation();
+        List<HistoryMessage> history = outbox.isNewConversation()
+            ? List.of()
+            : getHistory(conversation.getId(), residentMessage.getId());
+        AiConverseRequest aiRequest = AiConverseRequest.of(room, conversation, residentMessage,
+            messageImages(attachments), history, outbox.getTraceId());
+        return PendingAiReply.of(outbox, lockToken, conversation, MessageResponse.of(residentMessage, attachments),
+            aiRequest);
+    }
+
+    private List<HistoryMessage> getHistory(Long conversationId, Long beforeMessageId) {
+        List<Message> messages = messageRepository.findAllByConversationIdBefore(conversationId, beforeMessageId);
         List<Long> messageIds = messages.stream().map(message -> message.getId()).toList();
 
         Map<Long, List<HistoryImage>> images = new HashMap<>();

@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.invocation.InvocationOnMock;
@@ -69,6 +70,11 @@ class ConversationAsyncReplyTest {
 
     @MockitoSpyBean
     StructuredLogger structuredLogger;
+
+    @BeforeEach
+    void setUp() {
+        given(conversationReplyLock.acquire(any())).willReturn("lock-token");
+    }
 
     @Test
     @DisplayName("AI 답변은 요청 스레드가 아닌 챗봇 가상 스레드에서 요청의 traceId를 이어받아 처리한다")
