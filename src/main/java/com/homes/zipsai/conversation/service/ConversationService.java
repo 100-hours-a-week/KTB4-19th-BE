@@ -6,9 +6,12 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Service;
@@ -62,6 +65,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class ConversationService {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(ConversationService.class);
     private static final int TITLE_MAX_LENGTH = 30;
     private static final String IMAGE_ONLY_TITLE = "사진 문의";
     private static final Set<String> IMAGE_TYPES = Set.of("jpg", "jpeg", "png", "webp");
@@ -184,8 +188,30 @@ public class ConversationService {
         return prepareReply(outbox, lockToken, room, residentMessage, attachments);
     }
 
+    @Transactional(readOnly = true)
+    public Optional<PendingAiReply> prepareReply(Long eventId, int attempt, String lockToken) {
+        ChatbotReplyOutbox outbox = chatbotReplyOutboxRepository.findById(eventId).orElseThrow();
+        if (!outbox.isProcessingBy(attempt)) {
+            warnHandledByAnotherAttempt(outbox, attempt);
+            return Optional.empty();
+        }
+
+        Message residentMessage = messageRepository.findById(outbox.getMessageId()).orElseThrow();
+        Room room = residentRoomService.getLivingRoom(outbox.getUserId());
+        List<AttachmentResponse> attachments =
+            findAttachments(List.of(residentMessage)).getOrDefault(residentMessage.getId(), List.of());
+        return Optional.of(prepareReply(outbox, lockToken, room, residentMessage, attachments));
+    }
+
     @Transactional
-    public ConversationReplyResponse saveAiReply(PendingAiReply pendingReply, AiConverseResponse aiResponse) {
+    public Optional<ConversationReplyResponse> saveAiReply(PendingAiReply pendingReply,
+                                                           AiConverseResponse aiResponse) {
+        ChatbotReplyOutbox outbox = getOutboxForUpdate(pendingReply.eventId());
+        if (!outbox.isProcessingBy(pendingReply.attempt())) {
+            warnHandledByAnotherAttempt(outbox, pendingReply.attempt());
+            return Optional.empty();
+        }
+
         Conversation conversation = conversationRepository.getReferenceById(pendingReply.conversation().getId());
         conversation.applyAiResponse(aiResponse);
         saveImageAnalysis(pendingReply.residentMessage().messageId(), aiResponse.imageObservations());
@@ -198,7 +224,9 @@ public class ConversationService {
         Message assistantMessage = saveMessage(conversation, reply, SenderType.ASSISTANT, messageType, turnId);
         MessageResponse assistantReply =
             MessageResponse.of(assistantMessage, List.of(), summaryCardOf(conversation, List.of(assistantMessage)));
-        return new ConversationReplyResponse(conversation.getId(), assistantReply, conversation.closesAt());
+        outbox.complete();
+        return Optional.of(
+            new ConversationReplyResponse(conversation.getId(), assistantReply, conversation.closesAt()));
     }
 
     @Transactional
@@ -213,17 +241,17 @@ public class ConversationService {
     }
 
     @Transactional
-    public void discardUnansweredMessage(PendingAiReply pendingReply) {
-        Long conversationId = pendingReply.conversation().getId();
-        Long residentMessageId = pendingReply.residentMessage().messageId();
-        messageFileGroupRepository.deleteAllByMessageId(residentMessageId);
-        messageRepository.deleteById(residentMessageId);
-        if (pendingReply.newConversation()) {
-            conversationRepository.deleteById(conversationId);
-            return;
+    public Optional<DiscardedMessage> discardUnansweredMessage(Long eventId, int attempt) {
+        ChatbotReplyOutbox outbox = getOutboxForUpdate(eventId);
+        if (!outbox.isProcessingBy(attempt)) {
+            warnHandledByAnotherAttempt(outbox, attempt);
+            return Optional.empty();
         }
-        conversationRepository.findById(conversationId)
-            .ifPresent(conversation -> conversation.updateLastMessageAt(pendingReply.previousLastMessageAt()));
+
+        Message residentMessage = messageRepository.findById(outbox.getMessageId()).orElseThrow();
+        Long conversationId = residentMessage.getConversation().getId();
+        deleteUnansweredMessage(outbox, conversationId);
+        return Optional.of(new DiscardedMessage(outbox.getUserId(), conversationId));
     }
 
     @Transactional(readOnly = true)
@@ -296,6 +324,27 @@ public class ConversationService {
                 fileGroup.recordAnalysis(observation.summary(), observation.ocrText());
             }
         }
+    }
+
+    private void deleteUnansweredMessage(ChatbotReplyOutbox outbox, Long conversationId) {
+        outbox.fail();
+        messageFileGroupRepository.deleteAllByMessageId(outbox.getMessageId());
+        messageRepository.deleteById(outbox.getMessageId());
+        if (outbox.isNewConversation()) {
+            conversationRepository.deleteById(conversationId);
+            return;
+        }
+        conversationRepository.findById(conversationId)
+            .ifPresent(conversation -> conversation.updateLastMessageAt(outbox.getPreviousLastMessageAt()));
+    }
+
+    private ChatbotReplyOutbox getOutboxForUpdate(Long eventId) {
+        return chatbotReplyOutboxRepository.findByIdForUpdate(eventId).orElseThrow();
+    }
+
+    private void warnHandledByAnotherAttempt(ChatbotReplyOutbox outbox, int attempt) {
+        LOGGER.warn("다른 시도가 맡은 답변 이벤트라 처리하지 않습니다. eventId={}, attempt={}, currentAttempt={}, status={}",
+            outbox.getId(), attempt, outbox.getAttemptCount(), outbox.getStatus());
     }
 
     private PendingAiReply prepareReply(ChatbotReplyOutbox outbox, String lockToken, Room room,

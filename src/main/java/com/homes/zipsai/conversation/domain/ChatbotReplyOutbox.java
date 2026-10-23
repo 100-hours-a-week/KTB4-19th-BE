@@ -82,4 +82,16 @@ public class ChatbotReplyOutbox extends BaseTimeEntity {
         return new ChatbotReplyOutbox(residentMessage.getId(), userId, traceId, lockToken, false,
             previousLastMessageAt, now);
     }
+
+    public boolean isProcessingBy(int attempt) {
+        return status == ChatbotReplyOutboxStatus.PROCESSING && attemptCount == attempt;
+    }
+
+    public void complete() {
+        this.status = ChatbotReplyOutboxStatus.COMPLETED;
+    }
+
+    public void fail() {
+        this.status = ChatbotReplyOutboxStatus.FAILED;
+    }
 }

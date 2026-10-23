@@ -1,5 +1,6 @@
 package com.homes.zipsai.conversation.service;
 
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -35,23 +36,32 @@ public class ConversationReplyService {
     private final RedisMessagePublisher redisMessagePublisher;
     private final ChatbotReplyPubSubProperties chatbotReplyPubSubProperties;
     private final ConversationReplyLock conversationReplyLock;
+    private final ChatbotReplyShutdownSignal chatbotReplyShutdownSignal;
 
     @Async(AsyncConfig.CHATBOT_REPLY_EXECUTOR)
     public void reply(PendingAiReply pendingReply) {
-        ChatbotReplyEvent event = askAiForReply(pendingReply.userId(), pendingReply);
-        conversationReplyLock.release(pendingReply.conversation().getId(), pendingReply.lockToken());
-        publish(event);
+        askAiForReply(pendingReply.userId(), pendingReply).ifPresent(event -> {
+            conversationReplyLock.release(pendingReply.conversation().getId(), pendingReply.lockToken());
+            publish(event);
+        });
     }
 
-    private ChatbotReplyEvent askAiForReply(Long userId, PendingAiReply pendingReply) {
+    public void failReply(Long eventId, int attempt, String lockToken) {
+        conversationService.discardUnansweredMessage(eventId, attempt).ifPresent(discarded -> {
+            conversationReplyLock.release(discarded.conversationId(), lockToken);
+            publish(failedEvent(discarded.userId(), discarded.conversationId(), new InternalServerException()));
+        });
+    }
+
+    private Optional<ChatbotReplyEvent> askAiForReply(Long userId, PendingAiReply pendingReply) {
         Long conversationId = pendingReply.conversation().getId();
         try {
-            return ChatbotReplyEvent.of(userId, askAiAndSaveReply(userId, pendingReply));
+            return askAiAndSaveReply(userId, pendingReply).map(reply -> ChatbotReplyEvent.of(userId, reply));
         } catch (ApiException e) {
-            return failedEvent(userId, conversationId, e);
+            return Optional.of(failedEvent(userId, conversationId, e));
         } catch (RuntimeException e) {
             LOGGER.error("AI 답변을 처리하지 못했습니다. conversationId={}", conversationId, e);
-            return failedEvent(userId, conversationId, new InternalServerException());
+            return Optional.of(failedEvent(userId, conversationId, new InternalServerException()));
         }
     }
 
@@ -60,7 +70,7 @@ public class ConversationReplyService {
         return ChatbotReplyEvent.of(userId, ConversationReplyFailedResponse.of(conversationId, exception));
     }
 
-    private ConversationReplyResponse askAiAndSaveReply(Long userId, PendingAiReply pendingReply) {
+    private Optional<ConversationReplyResponse> askAiAndSaveReply(Long userId, PendingAiReply pendingReply) {
         try {
             String turnId = pendingReply.aiRequest().turnId();
             Consumer<String> onReplyDelta = replyDeltaSender(userId, pendingReply.conversation().getId());
@@ -68,7 +78,15 @@ public class ConversationReplyService {
             verifyPairedWithRequest(turnId, aiResponse);
             return conversationService.saveAiReply(pendingReply, aiResponse);
         } catch (RuntimeException e) {
-            conversationService.discardUnansweredMessage(pendingReply);
+            if (chatbotReplyShutdownSignal.isShuttingDown()) {
+                LOGGER.warn("서버가 종료되는 중이라 답변 이벤트를 처리 중으로 남깁니다. eventId={}", pendingReply.eventId(), e);
+                return Optional.empty();
+            }
+            Optional<DiscardedMessage> discarded =
+                conversationService.discardUnansweredMessage(pendingReply.eventId(), pendingReply.attempt());
+            if (discarded.isEmpty()) {
+                return Optional.empty();
+            }
             throw e;
         }
     }

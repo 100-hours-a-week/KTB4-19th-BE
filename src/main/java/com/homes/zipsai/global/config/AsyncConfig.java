@@ -20,7 +20,7 @@ public class AsyncConfig {
 
     private static final String CHATBOT_REPLY_STAGE = "chatbot_reply";
     private static final String ASYNC_TASK_STAGE = "async_task";
-    private static final Duration TASK_TERMINATION_TIMEOUT = Duration.ofSeconds(60);
+    private static final Duration TASK_TERMINATION_TIMEOUT = Duration.ofSeconds(25);
 
     @Bean
     public TaskDecorator taskLoggingDecorator(StructuredLogger structuredLogger) {
