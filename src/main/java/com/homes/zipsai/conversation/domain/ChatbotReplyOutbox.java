@@ -1,6 +1,9 @@
 package com.homes.zipsai.conversation.domain;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.util.Objects;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -85,6 +88,45 @@ public class ChatbotReplyOutbox extends BaseTimeEntity {
 
     public boolean isProcessingBy(int attempt) {
         return status == ChatbotReplyOutboxStatus.PROCESSING && attemptCount == attempt;
+    }
+
+    public boolean isProcessingBy(int attempt, String lockToken) {
+        return isProcessingBy(attempt) && this.lockToken.equals(lockToken);
+    }
+
+    public void retry(int attemptCount) {
+        if (status != ChatbotReplyOutboxStatus.PROCESSING) {
+            throw new IllegalStateException("Reply is not processing");
+        }
+        this.attemptCount = attemptCount;
+        this.status = ChatbotReplyOutboxStatus.PENDING;
+    }
+
+    public void claim(String lockToken, LocalDateTime now) {
+        if (status != ChatbotReplyOutboxStatus.PENDING) {
+            throw new IllegalStateException("Reply is not pending");
+        }
+        Objects.requireNonNull(lockToken, "lockToken");
+        Objects.requireNonNull(now, "now");
+        this.lockToken = lockToken;
+        this.processingStartedAt = now;
+        this.status = ChatbotReplyOutboxStatus.PROCESSING;
+    }
+
+    public LocalDateTime requestDeadline(Duration requestTimeout, Conversation conversation) {
+        LocalDateTime deadline = getCreatedAt().plus(requestTimeout);
+        OffsetDateTime closesAt = conversation.closesAt();
+        if (closesAt != null && closesAt.toLocalDateTime().isBefore(deadline)) {
+            return closesAt.toLocalDateTime();
+        }
+        return deadline;
+    }
+
+    public LocalDateTime processingDeadline(Duration attemptTimeout, Duration requestTimeout,
+                                             Conversation conversation) {
+        LocalDateTime deadline = requestDeadline(requestTimeout, conversation);
+        LocalDateTime processingDeadline = processingStartedAt.plus(attemptTimeout);
+        return processingDeadline.isBefore(deadline) ? processingDeadline : deadline;
     }
 
     public void complete() {
