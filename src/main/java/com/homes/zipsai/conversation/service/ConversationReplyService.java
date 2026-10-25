@@ -13,6 +13,8 @@ import org.springframework.stereotype.Service;
 import com.homes.zipsai.common.service.RedisMessagePublisher;
 import com.homes.zipsai.conversation.ai.AiConverseClient;
 import com.homes.zipsai.conversation.ai.AiConverseResponse;
+import com.homes.zipsai.conversation.ai.error.AiConverseErrorType;
+import com.homes.zipsai.conversation.ai.error.AiConverseException;
 import com.homes.zipsai.conversation.config.ChatbotReplyPubSubProperties;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyDeltaResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyFailedResponse;
@@ -37,6 +39,7 @@ public class ConversationReplyService {
     private final ChatbotReplyPubSubProperties chatbotReplyPubSubProperties;
     private final ConversationReplyLock conversationReplyLock;
     private final ChatbotReplyShutdownSignal chatbotReplyShutdownSignal;
+    private final StructuredLogger structuredLogger;
 
     @Async(AsyncConfig.CHATBOT_REPLY_EXECUTOR)
     public void reply(PendingAiReply pendingReply) {
@@ -58,9 +61,12 @@ public class ConversationReplyService {
         try {
             return askAiAndSaveReply(userId, pendingReply).map(reply -> ChatbotReplyEvent.of(userId, reply));
         } catch (ApiException e) {
+            structuredLogger.chatbotReplyFailed(pendingReply.eventId(), conversationId,
+                pendingReply.aiRequest().turnId(), e);
             return Optional.of(failedEvent(userId, conversationId, e));
         } catch (RuntimeException e) {
-            LOGGER.error("AI 답변을 처리하지 못했습니다. conversationId={}", conversationId, e);
+            structuredLogger.chatbotReplyFailed(pendingReply.eventId(), conversationId,
+                pendingReply.aiRequest().turnId(), e);
             return Optional.of(failedEvent(userId, conversationId, new InternalServerException()));
         }
     }
@@ -75,7 +81,11 @@ public class ConversationReplyService {
             String turnId = pendingReply.aiRequest().turnId();
             Consumer<String> onReplyDelta = replyDeltaSender(userId, pendingReply.conversation().getId());
             AiConverseResponse aiResponse = aiConverseClient.converse(pendingReply.aiRequest(), onReplyDelta);
-            verifyPairedWithRequest(turnId, aiResponse);
+            if (aiResponse == null) {
+                throw new AiConverseException(AiConverseErrorType.INVALID_RESPONSE,
+                    new InternalServerException(), null);
+            }
+            aiResponse.validateFor(turnId);
             return conversationService.saveAiReply(pendingReply, aiResponse);
         } catch (RuntimeException e) {
             if (chatbotReplyShutdownSignal.isShuttingDown()) {
@@ -95,15 +105,6 @@ public class ConversationReplyService {
         AtomicInteger seq = new AtomicInteger();
         return text -> publish(ChatbotReplyEvent.of(userId,
             new ConversationReplyDeltaResponse(conversationId, seq.incrementAndGet(), text)));
-    }
-
-    private void verifyPairedWithRequest(String turnId, AiConverseResponse aiResponse) {
-        if (aiResponse.isSuccess() && turnId.equals(aiResponse.turnId())) {
-            return;
-        }
-        LOGGER.error("AI 응답이 요청과 짝이 맞지 않습니다. requestTurnId={}, responseTurnId={}, code={}",
-            turnId, aiResponse.turnId(), aiResponse.code());
-        throw new InternalServerException();
     }
 
     private void publish(ChatbotReplyEvent event) {

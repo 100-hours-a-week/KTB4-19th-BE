@@ -67,13 +67,16 @@ class ConversationReplyServiceTest {
     @Mock
     ChatbotReplyShutdownSignal chatbotReplyShutdownSignal;
 
+    @Mock
+    StructuredLogger structuredLogger;
+
     ConversationReplyService conversationReplyService;
 
     @BeforeEach
     void setUp() {
         conversationReplyService = new ConversationReplyService(conversationService, aiConverseClient,
             redisMessagePublisher, new ChatbotReplyPubSubProperties(CHANNEL), conversationReplyLock,
-            chatbotReplyShutdownSignal);
+            chatbotReplyShutdownSignal, structuredLogger);
     }
 
     @AfterEach

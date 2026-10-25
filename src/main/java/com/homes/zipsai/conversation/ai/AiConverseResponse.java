@@ -12,6 +12,8 @@ import org.slf4j.LoggerFactory;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.homes.zipsai.conversation.ai.error.AiConverseErrorType;
+import com.homes.zipsai.conversation.ai.error.AiConverseException;
 import com.homes.zipsai.global.exception.InternalServerException;
 
 import lombok.Builder;
