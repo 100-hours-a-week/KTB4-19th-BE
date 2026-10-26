@@ -81,6 +81,9 @@ public class ConversationReplyService {
 
     private Optional<ConversationReplyResponse> askAiAndSaveReply(Long userId, PendingAiReply pendingReply) {
         try {
+            if (!conversationService.isReplyExecutable(pendingReply)) {
+                return Optional.empty();
+            }
             String turnId = pendingReply.aiRequest().turnId();
             Consumer<String> onReplyDelta = replyDeltaSender(userId, pendingReply.conversation().getId());
             AiConverseResponse aiResponse = aiConverseClient.converse(pendingReply.aiRequest(), onReplyDelta);

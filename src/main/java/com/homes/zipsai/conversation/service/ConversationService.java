@@ -34,7 +34,9 @@ import com.homes.zipsai.conversation.ai.AiConverseRequest.MessageImage;
 import com.homes.zipsai.conversation.ai.AiConverseResponse;
 import com.homes.zipsai.conversation.ai.AiConverseResponse.ImageObservation;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
+import com.homes.zipsai.conversation.domain.ChatbotReplyOutboxStatus;
 import com.homes.zipsai.conversation.domain.Conversation;
+import com.homes.zipsai.conversation.domain.ConversationStatus;
 import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.conversation.domain.Message;
 import com.homes.zipsai.conversation.domain.MessageFileGroup;
@@ -47,12 +49,14 @@ import com.homes.zipsai.conversation.dto.response.ConversationMessagesResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyResponse;
 import com.homes.zipsai.conversation.dto.response.MessageResponse;
 import com.homes.zipsai.conversation.dto.response.SummaryCardResponse;
+import com.homes.zipsai.conversation.outbox.ChatbotReplyWorkerProperties;
 import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
 import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.global.exception.ForbiddenException;
+import com.homes.zipsai.global.exception.InternalServerException;
 import com.homes.zipsai.global.exception.NotFoundException;
 import com.homes.zipsai.global.exception.ValidationFailedException;
 import com.homes.zipsai.global.util.TextUtils;
@@ -80,6 +84,7 @@ public class ConversationService {
     private final OutboxRecorder outboxRecorder;
     private final ChatbotReplyOutboxRepository chatbotReplyOutboxRepository;
     private final ConversationReplyLock conversationReplyLock;
+    private final ChatbotReplyWorkerProperties chatbotReplyWorkerProperties;
 
     @Transactional(readOnly = true)
     public ConversationListResponse getConversations(Long userId, String keyword, String cursor, int size) {
@@ -189,6 +194,17 @@ public class ConversationService {
     }
 
     @Transactional(readOnly = true)
+    public boolean isReplyExecutable(PendingAiReply pendingReply) {
+        ChatbotReplyOutbox outbox = chatbotReplyOutboxRepository.findById(pendingReply.eventId()).orElseThrow();
+        if (!outbox.isProcessingBy(pendingReply.attempt(), pendingReply.lockToken())) {
+            return false;
+        }
+        Message residentMessage = messageRepository.findById(outbox.getMessageId()).orElseThrow();
+        verifyReplyDeadline(outbox, residentMessage.getConversation());
+        return true;
+    }
+
+    @Transactional(readOnly = true)
     public Optional<PendingAiReply> prepareReply(Long eventId, int attempt, String lockToken) {
         ChatbotReplyOutbox outbox = chatbotReplyOutboxRepository.findById(eventId).orElseThrow();
         if (!outbox.isProcessingBy(attempt, lockToken)) {
@@ -197,6 +213,7 @@ public class ConversationService {
         }
 
         Message residentMessage = messageRepository.findById(outbox.getMessageId()).orElseThrow();
+        verifyReplyDeadline(outbox, residentMessage.getConversation());
         Room room = residentRoomService.getLivingRoom(outbox.getUserId());
         List<AttachmentResponse> attachments =
             findAttachments(List.of(residentMessage)).getOrDefault(residentMessage.getId(), List.of());
@@ -212,7 +229,9 @@ public class ConversationService {
             return Optional.empty();
         }
 
-        Conversation conversation = conversationRepository.getReferenceById(pendingReply.conversation().getId());
+        Conversation conversation = conversationRepository
+            .findByResidentMessageForUpdate(outbox.getMessageId(), outbox.getUserId()).orElseThrow();
+        verifyReplyDeadline(outbox, conversation);
         conversation.applyAiResponse(aiResponse);
         saveImageAnalysis(pendingReply.residentMessage().messageId(), aiResponse.imageObservations());
         MessageType messageType = MessageType.TEXT;
@@ -243,15 +262,40 @@ public class ConversationService {
     @Transactional
     public Optional<DiscardedMessage> discardUnansweredMessage(Long eventId, int attempt, String lockToken) {
         ChatbotReplyOutbox outbox = getOutboxForUpdate(eventId);
-        if (!outbox.isProcessingBy(attempt, lockToken)) {
+        boolean processing = outbox.isProcessingBy(attempt, lockToken);
+        boolean pending = outbox.getStatus() == ChatbotReplyOutboxStatus.PENDING
+            && outbox.getAttemptCount() == attempt && outbox.getLockToken().equals(lockToken);
+        if (!processing && !pending) {
             warnHandledByAnotherAttempt(outbox, attempt);
             return Optional.empty();
         }
 
-        Message residentMessage = messageRepository.findById(outbox.getMessageId()).orElseThrow();
-        Long conversationId = residentMessage.getConversation().getId();
+        Long conversationId;
+        if (pending) {
+            Conversation conversation = conversationRepository
+                .findByResidentMessageForUpdate(outbox.getMessageId(), outbox.getUserId()).orElseThrow();
+            LocalDateTime now = chatbotReplyOutboxRepository.currentTime();
+            if (conversation.statusAt(now) == ConversationStatus.ACTIVE
+                    && now.isBefore(outbox.requestDeadline(chatbotReplyWorkerProperties.requestTimeout(),
+                        conversation))) {
+                return Optional.empty();
+            }
+            conversationId = conversation.getId();
+        } else {
+            conversationId = messageRepository.findById(outbox.getMessageId()).orElseThrow().getConversation().getId();
+        }
         deleteUnansweredMessage(outbox, conversationId);
         return Optional.of(new DiscardedMessage(outbox.getUserId(), conversationId));
+    }
+
+    private void verifyReplyDeadline(ChatbotReplyOutbox outbox, Conversation conversation) {
+        LocalDateTime now = chatbotReplyOutboxRepository.currentTime();
+        if (outbox.getDeletedAt() != null || conversation.getDeletedAt() != null
+                || conversation.statusAt(now) != ConversationStatus.ACTIVE
+                || !now.isBefore(outbox.processingDeadline(chatbotReplyWorkerProperties.attemptTimeout(),
+                    chatbotReplyWorkerProperties.requestTimeout(), conversation))) {
+            throw new InternalServerException();
+        }
     }
 
     @Transactional(readOnly = true)
