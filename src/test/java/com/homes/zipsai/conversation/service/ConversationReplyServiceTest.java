@@ -157,19 +157,20 @@ class ConversationReplyServiceTest {
     }
 
     @Test
-    @DisplayName("요청과 다른 turn ID로 온 AI 응답은 저장하지 않고 서버 오류로 알린다")
-    void rejectsReplyWithAnotherTurnId() {
+    @DisplayName("요청과 다른 turn ID로 온 AI 응답은 저장하지 않고 최종 실패 정리와 알림도 보류한다")
+    void defersFailureForReplyWithAnotherTurnId() {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willReturn(aiResponse("other-turn"));
-        givenDiscarded();
 
         conversationReplyService.reply(pendingAiReply);
 
-        then(conversationService).should().discardUnansweredMessage(EVENT_ID, 0, LOCK_TOKEN);
+        then(conversationService).should(never()).discardUnansweredMessage(any(), anyInt(), any());
 
         then(conversationService).should(never()).saveAiReply(any(), any());
 
-        assertThat(publishedEvent().failure()).hasFieldOrPropertyWithValue("code", "INTERNAL_SERVER_ERROR");
+        then(conversationReplyLock).shouldHaveNoInteractions();
+
+        then(redisMessagePublisher).shouldHaveNoInteractions();
     }
 
     @Test
