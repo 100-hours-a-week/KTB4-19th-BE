@@ -94,6 +94,13 @@ public class ChatbotReplyOutbox extends BaseTimeEntity {
         return isProcessingBy(attempt) && this.lockToken.equals(lockToken);
     }
 
+    public void recordFailure() {
+        if (status != ChatbotReplyOutboxStatus.PROCESSING) {
+            throw new IllegalStateException("Reply is not processing");
+        }
+        this.attemptCount++;
+    }
+
     public void retry(int attemptCount) {
         if (status != ChatbotReplyOutboxStatus.PROCESSING) {
             throw new IllegalStateException("Reply is not processing");

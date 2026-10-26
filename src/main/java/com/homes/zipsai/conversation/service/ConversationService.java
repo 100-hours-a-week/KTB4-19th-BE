@@ -33,6 +33,8 @@ import com.homes.zipsai.conversation.ai.AiConverseRequest.HistoryMessage;
 import com.homes.zipsai.conversation.ai.AiConverseRequest.MessageImage;
 import com.homes.zipsai.conversation.ai.AiConverseResponse;
 import com.homes.zipsai.conversation.ai.AiConverseResponse.ImageObservation;
+import com.homes.zipsai.conversation.ai.error.AiConverseErrorType;
+import com.homes.zipsai.conversation.ai.error.AiConverseErrorType.RetryPolicy;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutboxStatus;
 import com.homes.zipsai.conversation.domain.Conversation;
@@ -288,14 +290,41 @@ public class ConversationService {
         return Optional.of(new DiscardedMessage(outbox.getUserId(), conversationId));
     }
 
+    @Transactional
+    public Optional<DiscardedMessage> handleAiReplyFailure(PendingAiReply pendingReply,
+                                                          AiConverseErrorType errorType) {
+        ChatbotReplyOutbox outbox = getOutboxForUpdate(pendingReply.eventId());
+        if (!outbox.isProcessingBy(pendingReply.attempt(), pendingReply.lockToken())) {
+            warnHandledByAnotherAttempt(outbox, pendingReply.attempt());
+            return Optional.empty();
+        }
+
+        Conversation conversation = conversationRepository
+            .findByResidentMessageForUpdate(outbox.getMessageId(), outbox.getUserId()).orElseThrow();
+        RetryPolicy policy = errorType.getRetryPolicy();
+        if (policy == RetryPolicy.LIMITED) {
+            outbox.recordFailure();
+        }
+        if (policy.shouldRetry(outbox.getAttemptCount()) && isReplyWithinDeadline(outbox, conversation)) {
+            outbox.retry(outbox.getAttemptCount());
+            return Optional.empty();
+        }
+        deleteUnansweredMessage(outbox, conversation.getId());
+        return Optional.of(new DiscardedMessage(outbox.getUserId(), conversation.getId()));
+    }
+
     private void verifyReplyDeadline(ChatbotReplyOutbox outbox, Conversation conversation) {
-        LocalDateTime now = chatbotReplyOutboxRepository.currentTime();
-        if (outbox.getDeletedAt() != null || conversation.getDeletedAt() != null
-                || conversation.statusAt(now) != ConversationStatus.ACTIVE
-                || !now.isBefore(outbox.processingDeadline(chatbotReplyWorkerProperties.attemptTimeout(),
-                    chatbotReplyWorkerProperties.requestTimeout(), conversation))) {
+        if (!isReplyWithinDeadline(outbox, conversation)) {
             throw new InternalServerException();
         }
+    }
+
+    private boolean isReplyWithinDeadline(ChatbotReplyOutbox outbox, Conversation conversation) {
+        LocalDateTime now = chatbotReplyOutboxRepository.currentTime();
+        return outbox.getDeletedAt() == null && conversation.getDeletedAt() == null
+            && conversation.statusAt(now) == ConversationStatus.ACTIVE
+            && now.isBefore(outbox.processingDeadline(chatbotReplyWorkerProperties.attemptTimeout(),
+                chatbotReplyWorkerProperties.requestTimeout(), conversation));
     }
 
     @Transactional(readOnly = true)
