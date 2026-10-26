@@ -4,6 +4,7 @@ import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Iterator;
@@ -20,9 +21,11 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientException;
 
+import com.homes.zipsai.conversation.ai.error.AiConverseErrorType;
+import com.homes.zipsai.conversation.ai.error.AiConverseException;
 import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.global.exception.ApiException;
 import com.homes.zipsai.global.exception.InternalServerException;
@@ -61,32 +64,34 @@ public class HttpAiConverseClient implements AiConverseClient {
     @Override
     public AiConverseResponse converse(AiConverseRequest request, Consumer<String> onReplyDelta) {
         String turnId = request.turnId();
+        String requestBody;
         try {
-            LOGGER.info("AI 요청 원문. traceId={}, turnId={}, body={}", MDC.get("traceId"), turnId,
-                objectMapper.writeValueAsString(request));
-            return exchange(request, turnId, onReplyDelta);
+            requestBody = objectMapper.writeValueAsString(request);
         } catch (JacksonException e) {
-            LOGGER.error("AI 응답을 읽지 못했습니다. turnId={}", turnId);
-            throw new AiUnavailableException();
+            LOGGER.error("AI 요청 JSON을 만들지 못했습니다. turnId={}", turnId);
+            throw new AiConverseException(AiConverseErrorType.REQUEST_SERIALIZATION_ERROR,
+                new AiUnavailableException(), e);
         }
+        LOGGER.info("AI 요청 원문. traceId={}, turnId={}, body={}", MDC.get("traceId"), turnId, requestBody);
+        return exchange(requestBody, turnId, onReplyDelta);
     }
 
-    private AiConverseResponse exchange(AiConverseRequest request, String turnId, Consumer<String> onReplyDelta) {
+    private AiConverseResponse exchange(String requestBody, String turnId, Consumer<String> onReplyDelta) {
         try {
             return restClient.post()
                 .uri(converseStreamPath)
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.TEXT_EVENT_STREAM)
-                .body(request)
+                .body(requestBody)
                 .exchange((httpRequest, response) -> {
                     if (response.getStatusCode().isError()) {
                         throw toApiException(response.getStatusCode(), turnId);
                     }
                     return readReply(response.getBody(), turnId, onReplyDelta);
                 });
-        } catch (RestClientException | UncheckedIOException e) {
+        } catch (ResourceAccessException | UncheckedIOException e) {
             LOGGER.error("AI 서버를 호출하지 못했습니다. turnId={}", turnId);
-            throw new AiUnavailableException();
+            throw new AiConverseException(connectionErrorType(e), new AiUnavailableException(), e);
         }
     }
 
@@ -97,7 +102,18 @@ public class HttpAiConverseClient implements AiConverseClient {
             .iterator();
         while (lines.hasNext()) {
             String data = lines.next().substring(DATA_PREFIX.length()).strip();
-            AiConverseStreamEvent event = objectMapper.readValue(data, AiConverseStreamEvent.class);
+            AiConverseStreamEvent event;
+            try {
+                event = objectMapper.readValue(data, AiConverseStreamEvent.class);
+            } catch (JacksonException e) {
+                LOGGER.error("AI 응답을 읽지 못했습니다. turnId={}", turnId);
+                throw new AiConverseException(AiConverseErrorType.RESPONSE_JSON_ERROR,
+                    new AiUnavailableException(), e);
+            }
+            if (event == null || event.type() == AiConverseStreamEvent.Type.COMPLETE && event.response() == null) {
+                throw new AiConverseException(AiConverseErrorType.INVALID_RESPONSE,
+                    new InternalServerException(), null);
+            }
             if (event.isReplyDelta()) {
                 onReplyDelta.accept(event.text());
             }
@@ -107,22 +123,34 @@ public class HttpAiConverseClient implements AiConverseClient {
             }
             if (event.isError()) {
                 LOGGER.error("AI 서버가 답변 도중 실패했습니다. turnId={}, message={}", turnId, event.message());
-                throw new AiUnavailableException();
+                throw new AiConverseException(AiConverseErrorType.STREAM_ERROR, new AiUnavailableException(), null);
             }
         }
         LOGGER.error("AI 서버가 최종 응답 없이 스트림을 끝냈습니다. turnId={}", turnId);
-        throw new AiUnavailableException();
+        throw new AiConverseException(AiConverseErrorType.INCOMPLETE_STREAM, new AiUnavailableException(), null);
     }
 
     private ApiException toApiException(HttpStatusCode status, String turnId) {
         LOGGER.error("AI 서버가 오류로 응답했습니다. turnId={}, status={}", turnId, status.value());
         if (status.isSameCodeAs(HttpStatus.TOO_MANY_REQUESTS)) {
-            return new TooManyRequestsException();
+            return new AiConverseException(AiConverseErrorType.HTTP_ERROR, new TooManyRequestsException(), null);
         }
-        if (status.isSameCodeAs(HttpStatus.SERVICE_UNAVAILABLE) || status.isSameCodeAs(HttpStatus.GATEWAY_TIMEOUT)) {
-            return new AiUnavailableException();
+        if (status.isSameCodeAs(HttpStatus.SERVICE_UNAVAILABLE)) {
+            return new AiConverseException(AiConverseErrorType.SERVICE_UNAVAILABLE, new AiUnavailableException(), null);
         }
-        return new InternalServerException();
+        if (status.isSameCodeAs(HttpStatus.GATEWAY_TIMEOUT)) {
+            return new AiConverseException(AiConverseErrorType.GATEWAY_TIMEOUT, new AiUnavailableException(), null);
+        }
+        return new AiConverseException(AiConverseErrorType.HTTP_ERROR, new InternalServerException(), null);
+    }
+
+    private static AiConverseErrorType connectionErrorType(Throwable exception) {
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof SocketTimeoutException) {
+                return AiConverseErrorType.TIMEOUT;
+            }
+        }
+        return AiConverseErrorType.CONNECTION_FAILURE;
     }
 
     private static SimpleClientHttpRequestFactory requestFactory(Duration connectTimeout, Duration readTimeout) {
