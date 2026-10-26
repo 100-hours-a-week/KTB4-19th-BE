@@ -111,6 +111,7 @@ class ConversationServiceOutboxTest {
             .hasFieldOrPropertyWithValue("userId", RESIDENT_ID)
             .hasFieldOrPropertyWithValue("traceId", TRACE_ID)
             .hasFieldOrPropertyWithValue("lockToken", LOCK_TOKEN);
+
         assertThat(pendingReply)
             .hasFieldOrPropertyWithValue("eventId", EVENT_ID)
             .hasFieldOrPropertyWithValue("attempt", 0)
@@ -129,10 +130,15 @@ class ConversationServiceOutboxTest {
         PendingAiReply pendingReply = conversationService.saveFirstMessage(RESIDENT_ID, "보일러가 안 켜져요", null);
 
         InOrder inOrder = inOrder(conversationRepository, conversationReplyLock, messageRepository);
+
         inOrder.verify(conversationRepository).save(any(Conversation.class));
+
         inOrder.verify(conversationReplyLock).acquire(CONVERSATION_ID);
+
         inOrder.verify(messageRepository).save(any(Message.class));
+
         assertThat(savedEvent().getLockToken()).isEqualTo(LOCK_TOKEN);
+
         assertThat(pendingReply.lockToken()).isEqualTo(LOCK_TOKEN);
     }
 
@@ -141,6 +147,8 @@ class ConversationServiceOutboxTest {
     void preparesRetryFromStoredEvent() {
         givenLivingRoom();
         ChatbotReplyOutbox outbox = givenStoredEvent(1);
+        outbox.retry(1);
+        outbox.claim("retry-token", outbox.getProcessingStartedAt().plusSeconds(1));
         given(messageRepository.findById(MESSAGE_ID)).willReturn(Optional.of(storedResidentMessage()));
 
         PendingAiReply pendingReply = conversationService.prepareReply(EVENT_ID, 1, "retry-token").orElseThrow();
@@ -150,8 +158,11 @@ class ConversationServiceOutboxTest {
             .hasFieldOrPropertyWithValue("attempt", 1)
             .hasFieldOrPropertyWithValue("lockToken", "retry-token")
             .hasFieldOrPropertyWithValue("userId", RESIDENT_ID);
+
         assertThat(pendingReply.aiRequest().turnId()).isEqualTo("turn-1");
+
         assertThat(pendingReply.aiRequest().traceId()).isEqualTo(outbox.getTraceId());
+
         then(messageRepository).should().findAllByConversationIdBefore(CONVERSATION_ID, MESSAGE_ID);
     }
 
@@ -161,7 +172,20 @@ class ConversationServiceOutboxTest {
         givenStoredEvent(2);
 
         assertThat(conversationService.prepareReply(EVENT_ID, 1, "retry-token")).isEmpty();
+
         then(messageRepository).should(never()).findById(any());
+    }
+
+    @Test
+    @DisplayName("실패 횟수가 같아도 인계 전 토큰이면 AI 요청을 다시 구성하지 않는다")
+    void preparesNothingWhenTokenChangedWithoutAnotherFailure() {
+        ChatbotReplyOutbox outbox = givenStoredEvent(1);
+        outbox.retry(1);
+        outbox.claim("retry-token", outbox.getProcessingStartedAt().plusSeconds(1));
+
+        assertThat(conversationService.prepareReply(EVENT_ID, 1, "old-token")).isEmpty();
+
+        then(messageRepository).shouldHaveNoInteractions();
     }
 
     private void givenLivingRoom() {
@@ -203,7 +227,9 @@ class ConversationServiceOutboxTest {
 
     private ChatbotReplyOutbox savedEvent() {
         ArgumentCaptor<ChatbotReplyOutbox> eventCaptor = ArgumentCaptor.forClass(ChatbotReplyOutbox.class);
+
         then(chatbotReplyOutboxRepository).should().save(eventCaptor.capture());
+
         return eventCaptor.getValue();
     }
 

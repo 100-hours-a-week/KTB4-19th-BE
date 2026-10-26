@@ -125,6 +125,7 @@ class ConversationServiceAiReplyTest {
                 .orElseThrow();
 
         assertThat(reply.assistantMessage().messageType()).isEqualTo(MessageType.TEXT);
+
         assertThat(reply.assistantMessage().summaryCard()).isNull();
     }
 
@@ -138,6 +139,7 @@ class ConversationServiceAiReplyTest {
                 .orElseThrow();
 
         assertThat(reply.assistantMessage().messageType()).isEqualTo(MessageType.SUMMARY_CARD);
+
         assertThat(reply.assistantMessage().summaryCard()).isNotNull();
     }
 
@@ -175,6 +177,7 @@ class ConversationServiceAiReplyTest {
             complaintWithImageAnalysis(new AiConverseResponse.ImageObservation(31L, "천장 얼룩", "관리실 010")));
 
         assertThat(fileGroup.getSummary()).isEqualTo("천장 얼룩");
+
         assertThat(fileGroup.getOcrText()).isEqualTo("관리실 010");
     }
 
@@ -188,6 +191,7 @@ class ConversationServiceAiReplyTest {
             complaintWithImageAnalysis(new AiConverseResponse.ImageObservation(99L, "천장 얼룩", null)));
 
         assertThat(fileGroup.getSummary()).isNull();
+
         assertThat(fileGroup.getOcrText()).isNull();
     }
 
@@ -220,7 +224,29 @@ class ConversationServiceAiReplyTest {
             conversationService.saveAiReply(pendingAiReply(), knowledge("화요일과 금요일입니다.", CITATIONS));
 
         assertThat(reply).isEmpty();
+
         then(messageRepository).should(never()).save(any());
+
+        assertThat(outbox.getStatus()).isEqualTo(ChatbotReplyOutboxStatus.PROCESSING);
+    }
+
+    @Test
+    @DisplayName("실패 횟수가 같아도 인계 전 토큰의 답변은 저장하거나 대화에 반영하지 않는다")
+    void savesNoReplyWhenTokenChangedWithoutAnotherFailure() {
+        PendingAiReply pendingReply = pendingAiReply();
+        outbox.retry(0);
+        outbox.claim("next-token", REPLIED_AT.plusSeconds(1));
+        givenEvent();
+
+        Optional<ConversationReplyResponse> reply =
+            conversationService.saveAiReply(pendingReply, knowledge("화요일과 금요일입니다.", CITATIONS));
+
+        assertThat(reply).isEmpty();
+
+        then(conversationRepository).shouldHaveNoInteractions();
+
+        then(messageRepository).shouldHaveNoInteractions();
+
         assertThat(outbox.getStatus()).isEqualTo(ChatbotReplyOutboxStatus.PROCESSING);
     }
 
@@ -229,7 +255,7 @@ class ConversationServiceAiReplyTest {
     void failsEventWhenUnansweredMessageIsDiscarded() {
         givenUnansweredEvent();
 
-        conversationService.discardUnansweredMessage(EVENT_ID, 0);
+        conversationService.discardUnansweredMessage(EVENT_ID, 0, "lock-token");
 
         assertThat(outbox.getStatus()).isEqualTo(ChatbotReplyOutboxStatus.FAILED);
     }
@@ -239,7 +265,7 @@ class ConversationServiceAiReplyTest {
     void returnsUserAndConversationOfDiscardedMessage() {
         givenUnansweredEvent();
 
-        Optional<DiscardedMessage> discarded = conversationService.discardUnansweredMessage(EVENT_ID, 0);
+        Optional<DiscardedMessage> discarded = conversationService.discardUnansweredMessage(EVENT_ID, 0, "lock-token");
 
         assertThat(discarded).contains(new DiscardedMessage(outbox.getUserId(), CONVERSATION_ID));
     }
@@ -249,12 +275,34 @@ class ConversationServiceAiReplyTest {
     void keepsMessageWhenAnotherAttemptOwnsEvent() {
         givenEventTakenByAnotherAttempt();
 
-        Optional<DiscardedMessage> discarded = conversationService.discardUnansweredMessage(EVENT_ID, 0);
+        Optional<DiscardedMessage> discarded = conversationService.discardUnansweredMessage(EVENT_ID, 0, "lock-token");
 
         assertThat(discarded).isEmpty();
+
         then(messageRepository).should(never()).findById(any());
+
         then(messageRepository).should(never()).deleteById(any());
+
         then(conversationRepository).should(never()).deleteById(any());
+    }
+
+    @Test
+    @DisplayName("실패 횟수가 같아도 인계 전 토큰의 실패 정리는 메시지와 대화를 변경하지 않는다")
+    void keepsMessageWhenTokenChangedWithoutAnotherFailure() {
+        outbox.retry(0);
+        outbox.claim("next-token", REPLIED_AT.plusSeconds(1));
+        givenEvent();
+
+        Optional<DiscardedMessage> discarded =
+            conversationService.discardUnansweredMessage(EVENT_ID, 0, "lock-token");
+
+        assertThat(discarded).isEmpty();
+
+        then(messageRepository).shouldHaveNoInteractions();
+
+        then(conversationRepository).shouldHaveNoInteractions();
+
+        assertThat(outbox.getStatus()).isEqualTo(ChatbotReplyOutboxStatus.PROCESSING);
     }
 
     @Test
@@ -262,10 +310,12 @@ class ConversationServiceAiReplyTest {
     void deletesConversationWhenFirstMessageIsUnanswered() {
         givenUnansweredEvent();
 
-        conversationService.discardUnansweredMessage(EVENT_ID, 0);
+        conversationService.discardUnansweredMessage(EVENT_ID, 0, "lock-token");
 
         then(messageFileGroupRepository).should().deleteAllByMessageId(RESIDENT_MESSAGE_ID);
+
         then(messageRepository).should().deleteById(RESIDENT_MESSAGE_ID);
+
         then(conversationRepository).should().deleteById(CONVERSATION_ID);
     }
 
@@ -278,10 +328,12 @@ class ConversationServiceAiReplyTest {
         outbox = followUpOutbox(previousLastMessageAt);
         givenUnansweredEvent();
 
-        conversationService.discardUnansweredMessage(EVENT_ID, 0);
+        conversationService.discardUnansweredMessage(EVENT_ID, 0, "lock-token");
 
         then(messageRepository).should().deleteById(RESIDENT_MESSAGE_ID);
+
         then(conversationRepository).should(never()).deleteById(any());
+
         assertThat(conversation.getLastMessageAt()).isEqualTo(previousLastMessageAt);
     }
 
@@ -321,7 +373,9 @@ class ConversationServiceAiReplyTest {
 
     private Message savedMessage() {
         ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
+
         then(messageRepository).should().save(messageCaptor.capture());
+
         return messageCaptor.getValue();
     }
 

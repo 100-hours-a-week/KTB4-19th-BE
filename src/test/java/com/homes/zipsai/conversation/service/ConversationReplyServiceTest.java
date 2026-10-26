@@ -96,7 +96,8 @@ class ConversationReplyServiceTest {
         conversationReplyService.reply(pendingAiReply);
 
         assertThat(publishedEvent()).isEqualTo(ChatbotReplyEvent.of(RESIDENT_ID, reply));
-        then(conversationService).should(never()).discardUnansweredMessage(any(), anyInt());
+
+        then(conversationService).should(never()).discardUnansweredMessage(any(), anyInt(), any());
     }
 
     @Test
@@ -130,10 +131,14 @@ class ConversationReplyServiceTest {
 
         conversationReplyService.reply(pendingAiReply);
 
-        then(conversationService).should().discardUnansweredMessage(EVENT_ID, 0);
+        then(conversationService).should().discardUnansweredMessage(EVENT_ID, 0, LOCK_TOKEN);
+
         then(conversationService).should(never()).saveAiReply(any(), any());
+
         ChatbotReplyEvent event = publishedEvent();
+
         assertThat(event.eventType()).isEqualTo(ChatbotReplyEvent.Type.FAILED);
+
         assertThat(event.failure())
             .hasFieldOrPropertyWithValue("conversationId", CONVERSATION_ID)
             .hasFieldOrPropertyWithValue("code", new AiUnavailableException().code);
@@ -160,8 +165,10 @@ class ConversationReplyServiceTest {
 
         conversationReplyService.reply(pendingAiReply);
 
-        then(conversationService).should().discardUnansweredMessage(EVENT_ID, 0);
+        then(conversationService).should().discardUnansweredMessage(EVENT_ID, 0, LOCK_TOKEN);
+
         then(conversationService).should(never()).saveAiReply(any(), any());
+
         assertThat(publishedEvent().failure()).hasFieldOrPropertyWithValue("code", "INTERNAL_SERVER_ERROR");
     }
 
@@ -175,9 +182,12 @@ class ConversationReplyServiceTest {
 
         conversationReplyService.reply(pendingAiReply);
 
-        then(conversationService).should().discardUnansweredMessage(EVENT_ID, 0);
+        then(conversationService).should().discardUnansweredMessage(EVENT_ID, 0, LOCK_TOKEN);
+
         ChatbotReplyEvent event = publishedEvent();
+
         assertThat(event.eventType()).isEqualTo(ChatbotReplyEvent.Type.FAILED);
+
         assertThat(event.failure()).hasFieldOrPropertyWithValue("code", "INTERNAL_SERVER_ERROR");
     }
 
@@ -204,6 +214,7 @@ class ConversationReplyServiceTest {
         conversationReplyService.reply(pendingAiReply);
 
         then(conversationReplyLock).should(never()).release(any(), any());
+
         then(redisMessagePublisher).should(never()).publish(any(), any());
     }
 
@@ -212,11 +223,12 @@ class ConversationReplyServiceTest {
     void skipsLockReleaseAndEventWhenAnotherAttemptOwnsFailure() {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(aiConverseClient.converse(eq(pendingAiReply.aiRequest()), any())).willThrow(new AiUnavailableException());
-        given(conversationService.discardUnansweredMessage(EVENT_ID, 0)).willReturn(Optional.empty());
+        given(conversationService.discardUnansweredMessage(EVENT_ID, 0, LOCK_TOKEN)).willReturn(Optional.empty());
 
         conversationReplyService.reply(pendingAiReply);
 
         then(conversationReplyLock).should(never()).release(any(), any());
+
         then(redisMessagePublisher).should(never()).publish(any(), any());
     }
 
@@ -229,23 +241,29 @@ class ConversationReplyServiceTest {
 
         conversationReplyService.reply(pendingAiReply);
 
-        then(conversationService).should(never()).discardUnansweredMessage(any(), anyInt());
+        then(conversationService).should(never()).discardUnansweredMessage(any(), anyInt(), any());
+
         then(conversationReplyLock).should(never()).release(any(), any());
+
         then(redisMessagePublisher).should(never()).publish(any(), any());
     }
 
     @Test
     @DisplayName("워커가 답변을 포기하면 메시지를 지운 뒤 잠금을 풀고 서버 오류를 chat-error 이벤트로 발행한다")
     void releasesLockAndSendsErrorEventWhenWorkerGivesUp() {
-        given(conversationService.discardUnansweredMessage(EVENT_ID, 2))
+        given(conversationService.discardUnansweredMessage(EVENT_ID, 2, LOCK_TOKEN))
             .willReturn(Optional.of(new DiscardedMessage(RESIDENT_ID, CONVERSATION_ID)));
 
         conversationReplyService.failReply(EVENT_ID, 2, LOCK_TOKEN);
 
         then(conversationReplyLock).should().release(CONVERSATION_ID, LOCK_TOKEN);
+
         ChatbotReplyEvent event = publishedEvent();
+
         assertThat(event.eventType()).isEqualTo(ChatbotReplyEvent.Type.FAILED);
+
         assertThat(event.userId()).isEqualTo(RESIDENT_ID);
+
         assertThat(event.failure())
             .hasFieldOrPropertyWithValue("conversationId", CONVERSATION_ID)
             .hasFieldOrPropertyWithValue("code", "INTERNAL_SERVER_ERROR");
@@ -254,28 +272,33 @@ class ConversationReplyServiceTest {
     @Test
     @DisplayName("워커가 포기하려는 이벤트를 다른 시도가 맡았으면 잠금을 풀지 않고 알리지 않는다")
     void skipsLockReleaseAndEventWhenAnotherAttemptOwnsGivenUpReply() {
-        given(conversationService.discardUnansweredMessage(EVENT_ID, 2)).willReturn(Optional.empty());
+        given(conversationService.discardUnansweredMessage(EVENT_ID, 2, LOCK_TOKEN)).willReturn(Optional.empty());
 
         conversationReplyService.failReply(EVENT_ID, 2, LOCK_TOKEN);
 
         then(conversationReplyLock).should(never()).release(any(), any());
+
         then(redisMessagePublisher).should(never()).publish(any(), any());
     }
 
     private void givenDiscarded() {
-        given(conversationService.discardUnansweredMessage(EVENT_ID, 0))
+        given(conversationService.discardUnansweredMessage(EVENT_ID, 0, LOCK_TOKEN))
             .willReturn(Optional.of(new DiscardedMessage(RESIDENT_ID, CONVERSATION_ID)));
     }
 
     private ChatbotReplyEvent publishedEvent() {
         ArgumentCaptor<ChatbotReplyEvent> eventCaptor = ArgumentCaptor.forClass(ChatbotReplyEvent.class);
+
         then(redisMessagePublisher).should().publish(eq(CHANNEL), eventCaptor.capture());
+
         return eventCaptor.getValue();
     }
 
     private List<ChatbotReplyEvent> publishedEvents(int count) {
         ArgumentCaptor<ChatbotReplyEvent> eventCaptor = ArgumentCaptor.forClass(ChatbotReplyEvent.class);
+
         then(redisMessagePublisher).should(times(count)).publish(eq(CHANNEL), eventCaptor.capture());
+
         return eventCaptor.getAllValues();
     }
 
