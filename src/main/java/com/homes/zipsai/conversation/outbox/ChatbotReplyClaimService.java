@@ -16,6 +16,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.homes.zipsai.conversation.ai.error.AiConverseErrorType.RetryPolicy;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutboxStatus;
 import com.homes.zipsai.conversation.domain.Conversation;
@@ -98,6 +99,21 @@ public class ChatbotReplyClaimService {
         return claims;
     }
 
+    public List<Claim> findCleanupBatch() {
+        return transactions.execute(transaction -> {
+            LocalDateTime now = outboxRepository.currentTime();
+            return outboxRepository.findCleanupCandidates(now.minus(workerProperties.requestTimeout()),
+                    now.minus(Conversation.IDLE_TIME_TO_CLOSE), MAX_CLAIMS).stream()
+                .map(outbox -> new Claim(outbox.getId(), outbox.getAttemptCount(), outbox.getLockToken())).toList();
+        });
+    }
+
+    public void retry(Claim claim) {
+        transactions.executeWithoutResult(transaction -> outboxRepository.findByIdForUpdate(claim.eventId())
+            .filter(outbox -> outbox.isProcessingBy(claim.attempt(), claim.lockToken()))
+            .ifPresent(outbox -> outbox.retry(claim.attempt())));
+    }
+
     private void transferOwnership(ChatbotReplyOutbox outbox, List<Transfer> transfers) {
         LocalDateTime now = outboxRepository.currentTime();
         if (!isEligible(outbox, now)) {
@@ -175,7 +191,8 @@ public class ChatbotReplyClaimService {
     }
 
     private boolean isEligible(ChatbotReplyOutbox outbox, LocalDateTime now) {
-        return outbox.getDeletedAt() == null && (outbox.getStatus() == ChatbotReplyOutboxStatus.PENDING
+        return outbox.getDeletedAt() == null && RetryPolicy.LIMITED.shouldRetry(outbox.getAttemptCount())
+            && (outbox.getStatus() == ChatbotReplyOutboxStatus.PENDING
             || (outbox.getStatus() == ChatbotReplyOutboxStatus.PROCESSING
                 && !now.isBefore(outbox.getProcessingStartedAt().plus(workerProperties.attemptTimeout()))));
     }
