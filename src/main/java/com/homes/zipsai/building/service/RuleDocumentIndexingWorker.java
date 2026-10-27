@@ -39,7 +39,10 @@ public class RuleDocumentIndexingWorker {
     static final int MAX_RETRY_COUNT = 5;
     static final Duration BASE_RETRY_DELAY = Duration.ofSeconds(10);
     static final Duration MAX_RETRY_DELAY = Duration.ofMinutes(10);
+    static final Duration IN_PROGRESS_DEFAULT_DELAY = Duration.ofSeconds(30);
+    static final Duration IN_PROGRESS_MAX_WAIT = Duration.ofMinutes(30);
     static final String AI_UNAVAILABLE = "AI_UNAVAILABLE";
+    static final String AI_IN_PROGRESS = "AI_IN_PROGRESS";
     static final String AI_REJECTED = "AI_REJECTED";
     static final String MISSING_RESULT = "MISSING_RESULT";
     static final String UNKNOWN_STATUS = "UNKNOWN_STATUS";
@@ -95,7 +98,11 @@ public class RuleDocumentIndexingWorker {
             try {
                 response = client.index(task.request());
             } catch (AiRetryLaterException exception) {
-                retry(task, AI_UNAVAILABLE, exception.retryAfter());
+                if (exception.inProgress()) {
+                    waitWhileInProgress(task, exception.retryAfter());
+                } else {
+                    retry(task, AI_UNAVAILABLE, exception.retryAfter());
+                }
                 return;
             } catch (AiUnavailableException exception) {
                 retry(task, AI_UNAVAILABLE, null);
@@ -224,6 +231,19 @@ public class RuleDocumentIndexingWorker {
                             + "reason={}",
                     task.outboxId(), task.operation(), task.documentId(), reason);
         }
+    }
+
+    private void waitWhileInProgress(Task task, Duration retryAfter) {
+        Boolean waiting = tx.execute(transaction -> outboxRepository.findById(task.outboxId())
+                .map(outbox -> outbox.waitWhileInProgress(AI_IN_PROGRESS, retryAfter, IN_PROGRESS_DEFAULT_DELAY,
+                        MAX_RETRY_DELAY, IN_PROGRESS_MAX_WAIT, TimeUtils.now()))
+                .orElse(true));
+        if (Boolean.TRUE.equals(waiting)) {
+            LOGGER.info("AI가 운영규칙 문서를 처리 중이라 결과를 다시 확인합니다. outboxId={}, documentId={}, retryAfter={}",
+                    task.outboxId(), task.documentId(), retryAfter);
+            return;
+        }
+        retry(task, AI_IN_PROGRESS, retryAfter);
     }
 
     private void markDocumentFailed(Task task, String reason) {

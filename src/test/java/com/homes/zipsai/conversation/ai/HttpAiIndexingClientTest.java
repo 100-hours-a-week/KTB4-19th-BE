@@ -138,7 +138,24 @@ class HttpAiIndexingClientTest {
             .andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS).headers(headers));
 
         assertThatThrownBy(() -> httpAiIndexingClient.cleanup(10L, TRACE_ID, List.of()))
-            .isInstanceOfSatisfying(AiRetryLaterException.class,
-                exception -> assertThat(exception.retryAfter()).isEqualTo(Duration.ofSeconds(30)));
+            .isInstanceOfSatisfying(AiRetryLaterException.class, exception -> {
+                assertThat(exception.retryAfter()).isEqualTo(Duration.ofSeconds(30));
+                assertThat(exception.inProgress()).isTrue();
+            });
+    }
+
+    @Test
+    @DisplayName("503과 Retry-After는 처리 중이 아닌 일시 과부하로 알린다")
+    void throwsBusyRetryLaterOnServiceUnavailable() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.RETRY_AFTER, "10");
+        mockRestServiceServer.expect(requestTo(BASE_URL + INDEXING_PATH))
+            .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE).headers(headers));
+
+        assertThatThrownBy(() -> httpAiIndexingClient.cleanup(10L, TRACE_ID, List.of()))
+            .isInstanceOfSatisfying(AiRetryLaterException.class, exception -> {
+                assertThat(exception.retryAfter()).isEqualTo(Duration.ofSeconds(10));
+                assertThat(exception.inProgress()).isFalse();
+            });
     }
 }
