@@ -116,4 +116,16 @@ public class RuleDocumentIndexingOutbox extends BaseTimeEntity {
         nextRetryAt = now.plus(delay.compareTo(maxDelay) > 0 ? maxDelay : delay);
         return true;
     }
+
+    public boolean waitWhileInProgress(String reason, Duration retryAfter, Duration defaultDelay, Duration maxDelay,
+                                       Duration maxWait, LocalDateTime now) {
+        LocalDateTime startedAt = getCreatedAt() == null ? now : getCreatedAt();
+        if (now.isAfter(startedAt.plus(maxWait))) {
+            return false;
+        }
+        lastError = TextUtils.truncate(reason, LAST_ERROR_MAX_LENGTH);
+        Duration delay = retryAfter == null || retryAfter.isZero() ? defaultDelay : retryAfter;
+        nextRetryAt = now.plus(delay.compareTo(maxDelay) > 0 ? maxDelay : delay);
+        return true;
+    }
 }

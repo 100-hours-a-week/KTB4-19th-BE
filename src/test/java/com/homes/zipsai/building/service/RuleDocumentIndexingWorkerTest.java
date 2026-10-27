@@ -274,6 +274,53 @@ class RuleDocumentIndexingWorkerTest {
     }
 
     @Test
+    @DisplayName("AI가 같은 문서를 처리 중이라고 하면 재시도 횟수를 쓰지 않고 Retry-After 뒤에 결과를 다시 확인한다")
+    void waitsWithoutCountingWhileAiIsProcessing() {
+        RuleDocumentIndexingOutbox outbox = givenIndexOutbox();
+        given(aiIndexingClient.index(any())).willThrow(new AiRetryLaterException(Duration.ofSeconds(60), true));
+        LocalDateTime before = LocalDateTime.now();
+
+        for (int i = 0; i < RuleDocumentIndexingWorker.MAX_RETRY_COUNT + 3; i++) {
+            worker.processDue();
+        }
+
+        assertThat(outbox.getStatus()).isEqualTo(RuleDocumentIndexingOutboxStatus.PENDING);
+        assertThat(outbox.getRetryCount()).isZero();
+        assertThat(outbox.getLastError()).isEqualTo(RuleDocumentIndexingWorker.AI_IN_PROGRESS);
+        assertThat(outbox.getNextRetryAt()).isAfterOrEqualTo(before.plusSeconds(60));
+        then(documentRepository).should(never()).updateIndexingResult(anyLong(), anyInt(), any(), any());
+    }
+
+    @Test
+    @DisplayName("처리 중 응답에 Retry-After가 없으면 기본 간격 뒤에 다시 확인한다")
+    void usesDefaultDelayWhenInProgressHasNoRetryAfter() {
+        RuleDocumentIndexingOutbox outbox = givenIndexOutbox();
+        given(aiIndexingClient.index(any())).willThrow(new AiRetryLaterException(null, true));
+        LocalDateTime before = LocalDateTime.now();
+
+        worker.processDue();
+
+        assertThat(outbox.getRetryCount()).isZero();
+        assertThat(outbox.getNextRetryAt())
+            .isAfterOrEqualTo(before.plus(RuleDocumentIndexingWorker.IN_PROGRESS_DEFAULT_DELAY));
+    }
+
+    @Test
+    @DisplayName("처리 중 대기가 최대 시간을 넘기면 일반 재시도로 횟수를 센다")
+    void countsRetryAfterInProgressWaitExpires() {
+        RuleDocumentIndexingOutbox outbox = givenIndexOutbox();
+        ReflectionTestUtils.setField(outbox, "createdAt",
+            LocalDateTime.now().minus(RuleDocumentIndexingWorker.IN_PROGRESS_MAX_WAIT).minusMinutes(1));
+        given(aiIndexingClient.index(any())).willThrow(new AiRetryLaterException(Duration.ofSeconds(60), true));
+
+        worker.processDue();
+
+        assertThat(outbox.getStatus()).isEqualTo(RuleDocumentIndexingOutboxStatus.PENDING);
+        assertThat(outbox.getRetryCount()).isOne();
+        assertThat(outbox.getLastError()).isEqualTo(RuleDocumentIndexingWorker.AI_IN_PROGRESS);
+    }
+
+    @Test
     @DisplayName("다시 보낼 수 있는 정리 실패는 다시 보낸다")
     void retriesRetryableCleanupFailure() {
         RuleDocumentIndexingOutbox outbox = RuleDocumentIndexingOutbox.cleanup(BUILDING_ID, TRACE_ID,

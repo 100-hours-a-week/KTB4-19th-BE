@@ -72,8 +72,10 @@ public class HttpAiIndexingClient implements AiIndexingClient {
     }
 
     private ApiException toApiException(HttpStatusCode status, HttpHeaders headers) {
-        if (status.isSameCodeAs(HttpStatus.SERVICE_UNAVAILABLE)
-                || status.isSameCodeAs(HttpStatus.TOO_MANY_REQUESTS)) {
+        if (status.isSameCodeAs(HttpStatus.TOO_MANY_REQUESTS)) {
+            return AiRetryLaterException.inProgress(headers);
+        }
+        if (status.isSameCodeAs(HttpStatus.SERVICE_UNAVAILABLE)) {
             return AiRetryLaterException.from(headers);
         }
         if (status.isSameCodeAs(HttpStatus.GATEWAY_TIMEOUT)) {
