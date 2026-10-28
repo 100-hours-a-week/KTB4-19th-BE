@@ -191,7 +191,7 @@ public class ConversationService {
     @Transactional(readOnly = true)
     public Optional<PendingAiReply> prepareReply(Long eventId, int attempt, String lockToken) {
         ChatbotReplyOutbox outbox = chatbotReplyOutboxRepository.findById(eventId).orElseThrow();
-        if (!outbox.isProcessingBy(attempt)) {
+        if (!outbox.isProcessingBy(attempt, lockToken)) {
             warnHandledByAnotherAttempt(outbox, attempt);
             return Optional.empty();
         }
@@ -207,7 +207,7 @@ public class ConversationService {
     public Optional<ConversationReplyResponse> saveAiReply(PendingAiReply pendingReply,
                                                            AiConverseResponse aiResponse) {
         ChatbotReplyOutbox outbox = getOutboxForUpdate(pendingReply.eventId());
-        if (!outbox.isProcessingBy(pendingReply.attempt())) {
+        if (!outbox.isProcessingBy(pendingReply.attempt(), pendingReply.lockToken())) {
             warnHandledByAnotherAttempt(outbox, pendingReply.attempt());
             return Optional.empty();
         }
@@ -241,9 +241,9 @@ public class ConversationService {
     }
 
     @Transactional
-    public Optional<DiscardedMessage> discardUnansweredMessage(Long eventId, int attempt) {
+    public Optional<DiscardedMessage> discardUnansweredMessage(Long eventId, int attempt, String lockToken) {
         ChatbotReplyOutbox outbox = getOutboxForUpdate(eventId);
-        if (!outbox.isProcessingBy(attempt)) {
+        if (!outbox.isProcessingBy(attempt, lockToken)) {
             warnHandledByAnotherAttempt(outbox, attempt);
             return Optional.empty();
         }

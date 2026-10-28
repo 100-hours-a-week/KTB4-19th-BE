@@ -53,7 +53,7 @@ public class ConversationReplyService {
     }
 
     public void failReply(Long eventId, int attempt, String lockToken) {
-        conversationService.discardUnansweredMessage(eventId, attempt).ifPresent(discarded -> {
+        conversationService.discardUnansweredMessage(eventId, attempt, lockToken).ifPresent(discarded -> {
             conversationReplyLock.release(discarded.conversationId(), lockToken);
             publish(failedEvent(discarded.userId(), discarded.conversationId(), new InternalServerException()));
         });
@@ -96,7 +96,8 @@ public class ConversationReplyService {
                 return Optional.empty();
             }
             Optional<DiscardedMessage> discarded =
-                conversationService.discardUnansweredMessage(pendingReply.eventId(), pendingReply.attempt());
+                conversationService.discardUnansweredMessage(pendingReply.eventId(), pendingReply.attempt(),
+                    pendingReply.lockToken());
             if (discarded.isEmpty()) {
                 return Optional.empty();
             }
