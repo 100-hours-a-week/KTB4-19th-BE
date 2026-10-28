@@ -4,8 +4,6 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.scheduling.annotation.Async;
@@ -34,8 +32,6 @@ import lombok.RequiredArgsConstructor;
 @EnableConfigurationProperties(ChatbotReplyWorkerProperties.class)
 public class ConversationReplyService {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(ConversationReplyService.class);
-
     private final ConversationService conversationService;
     private final AiConverseClient aiConverseClient;
     private final RedisMessagePublisher redisMessagePublisher;
@@ -63,14 +59,21 @@ public class ConversationReplyService {
         Long conversationId = pendingReply.conversation().getId();
         try {
             return askAiAndSaveReply(userId, pendingReply).map(reply -> ChatbotReplyEvent.of(userId, reply));
-        } catch (ApiException e) {
-            structuredLogger.chatbotReplyFailed(pendingReply.eventId(), conversationId,
-                pendingReply.aiRequest().turnId(), e);
-            return Optional.of(failedEvent(userId, conversationId, e));
         } catch (RuntimeException e) {
             structuredLogger.chatbotReplyFailed(pendingReply.eventId(), conversationId,
                 pendingReply.aiRequest().turnId(), e);
-            return Optional.of(failedEvent(userId, conversationId, new InternalServerException()));
+            if (chatbotReplyShutdownSignal.isShuttingDown()) {
+                return Optional.empty();
+            }
+            Optional<DiscardedMessage> discarded = e instanceof AiConverseException aiException
+                ? conversationService.handleAiReplyFailure(pendingReply, aiException.getErrorType())
+                : conversationService.discardUnansweredMessage(pendingReply.eventId(), pendingReply.attempt(),
+                    pendingReply.lockToken());
+            if (discarded.isEmpty()) {
+                return Optional.empty();
+            }
+            ApiException error = e instanceof ApiException apiException ? apiException : new InternalServerException();
+            return Optional.of(failedEvent(userId, conversationId, error));
         }
     }
 
@@ -80,32 +83,18 @@ public class ConversationReplyService {
     }
 
     private Optional<ConversationReplyResponse> askAiAndSaveReply(Long userId, PendingAiReply pendingReply) {
-        try {
-            if (!conversationService.isReplyExecutable(pendingReply)) {
-                return Optional.empty();
-            }
-            String turnId = pendingReply.aiRequest().turnId();
-            Consumer<String> onReplyDelta = replyDeltaSender(userId, pendingReply.conversation().getId());
-            AiConverseResponse aiResponse = aiConverseClient.converse(pendingReply.aiRequest(), onReplyDelta);
-            if (aiResponse == null) {
-                throw new AiConverseException(AiConverseErrorType.INVALID_RESPONSE,
-                    new InternalServerException(), null);
-            }
-            aiResponse.validateFor(turnId);
-            return conversationService.saveAiReply(pendingReply, aiResponse);
-        } catch (RuntimeException e) {
-            if (chatbotReplyShutdownSignal.isShuttingDown()) {
-                LOGGER.warn("서버가 종료되는 중이라 답변 이벤트를 처리 중으로 남깁니다. eventId={}", pendingReply.eventId(), e);
-                return Optional.empty();
-            }
-            Optional<DiscardedMessage> discarded =
-                conversationService.discardUnansweredMessage(pendingReply.eventId(), pendingReply.attempt(),
-                    pendingReply.lockToken());
-            if (discarded.isEmpty()) {
-                return Optional.empty();
-            }
-            throw e;
+        if (!conversationService.isReplyExecutable(pendingReply)) {
+            return Optional.empty();
         }
+        String turnId = pendingReply.aiRequest().turnId();
+        Consumer<String> onReplyDelta = replyDeltaSender(userId, pendingReply.conversation().getId());
+        AiConverseResponse aiResponse = aiConverseClient.converse(pendingReply.aiRequest(), onReplyDelta);
+        if (aiResponse == null) {
+            throw new AiConverseException(AiConverseErrorType.INVALID_RESPONSE,
+                new InternalServerException(), null);
+        }
+        aiResponse.validateFor(turnId);
+        return conversationService.saveAiReply(pendingReply, aiResponse);
     }
 
     private Consumer<String> replyDeltaSender(Long userId, Long conversationId) {
