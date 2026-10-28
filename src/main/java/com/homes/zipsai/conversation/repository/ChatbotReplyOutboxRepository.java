@@ -28,6 +28,23 @@ public interface ChatbotReplyOutboxRepository extends JpaRepository<ChatbotReply
                                                         @Param("lastEventId") long lastEventId,
                                                         @Param("limit") int limit);
 
+    @Query(value = """
+        SELECT o.* FROM Chatbot_reply_outbox o
+        JOIN Messages m ON m.message_id = o.message_id
+        JOIN Conversations c ON c.conversation_id = m.conversation_id
+        WHERE o.deleted_at IS NULL AND m.deleted_at IS NULL AND c.deleted_at IS NULL
+            AND o.status IN ('PENDING', 'PROCESSING')
+            AND (o.attempt_count >= 3 OR o.created_at <= :requestExpiredBefore OR c.conversation_status <> 'ACTIVE'
+                OR ((c.ai_conversation_state IS NULL OR c.ai_conversation_state <> 'READY_TO_CONFIRM')
+                    AND c.last_message_at <= :conversationExpiredBefore))
+        ORDER BY o.event_id
+        LIMIT :limit
+        """, nativeQuery = true)
+    List<ChatbotReplyOutbox> findCleanupCandidates(@Param("requestExpiredBefore") LocalDateTime requestExpiredBefore,
+                                                  @Param("conversationExpiredBefore")
+                                                  LocalDateTime conversationExpiredBefore,
+                                                  @Param("limit") int limit);
+
     @Query("select coalesce(max(outbox.id), 0) from ChatbotReplyOutbox outbox")
     long findLastEventId();
 
