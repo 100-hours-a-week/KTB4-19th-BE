@@ -6,6 +6,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -37,6 +38,7 @@ import com.homes.zipsai.conversation.domain.MessageType;
 import com.homes.zipsai.conversation.domain.SenderType;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyResponse;
 import com.homes.zipsai.conversation.dto.response.MessageResponse;
+import com.homes.zipsai.conversation.outbox.ChatbotReplyWorkerProperties;
 import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
@@ -86,7 +88,8 @@ class ConversationServiceAiReplyTest {
     void setUp() {
         conversationService = new ConversationService(conversationRepository, messageRepository,
             messageFileGroupRepository, fileRepository, residentRoomService, s3StorageService,
-            new StorageProperties(null, null, null, 300, 0), outboxRecorder, chatbotReplyOutboxRepository, null);
+            new StorageProperties(null, null, null, 300, 0), outboxRecorder, chatbotReplyOutboxRepository, null,
+            new ChatbotReplyWorkerProperties(Duration.ofSeconds(130), Duration.ofSeconds(280)));
         conversation = Conversation.builder()
             .type(ConversationType.INQUIRY)
             .title("분리수거 요일이 언제인가요?")
@@ -353,7 +356,9 @@ class ConversationServiceAiReplyTest {
 
     private void givenReplySaved() {
         givenEvent();
-        given(conversationRepository.getReferenceById(CONVERSATION_ID)).willReturn(conversation);
+        given(conversationRepository.findByResidentMessageForUpdate(RESIDENT_MESSAGE_ID, 1L))
+            .willReturn(Optional.of(conversation));
+        given(chatbotReplyOutboxRepository.currentTime()).willReturn(REPLIED_AT);
         given(messageRepository.save(any(Message.class))).willAnswer(invocation -> {
             Message message = invocation.getArgument(0);
             ReflectionTestUtils.setField(message, "id", 21L);
@@ -391,6 +396,7 @@ class ConversationServiceAiReplyTest {
         ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startFirstMessage(residentMessage(), 1L, "trace-1", "lock-token",
             REPLIED_AT);
         ReflectionTestUtils.setField(outbox, "id", EVENT_ID);
+        ReflectionTestUtils.setField(outbox, "createdAt", REPLIED_AT);
         return outbox;
     }
 
@@ -398,6 +404,7 @@ class ConversationServiceAiReplyTest {
         ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startNextMessage(residentMessage(), 1L, "trace-1", "lock-token",
             previousLastMessageAt, REPLIED_AT);
         ReflectionTestUtils.setField(outbox, "id", EVENT_ID);
+        ReflectionTestUtils.setField(outbox, "createdAt", REPLIED_AT);
         return outbox;
     }
 

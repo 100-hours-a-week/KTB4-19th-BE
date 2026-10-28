@@ -7,6 +7,7 @@ import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
@@ -34,6 +35,7 @@ import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.conversation.domain.Message;
 import com.homes.zipsai.conversation.domain.MessageType;
 import com.homes.zipsai.conversation.domain.SenderType;
+import com.homes.zipsai.conversation.outbox.ChatbotReplyWorkerProperties;
 import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
@@ -86,7 +88,8 @@ class ConversationServiceOutboxTest {
         conversationService = new ConversationService(conversationRepository, messageRepository,
             messageFileGroupRepository, fileRepository, residentRoomService, s3StorageService,
             new StorageProperties(null, null, null, 300, 0), outboxRecorder, chatbotReplyOutboxRepository,
-            conversationReplyLock);
+            conversationReplyLock,
+            new ChatbotReplyWorkerProperties(Duration.ofSeconds(130), Duration.ofSeconds(280)));
         resident = withId(new User("resident@example.com", "password", "입주민", null), RESIDENT_ID);
         MDC.put("traceId", TRACE_ID);
     }
@@ -150,6 +153,7 @@ class ConversationServiceOutboxTest {
         outbox.retry(1);
         outbox.claim("retry-token", outbox.getProcessingStartedAt().plusSeconds(1));
         given(messageRepository.findById(MESSAGE_ID)).willReturn(Optional.of(storedResidentMessage()));
+        given(chatbotReplyOutboxRepository.currentTime()).willReturn(outbox.getProcessingStartedAt());
 
         PendingAiReply pendingReply = conversationService.prepareReply(EVENT_ID, 1, "retry-token").orElseThrow();
 
@@ -196,6 +200,7 @@ class ConversationServiceOutboxTest {
         ChatbotReplyOutbox outbox = withId(ChatbotReplyOutbox.startNextMessage(storedResidentMessage(), RESIDENT_ID,
             "trace-retry", "old-token", null, LocalDateTime.of(2026, 10, 22, 10, 7)), EVENT_ID);
         ReflectionTestUtils.setField(outbox, "attemptCount", attemptCount);
+        ReflectionTestUtils.setField(outbox, "createdAt", outbox.getProcessingStartedAt());
         given(chatbotReplyOutboxRepository.findById(EVENT_ID)).willReturn(Optional.of(outbox));
         return outbox;
     }

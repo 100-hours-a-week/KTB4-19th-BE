@@ -8,6 +8,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -38,6 +39,7 @@ import com.homes.zipsai.conversation.domain.MessageFileGroup;
 import com.homes.zipsai.conversation.domain.MessageType;
 import com.homes.zipsai.conversation.domain.SenderType;
 import com.homes.zipsai.conversation.dto.response.AttachmentResponse;
+import com.homes.zipsai.conversation.outbox.ChatbotReplyWorkerProperties;
 import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
@@ -90,7 +92,8 @@ class ConversationServiceImageTest {
         conversationService = new ConversationService(conversationRepository, messageRepository,
             messageFileGroupRepository, fileRepository, residentRoomService, s3StorageService,
             new StorageProperties(null, null, null, 300, 0), outboxRecorder, chatbotReplyOutboxRepository,
-            conversationReplyLock);
+            conversationReplyLock,
+            new ChatbotReplyWorkerProperties(Duration.ofSeconds(130), Duration.ofSeconds(280)));
         resident = user(RESIDENT_ID);
         given(residentRoomService.getLivingRoom(RESIDENT_ID)).willReturn(livingRoom(resident));
     }

@@ -302,7 +302,7 @@ class ConversationReplyServiceTest {
         return eventCaptor.getAllValues();
     }
 
-    private static PendingAiReply pendingAiReply() {
+    private PendingAiReply pendingAiReply() {
         Conversation conversation = Conversation.builder()
             .type(ConversationType.INQUIRY)
             .title("천장에서 물이 새요")
@@ -312,7 +312,10 @@ class ConversationReplyServiceTest {
             new MessageResponse(20L, SenderType.RESIDENT, MessageType.TEXT, "천장에서 물이 새요", List.of(), null, null);
         AiConverseRequest aiRequest =
             new AiConverseRequest(null, null, null, null, TURN_ID, null, null, null, null, List.of(), null);
-        return new PendingAiReply(EVENT_ID, 0, LOCK_TOKEN, RESIDENT_ID, conversation, residentMessage, aiRequest);
+        PendingAiReply pendingReply =
+            new PendingAiReply(EVENT_ID, 0, LOCK_TOKEN, RESIDENT_ID, conversation, residentMessage, aiRequest);
+        given(conversationService.isReplyExecutable(pendingReply)).willReturn(true);
+        return pendingReply;
     }
 
     private static MessageResponse assistantMessage() {

@@ -5,6 +5,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -20,6 +21,7 @@ import com.homes.zipsai.common.config.StorageProperties;
 import com.homes.zipsai.common.repository.FileRepository;
 import com.homes.zipsai.common.service.S3StorageService;
 import com.homes.zipsai.conversation.domain.Conversation;
+import com.homes.zipsai.conversation.outbox.ChatbotReplyWorkerProperties;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
@@ -58,7 +60,8 @@ class ConversationServiceClosingTest {
     void setUp() {
         conversationService = new ConversationService(conversationRepository, messageRepository,
             messageFileGroupRepository, fileRepository, residentRoomService, s3StorageService,
-            new StorageProperties(null, null, null, 300, 0), outboxRecorder, null, null);
+            new StorageProperties(null, null, null, 300, 0), outboxRecorder, null, null,
+            new ChatbotReplyWorkerProperties(Duration.ofSeconds(130), Duration.ofSeconds(280)));
     }
 
     @Test
