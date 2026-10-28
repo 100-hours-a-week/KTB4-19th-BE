@@ -9,6 +9,7 @@ import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -315,7 +316,7 @@ class ConversationReplyServiceTest {
             new AiConverseRequest(null, null, null, null, TURN_ID, null, null, null, null, List.of(), null);
         PendingAiReply pendingReply =
             new PendingAiReply(EVENT_ID, 0, LOCK_TOKEN, RESIDENT_ID, conversation, residentMessage, aiRequest);
-        given(conversationService.isReplyExecutable(pendingReply)).willReturn(true);
+        given(conversationService.remainingReplyTime(pendingReply)).willReturn(Optional.of(Duration.ofSeconds(130)));
         return pendingReply;
     }
 

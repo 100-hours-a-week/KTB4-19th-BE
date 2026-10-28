@@ -196,14 +196,19 @@ public class ConversationService {
     }
 
     @Transactional(readOnly = true)
-    public boolean isReplyExecutable(PendingAiReply pendingReply) {
+    public Optional<Duration> remainingReplyTime(PendingAiReply pendingReply) {
         ChatbotReplyOutbox outbox = chatbotReplyOutboxRepository.findById(pendingReply.eventId()).orElseThrow();
         if (!outbox.isProcessingBy(pendingReply.attempt(), pendingReply.lockToken())) {
-            return false;
+            return Optional.empty();
         }
-        Message residentMessage = messageRepository.findById(outbox.getMessageId()).orElseThrow();
-        verifyReplyDeadline(outbox, residentMessage.getConversation());
-        return true;
+        Conversation conversation = messageRepository.findById(outbox.getMessageId()).orElseThrow().getConversation();
+        LocalDateTime now = chatbotReplyOutboxRepository.currentTime();
+        if (!isReplyWithinDeadline(outbox, conversation, now)) {
+            throw new InternalServerException();
+        }
+        LocalDateTime deadline = outbox.processingDeadline(chatbotReplyWorkerProperties.attemptTimeout(),
+            chatbotReplyWorkerProperties.requestTimeout(), conversation);
+        return Optional.of(Duration.between(now, deadline));
     }
 
     @Transactional(readOnly = true)
@@ -320,7 +325,10 @@ public class ConversationService {
     }
 
     private boolean isReplyWithinDeadline(ChatbotReplyOutbox outbox, Conversation conversation) {
-        LocalDateTime now = chatbotReplyOutboxRepository.currentTime();
+        return isReplyWithinDeadline(outbox, conversation, chatbotReplyOutboxRepository.currentTime());
+    }
+
+    private boolean isReplyWithinDeadline(ChatbotReplyOutbox outbox, Conversation conversation, LocalDateTime now) {
         return outbox.getDeletedAt() == null && conversation.getDeletedAt() == null
             && conversation.statusAt(now) == ConversationStatus.ACTIVE
             && now.isBefore(outbox.processingDeadline(chatbotReplyWorkerProperties.attemptTimeout(),

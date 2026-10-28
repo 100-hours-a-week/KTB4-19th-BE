@@ -1,13 +1,16 @@
 package com.homes.zipsai.conversation.service;
 
+import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import org.slf4j.MDC;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.dao.DataAccessException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.TransactionException;
 
 import com.homes.zipsai.common.service.RedisMessagePublisher;
 import com.homes.zipsai.conversation.ai.AiConverseClient;
@@ -83,7 +86,9 @@ public class ConversationReplyService {
     }
 
     private Optional<ConversationReplyResponse> askAiAndSaveReply(Long userId, PendingAiReply pendingReply) {
-        if (!conversationService.isReplyExecutable(pendingReply)) {
+        long startedAt = System.nanoTime();
+        Optional<Duration> remaining = conversationService.remainingReplyTime(pendingReply);
+        if (remaining.isEmpty()) {
             return Optional.empty();
         }
         String turnId = pendingReply.aiRequest().turnId();
@@ -94,7 +99,44 @@ public class ConversationReplyService {
                 new InternalServerException(), null);
         }
         aiResponse.validateFor(turnId);
-        return conversationService.saveAiReply(pendingReply, aiResponse);
+        return saveAiReplyWithRetry(pendingReply, aiResponse, startedAt, remaining.get());
+    }
+
+    private Optional<ConversationReplyResponse> saveAiReplyWithRetry(PendingAiReply pendingReply,
+                                                                    AiConverseResponse aiResponse,
+                                                                    long startedAt, Duration timeout) {
+        Duration delay = Duration.ofSeconds(1);
+        while (!chatbotReplyShutdownSignal.isShuttingDown() && !Thread.currentThread().isInterrupted()) {
+            try {
+                return conversationService.saveAiReply(pendingReply, aiResponse);
+            } catch (DataAccessException | TransactionException exception) {
+                structuredLogger.chatbotReplyFailed(pendingReply.eventId(), pendingReply.conversation().getId(),
+                    pendingReply.aiRequest().turnId(), exception);
+                if (chatbotReplyShutdownSignal.isShuttingDown() || Thread.currentThread().isInterrupted()) {
+                    return Optional.empty();
+                }
+                Duration remaining = timeout.minusNanos(System.nanoTime() - startedAt);
+                if (remaining.isNegative() || remaining.isZero()) {
+                    throw new InternalServerException();
+                }
+                Duration wait = delay.compareTo(remaining) < 0 ? delay : remaining;
+                try {
+                    Thread.sleep(wait);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return Optional.empty();
+                }
+                if (chatbotReplyShutdownSignal.isShuttingDown()) {
+                    return Optional.empty();
+                }
+                remaining = timeout.minusNanos(System.nanoTime() - startedAt);
+                if (remaining.isNegative() || remaining.isZero()) {
+                    throw new InternalServerException();
+                }
+                delay = Duration.ofSeconds(Math.min(delay.toSeconds() * 2, 10));
+            }
+        }
+        return Optional.empty();
     }
 
     private Consumer<String> replyDeltaSender(Long userId, Long conversationId) {
