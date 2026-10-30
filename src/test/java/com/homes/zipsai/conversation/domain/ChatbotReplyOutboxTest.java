@@ -70,6 +70,74 @@ class ChatbotReplyOutboxTest {
         assertThat(outbox.isProcessingBy(0)).isFalse();
     }
 
+    @Test
+    @DisplayName("대기 중인 이벤트는 같은 시도 번호의 발행 확인을 받으면 발행 시각을 남긴다")
+    void marksPublishedWhenPendingWithSameAttempt() {
+        ChatbotReplyOutbox outbox = pendingOutbox(0);
+
+        boolean marked = outbox.markPublished(0, NOW);
+
+        assertThat(marked).isTrue();
+        assertThat(outbox.getPublishedAt()).isEqualTo(NOW);
+    }
+
+    @Test
+    @DisplayName("이미 발행 시각이 있으면 다시 기록하지 않는다")
+    void doesNotOverwritePublishedAt() {
+        ChatbotReplyOutbox outbox = pendingOutbox(0);
+        outbox.markPublished(0, NOW);
+
+        boolean marked = outbox.markPublished(0, NOW.plusSeconds(5));
+
+        assertThat(marked).isFalse();
+        assertThat(outbox.getPublishedAt()).isEqualTo(NOW);
+    }
+
+    @Test
+    @DisplayName("이전 시도의 늦은 발행 확인은 재시도 대기 중인 이벤트에 기록하지 않는다")
+    void ignoresLatePublishConfirmOfPreviousAttempt() {
+        ChatbotReplyOutbox outbox = pendingOutbox(1);
+
+        boolean marked = outbox.markPublished(0, NOW);
+
+        assertThat(marked).isFalse();
+        assertThat(outbox.getPublishedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("처리 중인 이벤트에는 발행 시각을 기록하지 않는다")
+    void doesNotMarkPublishedWhileProcessing() {
+        ChatbotReplyOutbox outbox =
+            ChatbotReplyOutbox.startFirstMessage(residentMessage(500L), 7L, "trace-1", "lock-1", NOW);
+
+        boolean marked = outbox.markPublished(0, NOW);
+
+        assertThat(marked).isFalse();
+        assertThat(outbox.getPublishedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("재시도로 대기 상태가 되면 발행 시각을 비워 다시 발행 대상이 된다")
+    void clearsPublishedAtOnRetry() {
+        ChatbotReplyOutbox outbox = pendingOutbox(0);
+        outbox.markPublished(0, NOW);
+        outbox.claim("lock-2", NOW.plusSeconds(1));
+        outbox.recordFailure();
+
+        outbox.retry(outbox.getAttemptCount());
+
+        assertThat(outbox.getStatus()).isEqualTo(ChatbotReplyOutboxStatus.PENDING);
+        assertThat(outbox.getAttemptCount()).isEqualTo(1);
+        assertThat(outbox.getPublishedAt()).isNull();
+    }
+
+    private static ChatbotReplyOutbox pendingOutbox(int attempt) {
+        ChatbotReplyOutbox outbox =
+            ChatbotReplyOutbox.startFirstMessage(residentMessage(500L), 7L, "trace-1", "lock-1", NOW);
+        outbox.retry(attempt);
+        return outbox;
+    }
+
     private static Message residentMessage(long id) {
         Message message = new Message(null, "보일러가 안 켜져요", SenderType.RESIDENT, MessageType.TEXT, "turn-1");
         ReflectionTestUtils.setField(message, "id", id);
