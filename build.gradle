@@ -30,6 +30,7 @@ dependencies {
 	implementation 'software.amazon.awssdk:s3'
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+	implementation 'org.springframework.boot:spring-boot-starter-amqp'
 	implementation "net.javacrumbs.shedlock:shedlock-spring:${shedlockVersion}"
 	implementation "net.javacrumbs.shedlock:shedlock-provider-redis-spring:${shedlockVersion}"
 	implementation 'org.hibernate.orm:hibernate-spatial'
