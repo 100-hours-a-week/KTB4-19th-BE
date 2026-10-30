@@ -45,6 +45,16 @@ public interface ChatbotReplyOutboxRepository extends JpaRepository<ChatbotReply
                                                   LocalDateTime conversationExpiredBefore,
                                                   @Param("limit") int limit);
 
+    @Query(value = """
+        SELECT * FROM Chatbot_reply_outbox
+        WHERE status = 'PENDING' AND published_at IS NULL AND updated_at <= :updatedBefore
+            AND deleted_at IS NULL
+        ORDER BY event_id
+        LIMIT :limit FOR UPDATE SKIP LOCKED
+        """, nativeQuery = true)
+    List<ChatbotReplyOutbox> findRelayCandidatesForUpdate(@Param("updatedBefore") LocalDateTime updatedBefore,
+                                                         @Param("limit") int limit);
+
     @Query("select coalesce(max(outbox.id), 0) from ChatbotReplyOutbox outbox")
     long findLastEventId();
 
