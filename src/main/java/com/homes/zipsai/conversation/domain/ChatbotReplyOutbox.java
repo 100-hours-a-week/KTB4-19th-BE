@@ -58,6 +58,9 @@ public class ChatbotReplyOutbox extends BaseTimeEntity {
     @Column(name = "attempt_count", nullable = false)
     private int attemptCount;
 
+    @Column(name = "published_at")
+    private LocalDateTime publishedAt;
+
     @Column(name = "processing_started_at", nullable = false)
     private LocalDateTime processingStartedAt;
 
@@ -110,6 +113,15 @@ public class ChatbotReplyOutbox extends BaseTimeEntity {
         }
         this.attemptCount = attemptCount;
         this.status = ChatbotReplyOutboxStatus.PENDING;
+        this.publishedAt = null;
+    }
+
+    public boolean markPublished(int attempt, LocalDateTime now) {
+        if (status != ChatbotReplyOutboxStatus.PENDING || attemptCount != attempt || publishedAt != null) {
+            return false;
+        }
+        this.publishedAt = Objects.requireNonNull(now, "now");
+        return true;
     }
 
     public void claim(String lockToken, LocalDateTime now) {
