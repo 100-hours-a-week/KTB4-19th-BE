@@ -128,7 +128,7 @@ class ChatbotReplyRelayIntegrationTest {
         assertThat(message).isNotNull();
 
         assertThat(new String(message.getBody(), StandardCharsets.UTF_8))
-            .isEqualTo("{\"eventId\":" + eventId + ",\"attempt\":1}");
+            .isEqualTo("{\"eventId\":" + eventId + "}");
 
         assertThat(relayService.relayBatch()).isZero();
     }

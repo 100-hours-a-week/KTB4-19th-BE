@@ -86,7 +86,7 @@ public class ChatbotReplyPublisher {
     }
 
     private static Message message(ChatbotReplyOutbox outbox) {
-        String body = "{\"eventId\":" + outbox.getId() + ",\"attempt\":" + outbox.getAttemptCount() + "}";
+        String body = "{\"eventId\":" + outbox.getId() + "}";
         return MessageBuilder.withBody(body.getBytes(StandardCharsets.UTF_8))
             .setContentType(MessageProperties.CONTENT_TYPE_JSON)
             .setContentEncoding(StandardCharsets.UTF_8.name())
