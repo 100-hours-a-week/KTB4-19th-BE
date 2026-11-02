@@ -19,7 +19,7 @@ public class ConversationMessageService {
 
     public ConversationCreateResponse createConversation(Long userId, String content, List<Long> attachmentIds) {
         PendingAiReply pendingReply = conversationService.saveFirstMessage(userId, content, attachmentIds);
-        conversationReplyService.reply(pendingReply);
+        conversationReplyService.publishReplyRequest(pendingReply.eventId());
         return new ConversationCreateResponse(pendingReply.conversation().getId());
     }
 
@@ -34,7 +34,7 @@ public class ConversationMessageService {
             conversationReplyLock.release(conversationId, lockToken);
             throw e;
         }
-        conversationReplyService.reply(pendingReply);
+        conversationReplyService.publishReplyRequest(pendingReply.eventId());
         return MessageSendResponse.of(conversationId, pendingReply.residentMessage());
     }
 }

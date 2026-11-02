@@ -14,8 +14,8 @@ class ChatbotReplyOutboxTest {
     private static final LocalDateTime PREVIOUS_LAST_MESSAGE_AT = LocalDateTime.of(2026, 10, 22, 10, 0);
 
     @Test
-    @DisplayName("첫 메시지의 답변 이벤트는 첫 시도로 처리 중이고 새 대화방으로 표시된다")
-    void startsFirstMessageAsProcessingNewConversation() {
+    @DisplayName("첫 메시지의 답변 이벤트는 첫 시도로 발행 대기 중이고 새 대화방으로 표시된다")
+    void startsFirstMessageAsPendingNewConversation() {
         Message residentMessage = residentMessage(500L);
 
         ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startFirstMessage(residentMessage, 7L, "trace-1", "lock-1", NOW);
@@ -27,7 +27,7 @@ class ChatbotReplyOutboxTest {
             .hasFieldOrPropertyWithValue("lockToken", "lock-1")
             .hasFieldOrPropertyWithValue("newConversation", true)
             .hasFieldOrPropertyWithValue("previousLastMessageAt", null)
-            .hasFieldOrPropertyWithValue("status", ChatbotReplyOutboxStatus.PROCESSING)
+            .hasFieldOrPropertyWithValue("status", ChatbotReplyOutboxStatus.PENDING)
             .hasFieldOrPropertyWithValue("attemptCount", 0)
             .hasFieldOrPropertyWithValue("processingStartedAt", NOW);
     }
@@ -44,7 +44,7 @@ class ChatbotReplyOutboxTest {
             .hasFieldOrPropertyWithValue("messageId", 502L)
             .hasFieldOrPropertyWithValue("newConversation", false)
             .hasFieldOrPropertyWithValue("previousLastMessageAt", PREVIOUS_LAST_MESSAGE_AT)
-            .hasFieldOrPropertyWithValue("status", ChatbotReplyOutboxStatus.PROCESSING)
+            .hasFieldOrPropertyWithValue("status", ChatbotReplyOutboxStatus.PENDING)
             .hasFieldOrPropertyWithValue("attemptCount", 0)
             .hasFieldOrPropertyWithValue("processingStartedAt", NOW);
     }
@@ -54,6 +54,7 @@ class ChatbotReplyOutboxTest {
     void isNotProcessingByAnotherAttempt() {
         ChatbotReplyOutbox outbox =
             ChatbotReplyOutbox.startFirstMessage(residentMessage(500L), 7L, "trace-1", "lock-1", NOW);
+        outbox.claim("lock-1", NOW);
 
         assertThat(outbox.isProcessingBy(0)).isTrue();
         assertThat(outbox.isProcessingBy(1)).isFalse();
@@ -109,6 +110,7 @@ class ChatbotReplyOutboxTest {
     void doesNotMarkPublishedWhileProcessing() {
         ChatbotReplyOutbox outbox =
             ChatbotReplyOutbox.startFirstMessage(residentMessage(500L), 7L, "trace-1", "lock-1", NOW);
+        outbox.claim("lock-1", NOW);
 
         boolean marked = outbox.markPublished(0, NOW);
 
@@ -134,6 +136,7 @@ class ChatbotReplyOutboxTest {
     private static ChatbotReplyOutbox pendingOutbox(int attempt) {
         ChatbotReplyOutbox outbox =
             ChatbotReplyOutbox.startFirstMessage(residentMessage(500L), 7L, "trace-1", "lock-1", NOW);
+        outbox.claim("lock-1", NOW);
         outbox.retry(attempt);
         return outbox;
     }

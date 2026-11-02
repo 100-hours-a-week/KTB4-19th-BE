@@ -72,7 +72,7 @@ public class ChatbotReplyOutbox extends BaseTimeEntity {
         this.lockToken = lockToken;
         this.newConversation = newConversation;
         this.previousLastMessageAt = previousLastMessageAt;
-        this.status = ChatbotReplyOutboxStatus.PROCESSING;
+        this.status = ChatbotReplyOutboxStatus.PENDING;
         this.attemptCount = FIRST_ATTEMPT;
         this.processingStartedAt = processingStartedAt;
     }

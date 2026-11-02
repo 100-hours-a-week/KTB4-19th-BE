@@ -199,6 +199,7 @@ class ConversationServiceOutboxTest {
     private ChatbotReplyOutbox givenStoredEvent(int attemptCount) {
         ChatbotReplyOutbox outbox = withId(ChatbotReplyOutbox.startNextMessage(storedResidentMessage(), RESIDENT_ID,
             "trace-retry", "old-token", null, LocalDateTime.of(2026, 10, 22, 10, 7)), EVENT_ID);
+        outbox.claim("old-token", outbox.getProcessingStartedAt());
         ReflectionTestUtils.setField(outbox, "attemptCount", attemptCount);
         ReflectionTestUtils.setField(outbox, "createdAt", outbox.getProcessingStartedAt());
         given(chatbotReplyOutboxRepository.findById(EVENT_ID)).willReturn(Optional.of(outbox));

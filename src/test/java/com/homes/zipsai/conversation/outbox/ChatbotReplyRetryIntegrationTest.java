@@ -118,6 +118,9 @@ class ChatbotReplyRetryIntegrationTest {
     @MockitoSpyBean
     ChatbotReplyOutboxRepository outboxRepository;
 
+    @Autowired
+    ChatbotReplyRequestSender chatbotReplyRequestSender;
+
     @MockitoBean
     AiConverseClient aiConverseClient;
 
@@ -149,7 +152,8 @@ class ChatbotReplyRetryIntegrationTest {
     void setUp() {
         jdbc.update("DELETE FROM Chatbot_reply_outbox");
         replyService = new ConversationReplyService(conversationService, aiConverseClient, redisMessagePublisher,
-            new ChatbotReplyPubSubProperties(CHANNEL), replyLock, shutdownSignal, structuredLogger);
+            new ChatbotReplyPubSubProperties(CHANNEL), replyLock, shutdownSignal, structuredLogger,
+            outboxRepository, chatbotReplyRequestSender);
         checkedAt(CREATED_AT.plusSeconds(10));
     }
 
@@ -332,6 +336,7 @@ class ChatbotReplyRetryIntegrationTest {
             LocalDateTime startedAt = CREATED_AT.plusSeconds(startedOffset);
             ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startNextMessage(message, user.getId(),
                 UUID.randomUUID().toString(), token, messageAt.minusSeconds(10), startedAt);
+            outbox.claim(token, startedAt);
             entityManager.persist(outbox);
             entityManager.flush();
             jdbc.update("UPDATE Chatbot_reply_outbox SET created_at = ?, attempt_count = ? WHERE event_id = ?",

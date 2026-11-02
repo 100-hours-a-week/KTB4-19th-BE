@@ -59,8 +59,8 @@ class ConversationMessageServiceTest {
     }
 
     @Test
-    @DisplayName("첫 메시지를 저장하면 AI 답변을 맡기고 대화 ID를 바로 돌려준다")
-    void handsOverReplyAndReturnsConversationId() {
+    @DisplayName("첫 메시지를 저장하면 답변 요청을 발행하고 대화 ID를 바로 돌려준다")
+    void publishesReplyRequestAndReturnsConversationId() {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(conversationService.saveFirstMessage(RESIDENT_ID, "천장에서 물이 새요", List.of()))
             .willReturn(pendingAiReply);
@@ -69,13 +69,13 @@ class ConversationMessageServiceTest {
             conversationMessageService.createConversation(RESIDENT_ID, "천장에서 물이 새요", List.of());
 
         assertThat(response.conversationId()).isEqualTo(CONVERSATION_ID);
-        then(conversationReplyService).should().reply(pendingAiReply);
+        then(conversationReplyService).should().publishReplyRequest(900L);
         then(conversationReplyLock).shouldHaveNoInteractions();
     }
 
     @Test
-    @DisplayName("메시지를 저장하면 AI 답변을 맡기고 저장한 메시지를 바로 돌려준다")
-    void handsOverReplyAndReturnsSavedMessage() {
+    @DisplayName("메시지를 저장하면 답변 요청을 발행하고 저장한 메시지를 바로 돌려준다")
+    void publishesReplyRequestAndReturnsSavedMessage() {
         PendingAiReply pendingAiReply = pendingAiReply();
         given(conversationReplyLock.acquire(CONVERSATION_ID)).willReturn(LOCK_TOKEN);
         given(conversationService.saveNextMessage(RESIDENT_ID, CONVERSATION_ID, "안방이요", List.of(), LOCK_TOKEN))
@@ -90,7 +90,7 @@ class ConversationMessageServiceTest {
         inOrder.verify(conversationReplyLock).acquire(CONVERSATION_ID);
         inOrder.verify(conversationService).saveNextMessage(RESIDENT_ID, CONVERSATION_ID, "안방이요", List.of(),
             LOCK_TOKEN);
-        inOrder.verify(conversationReplyService).reply(pendingAiReply);
+        inOrder.verify(conversationReplyService).publishReplyRequest(900L);
     }
 
     @Test
@@ -105,11 +105,11 @@ class ConversationMessageServiceTest {
             .hasFieldOrPropertyWithValue("code", "CONVERSATION_BUSY");
         then(conversationService).should(never())
             .saveNextMessage(anyLong(), anyLong(), anyString(), anyList(), anyString());
-        then(conversationReplyService).should(never()).reply(any());
+        then(conversationReplyService).should(never()).publishReplyRequest(any());
     }
 
     @Test
-    @DisplayName("메시지를 저장하지 못하면 대화방 답변 잠금을 풀고 AI에 맡기지 않는다")
+    @DisplayName("메시지를 저장하지 못하면 대화방 답변 잠금을 풀고 답변 요청을 발행하지 않는다")
     void releasesLockWhenMessageCannotBeSaved() {
         given(conversationReplyLock.acquire(CONVERSATION_ID)).willReturn(LOCK_TOKEN);
         given(conversationService.saveNextMessage(RESIDENT_ID, CONVERSATION_ID, "안방이요", List.of(), LOCK_TOKEN))
@@ -119,7 +119,7 @@ class ConversationMessageServiceTest {
             conversationMessageService.sendMessage(RESIDENT_ID, CONVERSATION_ID, "안방이요", List.of()))
             .isInstanceOf(NotFoundException.class);
         then(conversationReplyLock).should().release(CONVERSATION_ID, LOCK_TOKEN);
-        then(conversationReplyService).should(never()).reply(any());
+        then(conversationReplyService).should(never()).publishReplyRequest(any());
     }
 
     private static PendingAiReply pendingAiReply() {

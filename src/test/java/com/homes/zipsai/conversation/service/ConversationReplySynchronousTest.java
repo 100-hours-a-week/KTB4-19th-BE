@@ -51,6 +51,8 @@ import com.homes.zipsai.conversation.dto.response.ConversationReplyDeltaResponse
 import com.homes.zipsai.conversation.dto.response.ConversationReplyResponse;
 import com.homes.zipsai.conversation.dto.response.MessageResponse;
 import com.homes.zipsai.conversation.event.ChatbotReplyEvent;
+import com.homes.zipsai.conversation.outbox.ChatbotReplyRequestSender;
+import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
 import com.homes.zipsai.global.config.AsyncConfig;
 import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.global.exception.InternalServerException;
@@ -85,6 +87,12 @@ class ConversationReplySynchronousTest {
 
     @MockitoBean
     StructuredLogger structuredLogger;
+
+    @MockitoBean
+    ChatbotReplyOutboxRepository chatbotReplyOutboxRepository;
+
+    @MockitoBean
+    ChatbotReplyRequestSender chatbotReplyRequestSender;
 
     private PendingAiReply pending;
     private AiConverseResponse aiResponse;
