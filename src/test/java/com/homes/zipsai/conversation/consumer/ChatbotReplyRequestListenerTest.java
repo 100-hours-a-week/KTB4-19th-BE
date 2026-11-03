@@ -215,6 +215,72 @@ class ChatbotReplyRequestListenerTest {
         then(channel).shouldHaveNoMoreInteractions();
     }
 
+    @ParameterizedTest
+    @EnumSource(value = AiConverseErrorType.class, names = {"HTTP_ERROR", "STREAM_ERROR", "INCOMPLETE_STREAM",
+        "RESPONSE_JSON_ERROR", "TURN_ID_MISMATCH", "INVALID_RESPONSE", "REQUEST_SERIALIZATION_ERROR"})
+    @DisplayName("AI 오류 종류를 기존 처리로 전달하고 재시도 대기 반환 후 NACK한다")
+    void requeuesRetryableFailure(AiConverseErrorType type) throws Exception {
+        preparePending(EVENT_ID);
+        given(conversationReplyService.replySynchronously(pending)).willThrow(failure(type));
+        given(conversationService.handleAiReplyFailure(pending, type)).willAnswer(invocation -> {
+            then(channel).shouldHaveNoInteractions();
+
+            assertThat(outbox.getAttemptCount()).isZero();
+            outbox.retry(0);
+            return Optional.empty();
+        });
+
+        listener.onMessage(message("{\"eventId\":900}", DELIVERY_TAG), channel);
+
+        InOrder order = inOrder(conversationReplyService, conversationService, channel);
+        order.verify(conversationReplyService).replySynchronously(pending);
+
+        order.verify(conversationService).handleAiReplyFailure(pending, type);
+
+        order.verify(channel).basicNack(DELIVERY_TAG, false, true);
+
+        assertThat(outbox.getAttemptCount()).isZero();
+
+        then(conversationReplyService).should().replySynchronously(pending);
+
+        then(conversationReplyService).should(never()).reply(any());
+
+        then(conversationService).shouldHaveNoMoreInteractions();
+
+        then(channel).shouldHaveNoMoreInteractions();
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = AiConverseErrorType.class, names = {"TIMEOUT", "CONNECTION_FAILURE",
+        "SERVICE_UNAVAILABLE", "GATEWAY_TIMEOUT", "HTTP_ERROR"})
+    @DisplayName("재시도 가능 여부와 관계없이 기존 처리가 최종 실패를 확정하면 ACK한다")
+    void acknowledgesFinalFailure(AiConverseErrorType type) throws Exception {
+        preparePending(EVENT_ID);
+        given(conversationReplyService.replySynchronously(pending)).willThrow(failure(type));
+        given(conversationService.handleAiReplyFailure(pending, type)).willAnswer(invocation -> {
+            then(channel).shouldHaveNoInteractions();
+            outbox.fail();
+            return Optional.of(new DiscardedMessage(1L, 10L));
+        });
+
+        listener.onMessage(message("{\"eventId\":900}", DELIVERY_TAG), channel);
+
+        InOrder order = inOrder(conversationReplyService, conversationService, channel);
+        order.verify(conversationReplyService).replySynchronously(pending);
+
+        order.verify(conversationService).handleAiReplyFailure(pending, type);
+
+        order.verify(channel).basicAck(DELIVERY_TAG, false);
+
+        then(chatbotReplyOutboxRepository).should().findById(EVENT_ID);
+
+        then(chatbotReplyOutboxRepository).shouldHaveNoMoreInteractions();
+
+        then(conversationService).shouldHaveNoMoreInteractions();
+
+        then(channel).shouldHaveNoMoreInteractions();
+    }
+
     @Test
     @DisplayName("동기 서비스의 트랜잭션이 커밋된 뒤에만 ACK한다")
     void acknowledgesAfterCommit() throws Exception {
