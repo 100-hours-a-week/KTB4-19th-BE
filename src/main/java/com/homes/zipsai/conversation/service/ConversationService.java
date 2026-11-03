@@ -195,6 +195,11 @@ public class ConversationService {
         return prepareReply(outbox, lockToken, room, residentMessage, attachments);
     }
 
+    @Transactional
+    public void markReplyPublished(Long eventId, int attempt) {
+        chatbotReplyOutboxRepository.findById(eventId).orElseThrow().markPublished(attempt, LocalDateTime.now());
+    }
+
     @Transactional(readOnly = true)
     public Optional<Duration> remainingReplyTime(PendingAiReply pendingReply) {
         ChatbotReplyOutbox outbox = chatbotReplyOutboxRepository.findById(pendingReply.eventId()).orElseThrow();

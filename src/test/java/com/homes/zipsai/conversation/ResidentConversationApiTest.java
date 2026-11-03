@@ -187,15 +187,19 @@ class ResidentConversationApiTest {
     }
 
     private MvcTestResult startConversation(RequestPostProcessor authentication, String content) {
-        return mockMvcTester.post().uri(CONVERSATIONS).with(authentication)
+        MvcTestResult result = mockMvcTester.post().uri(CONVERSATIONS).with(authentication)
             .contentType(MediaType.APPLICATION_JSON).content(messageBody(content))
             .exchange();
+        conversationTestFixture.replyToPendingMessages();
+        return result;
     }
 
     private MvcTestResult sendMessage(RequestPostProcessor authentication, long conversationId, String content) {
-        return mockMvcTester.post().uri(CONVERSATIONS + "/{id}/messages", conversationId).with(authentication)
-            .contentType(MediaType.APPLICATION_JSON).content(messageBody(content))
+        MvcTestResult result = mockMvcTester.post().uri(CONVERSATIONS + "/{id}/messages", conversationId)
+            .with(authentication).contentType(MediaType.APPLICATION_JSON).content(messageBody(content))
             .exchange();
+        conversationTestFixture.replyToPendingMessages();
+        return result;
     }
 
     private MvcTestResult getMessages(RequestPostProcessor authentication, long conversationId) {

@@ -173,6 +173,7 @@ class ChatbotReplyOutboxWorkerTest {
         ReflectionTestUtils.setField(message, "id", 500L);
         ChatbotReplyOutbox outbox =
             ChatbotReplyOutbox.startFirstMessage(message, 7L, "trace-1", INITIAL_TOKEN, CREATED_AT);
+        outbox.claim(INITIAL_TOKEN, CREATED_AT);
         ReflectionTestUtils.setField(outbox, "createdAt", CREATED_AT);
         return outbox;
     }

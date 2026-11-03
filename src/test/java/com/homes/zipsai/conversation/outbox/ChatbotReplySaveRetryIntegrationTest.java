@@ -133,6 +133,9 @@ class ChatbotReplySaveRetryIntegrationTest {
     @MockitoSpyBean
     ChatbotReplyOutboxRepository outboxRepository;
 
+    @Autowired
+    ChatbotReplyRequestSender chatbotReplyRequestSender;
+
     @MockitoSpyBean
     MessageRepository messageRepository;
 
@@ -174,7 +177,8 @@ class ChatbotReplySaveRetryIntegrationTest {
         checkedAt.set(CREATED_AT.plusSeconds(10));
         doAnswer(invocation -> checkedAt.get()).when(outboxRepository).currentTime();
         replyService = new ConversationReplyService(conversationService, aiConverseClient, redisMessagePublisher,
-            new ChatbotReplyPubSubProperties(CHANNEL), replyLock, shutdownSignal, structuredLogger);
+            new ChatbotReplyPubSubProperties(CHANNEL), replyLock, shutdownSignal, structuredLogger,
+            outboxRepository, chatbotReplyRequestSender);
     }
 
     @AfterEach
@@ -368,7 +372,7 @@ class ChatbotReplySaveRetryIntegrationTest {
         RedisMessagePublisher publisher = new RedisMessagePublisher(failingRedis, objectMapper, publisherLogger);
         ConversationReplyService synchronousService = new ConversationReplyService(conversationService,
             aiConverseClient, publisher, new ChatbotReplyPubSubProperties(CHANNEL), replyLock, shutdownSignal,
-            structuredLogger);
+            structuredLogger, outboxRepository, chatbotReplyRequestSender);
 
         ConversationReplyResponse result = synchronousService.replySynchronously(job.pending()).orElseThrow();
 
@@ -401,6 +405,7 @@ class ChatbotReplySaveRetryIntegrationTest {
             LocalDateTime startedAt = CREATED_AT.plusSeconds(startedOffset);
             ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startNextMessage(message, user.getId(),
                 UUID.randomUUID().toString(), token, messageAt.minusSeconds(10), startedAt);
+            outbox.claim(token, startedAt);
             entityManager.persist(outbox);
             entityManager.flush();
             jdbc.update("UPDATE Chatbot_reply_outbox SET created_at = ?, attempt_count = ? WHERE event_id = ?",

@@ -249,16 +249,20 @@ class ConversationMockAiTest {
     }
 
     private MvcTestResult postConversation(RequestPostProcessor resident, String content, Long... attachmentIds) {
-        return mockMvcTester.post().uri(CONVERSATIONS).with(resident)
+        MvcTestResult result = mockMvcTester.post().uri(CONVERSATIONS).with(resident)
             .contentType(MediaType.APPLICATION_JSON).content(messageBody(content, attachmentIds))
             .exchange();
+        conversationTestFixture.replyToPendingMessages();
+        return result;
     }
 
     private MvcTestResult sendMessage(RequestPostProcessor resident, long conversationId, String content,
                                       Long... attachmentIds) {
-        return mockMvcTester.post().uri(CONVERSATIONS + "/{id}/messages", conversationId).with(resident)
-            .contentType(MediaType.APPLICATION_JSON).content(messageBody(content, attachmentIds))
+        MvcTestResult result = mockMvcTester.post().uri(CONVERSATIONS + "/{id}/messages", conversationId)
+            .with(resident).contentType(MediaType.APPLICATION_JSON).content(messageBody(content, attachmentIds))
             .exchange();
+        conversationTestFixture.replyToPendingMessages();
+        return result;
     }
 
     private MvcTestResult createComplaint(RequestPostProcessor resident, long conversationId) {

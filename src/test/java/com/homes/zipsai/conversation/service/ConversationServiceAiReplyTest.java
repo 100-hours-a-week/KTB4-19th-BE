@@ -395,6 +395,7 @@ class ConversationServiceAiReplyTest {
     private ChatbotReplyOutbox processingOutbox() {
         ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startFirstMessage(residentMessage(), 1L, "trace-1", "lock-token",
             REPLIED_AT);
+        outbox.claim("lock-token", REPLIED_AT);
         ReflectionTestUtils.setField(outbox, "id", EVENT_ID);
         ReflectionTestUtils.setField(outbox, "createdAt", REPLIED_AT);
         return outbox;
@@ -403,6 +404,7 @@ class ConversationServiceAiReplyTest {
     private ChatbotReplyOutbox followUpOutbox(LocalDateTime previousLastMessageAt) {
         ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startNextMessage(residentMessage(), 1L, "trace-1", "lock-token",
             previousLastMessageAt, REPLIED_AT);
+        outbox.claim("lock-token", REPLIED_AT);
         ReflectionTestUtils.setField(outbox, "id", EVENT_ID);
         ReflectionTestUtils.setField(outbox, "createdAt", REPLIED_AT);
         return outbox;

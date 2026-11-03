@@ -122,6 +122,9 @@ class ConversationReplyDeadlineIntegrationTest {
     @MockitoSpyBean
     ChatbotReplyOutboxRepository outboxRepository;
 
+    @Autowired
+    ChatbotReplyRequestSender chatbotReplyRequestSender;
+
     @MockitoBean
     AiConverseClient aiConverseClient;
 
@@ -150,7 +153,8 @@ class ConversationReplyDeadlineIntegrationTest {
     void setUp() {
         jdbc.update("DELETE FROM Chatbot_reply_outbox");
         replyService = new ConversationReplyService(conversationService, aiConverseClient, redisMessagePublisher,
-            new ChatbotReplyPubSubProperties(CHANNEL), replyLock, new ChatbotReplyShutdownSignal(), structuredLogger);
+            new ChatbotReplyPubSubProperties(CHANNEL), replyLock, new ChatbotReplyShutdownSignal(), structuredLogger,
+            outboxRepository, chatbotReplyRequestSender);
     }
 
     @AfterEach
@@ -389,6 +393,7 @@ class ConversationReplyDeadlineIntegrationTest {
             String token = UUID.randomUUID().toString();
             ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startNextMessage(message, user.getId(),
                 UUID.randomUUID().toString(), token, previousLastMessageAt, CREATED_AT.plusSeconds(startedOffset));
+            outbox.claim(token, CREATED_AT.plusSeconds(startedOffset));
             entityManager.persist(outbox);
             entityManager.flush();
             jdbc.update("UPDATE Chatbot_reply_outbox SET created_at = ? WHERE event_id = ?", CREATED_AT,
