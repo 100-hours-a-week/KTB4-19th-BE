@@ -51,6 +51,15 @@ public class ConversationReplyService {
         });
     }
 
+    public Optional<ConversationReplyResponse> replySynchronously(PendingAiReply pendingReply) {
+        Optional<ConversationReplyResponse> reply = askAiAndSaveReply(pendingReply.userId(), pendingReply);
+        reply.ifPresent(savedReply -> {
+            conversationReplyLock.release(pendingReply.conversation().getId(), pendingReply.lockToken());
+            publish(ChatbotReplyEvent.of(pendingReply.userId(), savedReply));
+        });
+        return reply;
+    }
+
     public void failReply(Long eventId, int attempt, String lockToken) {
         conversationService.discardUnansweredMessage(eventId, attempt, lockToken).ifPresent(discarded -> {
             conversationReplyLock.release(discarded.conversationId(), lockToken);
