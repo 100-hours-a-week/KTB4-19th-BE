@@ -75,10 +75,13 @@ public class ConversationReplyService {
     }
 
     public void failReply(Long eventId, int attempt, String lockToken) {
-        conversationService.discardUnansweredMessage(eventId, attempt, lockToken).ifPresent(discarded -> {
-            conversationReplyLock.release(discarded.conversationId(), lockToken);
-            publish(failedEvent(discarded.userId(), discarded.conversationId(), new InternalServerException()));
-        });
+        conversationService.discardUnansweredMessage(eventId, attempt, lockToken)
+            .ifPresent(discarded -> publishFailure(discarded, lockToken, new InternalServerException()));
+    }
+
+    public void publishFailure(DiscardedMessage discarded, String lockToken, ApiException exception) {
+        conversationReplyLock.release(discarded.conversationId(), lockToken);
+        publish(failedEvent(discarded.userId(), discarded.conversationId(), exception));
     }
 
     private Optional<ChatbotReplyEvent> askAiForReply(Long userId, PendingAiReply pendingReply) {

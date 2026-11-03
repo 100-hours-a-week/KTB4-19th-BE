@@ -11,6 +11,7 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.TransactionException;
 
+import com.homes.zipsai.conversation.ai.error.AiConverseException;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutboxStatus;
 import com.homes.zipsai.conversation.outbox.ChatbotReplyWorker;
@@ -18,6 +19,7 @@ import com.homes.zipsai.conversation.outbox.ChatbotReplyWorkerProperties;
 import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
 import com.homes.zipsai.conversation.service.ConversationReplyService;
 import com.homes.zipsai.conversation.service.ConversationService;
+import com.homes.zipsai.conversation.service.DiscardedMessage;
 import com.homes.zipsai.conversation.service.PendingAiReply;
 import com.homes.zipsai.global.logging.StructuredLogger;
 import com.rabbitmq.client.Channel;
@@ -101,6 +103,19 @@ public class ChatbotReplyRequestListener implements ChannelAwareMessageListener 
             structuredLogger.chatbotReplyFailed(eventId, pending.conversation().getId(),
                 pending.aiRequest().turnId(), exception);
             return false;
+        } catch (AiConverseException exception) {
+            structuredLogger.chatbotReplyFailed(eventId, pending.conversation().getId(),
+                pending.aiRequest().turnId(), exception);
+            Optional<DiscardedMessage> discardedMessage =
+                conversationService.handleAiReplyFailure(pending, exception.getErrorType());
+            if (discardedMessage.isPresent()) {
+                conversationReplyService.publishFailure(discardedMessage.orElseThrow(), pending.lockToken(), exception);
+                return true;
+            }
+        } catch (RuntimeException exception) {
+            structuredLogger.chatbotReplyFailed(eventId, pending.conversation().getId(),
+                pending.aiRequest().turnId(), exception);
+            conversationReplyService.failReply(eventId, pending.attempt(), pending.lockToken());
         }
         return isTerminal(chatbotReplyOutboxRepository.findById(eventId).orElseThrow());
     }
