@@ -1,6 +1,7 @@
 package com.homes.zipsai.conversation.consumer;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Optional;
 
@@ -14,6 +15,7 @@ import org.springframework.transaction.TransactionException;
 import com.homes.zipsai.conversation.ai.error.AiConverseException;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutboxStatus;
+import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.outbox.ChatbotReplyWorker;
 import com.homes.zipsai.conversation.outbox.ChatbotReplyWorkerProperties;
 import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
@@ -21,6 +23,7 @@ import com.homes.zipsai.conversation.service.ConversationReplyService;
 import com.homes.zipsai.conversation.service.ConversationService;
 import com.homes.zipsai.conversation.service.DiscardedMessage;
 import com.homes.zipsai.conversation.service.PendingAiReply;
+import com.homes.zipsai.global.exception.InternalServerException;
 import com.homes.zipsai.global.logging.StructuredLogger;
 import com.rabbitmq.client.Channel;
 
@@ -90,9 +93,11 @@ public class ChatbotReplyRequestListener implements ChannelAwareMessageListener 
             prepared = chatbotReplyWorker.claimAndPrepareReply(eventId);
         } catch (DataAccessException | TransactionException exception) {
             return false;
+        } catch (InternalServerException exception) {
+            return cleanupUnclaimed(eventId);
         }
         if (prepared.isEmpty()) {
-            return false;
+            return cleanupUnclaimed(eventId);
         }
         PendingAiReply pending = prepared.orElseThrow();
         try {
@@ -117,6 +122,22 @@ public class ChatbotReplyRequestListener implements ChannelAwareMessageListener 
                 pending.aiRequest().turnId(), exception);
             conversationReplyService.failReply(eventId, pending.attempt(), pending.lockToken());
         }
+        return isTerminal(chatbotReplyOutboxRepository.findById(eventId).orElseThrow());
+    }
+
+    private boolean cleanupUnclaimed(long eventId) {
+        Optional<ChatbotReplyOutbox> candidate;
+        try {
+            LocalDateTime now = chatbotReplyOutboxRepository.currentTime();
+            candidate = chatbotReplyOutboxRepository.findCleanupCandidate(eventId,
+                now.minus(chatbotReplyWorkerProperties.requestTimeout()),
+                now.minus(Conversation.IDLE_TIME_TO_CLOSE));
+        } catch (DataAccessException | TransactionException exception) {
+            structuredLogger.chatbotReplyFailed(eventId, null, null, exception);
+            return false;
+        }
+        candidate.ifPresent(outbox ->
+            conversationReplyService.failReply(eventId, outbox.getAttemptCount(), outbox.getLockToken()));
         return isTerminal(chatbotReplyOutboxRepository.findById(eventId).orElseThrow());
     }
 
