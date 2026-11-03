@@ -40,7 +40,7 @@ public class ChatbotReplyRelayService {
             if (candidates.isEmpty()) {
                 return 0;
             }
-            Set<Long> confirmed = publisher.publish(candidates);
+            Set<Long> confirmed = publisher.publishBatch(candidates);
             LocalDateTime publishedAt = outboxRepository.currentTime();
             int marked = 0;
             for (ChatbotReplyOutbox outbox : candidates) {

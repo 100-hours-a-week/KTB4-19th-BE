@@ -34,7 +34,7 @@ public class ChatbotReplyPublisher {
     private final RabbitTemplate rabbitTemplate;
     private final ChatbotReplyRelayProperties relayProperties;
 
-    public Set<Long> publish(List<ChatbotReplyOutbox> outboxes) {
+    public Set<Long> publishBatch(List<ChatbotReplyOutbox> outboxes) {
         List<Sent> sent = new ArrayList<>();
         for (ChatbotReplyOutbox outbox : outboxes) {
             CorrelationData correlation = new CorrelationData(String.valueOf(outbox.getId()));
