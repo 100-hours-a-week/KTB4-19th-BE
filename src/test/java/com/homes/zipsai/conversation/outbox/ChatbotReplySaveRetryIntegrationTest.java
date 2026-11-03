@@ -2,10 +2,12 @@ package com.homes.zipsai.conversation.outbox;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -31,6 +33,7 @@ import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.TransientDataAccessResourceException;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
@@ -42,6 +45,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.TransactionSystemException;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
@@ -60,6 +64,7 @@ import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.conversation.domain.Message;
 import com.homes.zipsai.conversation.domain.MessageType;
 import com.homes.zipsai.conversation.domain.SenderType;
+import com.homes.zipsai.conversation.dto.response.ConversationReplyResponse;
 import com.homes.zipsai.conversation.dto.response.MessageResponse;
 import com.homes.zipsai.conversation.event.ChatbotReplyEvent;
 import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
@@ -73,6 +78,8 @@ import com.homes.zipsai.global.exception.InternalServerException;
 import com.homes.zipsai.global.logging.StructuredLogger;
 import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.domain.UserRole;
+
+import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest
 @DirtiesContext
@@ -119,6 +126,9 @@ class ChatbotReplySaveRetryIntegrationTest {
 
     @Autowired
     StructuredLogger structuredLogger;
+
+    @Autowired
+    ObjectMapper objectMapper;
 
     @MockitoSpyBean
     ChatbotReplyOutboxRepository outboxRepository;
@@ -328,6 +338,49 @@ class ChatbotReplySaveRetryIntegrationTest {
         assertThat(redis.opsForValue().get(key(job))).isEqualTo(job.token());
 
         then(redisMessagePublisher).shouldHaveNoInteractions();
+
+        then(aiConverseClient).should().converse(eq(job.pending().aiRequest()), any());
+    }
+
+    @Test
+    @DisplayName("동기 답변은 답변·후속 상태·완료를 커밋한 뒤 Redis 발행이 실패해도 저장 결과를 반환한다")
+    void returnsCommittedReplyWhenRedisPublishingFails() {
+        Job job = job(0, 0);
+        StringRedisTemplate failingRedis = mock(StringRedisTemplate.class);
+        StructuredLogger publisherLogger = mock(StructuredLogger.class);
+        RedisConnectionFailureException failure = new RedisConnectionFailureException("Redis 발행 실패");
+        given(failingRedis.convertAndSend(eq(CHANNEL), anyString())).willAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+
+            assertThat(outbox(job))
+                .hasFieldOrPropertyWithValue("status", ChatbotReplyOutboxStatus.COMPLETED)
+                .hasFieldOrPropertyWithValue("attemptCount", FAILURE_COUNT);
+
+            assertThat(assistantCount(job)).isEqualTo(1);
+
+            assertThat(jdbc.queryForObject("SELECT current_route FROM Conversations WHERE conversation_id = ?",
+                String.class, job.conversationId())).isEqualTo("KNOWLEDGE");
+
+            assertThat(jdbc.queryForObject("SELECT ai_conversation_state FROM Conversations WHERE conversation_id = ?",
+                String.class, job.conversationId())).isEqualTo("READY_TO_CONFIRM");
+            throw failure;
+        });
+        RedisMessagePublisher publisher = new RedisMessagePublisher(failingRedis, objectMapper, publisherLogger);
+        ConversationReplyService synchronousService = new ConversationReplyService(conversationService,
+            aiConverseClient, publisher, new ChatbotReplyPubSubProperties(CHANNEL), replyLock, shutdownSignal,
+            structuredLogger);
+
+        ConversationReplyResponse result = synchronousService.replySynchronously(job.pending()).orElseThrow();
+
+        assertThat(result.conversationId()).isEqualTo(job.conversationId());
+
+        assertThat(assistantCount(job)).isEqualTo(1);
+
+        assertThat(outbox(job).getStatus()).isEqualTo(ChatbotReplyOutboxStatus.COMPLETED);
+
+        assertThat(messageRepository.existsById(job.messageId())).isTrue();
+
+        then(publisherLogger).should().pubSubFailed(eq("publish"), eq(CHANNEL), anyString(), eq(failure));
 
         then(aiConverseClient).should().converse(eq(job.pending().aiRequest()), any());
     }
