@@ -18,15 +18,16 @@ import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
 public class ChatbotReplyRelayService {
 
     private final ChatbotReplyOutboxRepository outboxRepository;
-    private final ChatbotReplyPublisher publisher;
+    private final ChatbotReplyRequestSender requestSender;
     private final ChatbotReplyRelayProperties relayProperties;
     private final TransactionTemplate transactions;
 
-    public ChatbotReplyRelayService(ChatbotReplyOutboxRepository outboxRepository, ChatbotReplyPublisher publisher,
+    public ChatbotReplyRelayService(ChatbotReplyOutboxRepository outboxRepository,
+                                    ChatbotReplyRequestSender requestSender,
                                     ChatbotReplyRelayProperties relayProperties,
                                     PlatformTransactionManager transactionManager) {
         this.outboxRepository = outboxRepository;
-        this.publisher = publisher;
+        this.requestSender = requestSender;
         this.relayProperties = relayProperties;
         this.transactions = new TransactionTemplate(transactionManager);
         this.transactions.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -40,7 +41,7 @@ public class ChatbotReplyRelayService {
             if (candidates.isEmpty()) {
                 return 0;
             }
-            Set<Long> confirmed = publisher.publishBatch(candidates);
+            Set<Long> confirmed = requestSender.sendBatch(candidates);
             LocalDateTime publishedAt = outboxRepository.currentTime();
             int marked = 0;
             for (ChatbotReplyOutbox outbox : candidates) {
