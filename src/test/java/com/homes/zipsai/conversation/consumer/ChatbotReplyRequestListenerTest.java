@@ -282,6 +282,55 @@ class ChatbotReplyRequestListenerTest {
     }
 
     @Test
+    @DisplayName("활성 작업의 선점이 비어 있으면 실패 정리 없이 NACK한다")
+    void requeuesActiveDuplicate() throws Exception {
+        given(chatbotReplyOutboxRepository.findById(EVENT_ID)).willReturn(Optional.of(outbox));
+        given(chatbotReplyWorker.claimAndPrepareReply(EVENT_ID)).willReturn(Optional.empty());
+        given(chatbotReplyOutboxRepository.currentTime()).willReturn(LocalDateTime.now());
+
+        listener.onMessage(message("{\"eventId\":900}", DELIVERY_TAG), channel);
+
+        then(channel).should().basicNack(DELIVERY_TAG, false, true);
+
+        verifyNoInteractions(conversationReplyService, conversationService);
+
+        then(channel).shouldHaveNoMoreInteractions();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("빈 선점 또는 준비 중 마감 오류의 만료 작업은 기존 최종 정리 반환 후 ACK한다")
+    void acknowledgesCleanupAfterEmptyClaim(boolean deadlineFailure) throws Exception {
+        LocalDateTime now = LocalDateTime.now();
+        ReflectionTestUtils.setField(outbox, "createdAt", now.minusSeconds(300));
+        given(chatbotReplyOutboxRepository.findById(EVENT_ID)).willReturn(Optional.of(outbox));
+        if (deadlineFailure) {
+            given(chatbotReplyWorker.claimAndPrepareReply(EVENT_ID)).willThrow(new InternalServerException());
+        } else {
+            given(chatbotReplyWorker.claimAndPrepareReply(EVENT_ID)).willReturn(Optional.empty());
+        }
+        given(chatbotReplyOutboxRepository.currentTime()).willReturn(now);
+        given(chatbotReplyOutboxRepository.findCleanupCandidate(EVENT_ID, now.minusSeconds(280),
+            now.minus(Conversation.IDLE_TIME_TO_CLOSE))).willReturn(Optional.of(outbox));
+        doAnswer(invocation -> {
+            then(channel).shouldHaveNoInteractions();
+            outbox.fail();
+            return null;
+        }).when(conversationReplyService).failReply(EVENT_ID, 0, LOCK_TOKEN);
+
+        listener.onMessage(message("{\"eventId\":900}", DELIVERY_TAG), channel);
+
+        InOrder order = inOrder(conversationReplyService, channel);
+        order.verify(conversationReplyService).failReply(EVENT_ID, 0, LOCK_TOKEN);
+
+        order.verify(channel).basicAck(DELIVERY_TAG, false);
+
+        then(conversationReplyService).shouldHaveNoMoreInteractions();
+
+        then(channel).shouldHaveNoMoreInteractions();
+    }
+
+    @Test
     @DisplayName("동기 서비스의 트랜잭션이 커밋된 뒤에만 ACK한다")
     void acknowledgesAfterCommit() throws Exception {
         preparePending(EVENT_ID);
