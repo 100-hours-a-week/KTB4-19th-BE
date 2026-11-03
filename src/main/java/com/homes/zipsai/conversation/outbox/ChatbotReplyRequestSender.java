@@ -27,14 +27,14 @@ import lombok.RequiredArgsConstructor;
 
 @Component
 @RequiredArgsConstructor
-public class ChatbotReplyPublisher {
+public class ChatbotReplyRequestSender {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(ChatbotReplyPublisher.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(ChatbotReplyRequestSender.class);
 
     private final RabbitTemplate rabbitTemplate;
     private final ChatbotReplyRelayProperties relayProperties;
 
-    public Set<Long> publishBatch(List<ChatbotReplyOutbox> outboxes) {
+    public Set<Long> sendBatch(List<ChatbotReplyOutbox> outboxes) {
         List<Sent> sent = new ArrayList<>();
         for (ChatbotReplyOutbox outbox : outboxes) {
             CorrelationData correlation = new CorrelationData(String.valueOf(outbox.getId()));
