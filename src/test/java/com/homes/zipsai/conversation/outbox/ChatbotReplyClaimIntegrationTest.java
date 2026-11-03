@@ -2,7 +2,11 @@ package com.homes.zipsai.conversation.outbox;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.never;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -61,7 +65,7 @@ import com.homes.zipsai.user.domain.UserRole;
 @SpringBootTest
 @DirtiesContext
 @TestPropertySource(properties = {
-    "spring.datasource.url=jdbc:tc:mysql:8.4.11:///zipsai_chatbot_reply_claim?TC_DAEMON=true",
+    "spring.datasource.url=jdbc:tc:mysql:8.4.11:///zipsai_chatbot_reply_claim",
     "spring.datasource.username=test",
     "spring.datasource.password=test",
     "spring.jpa.hibernate.ddl-auto=validate",
@@ -81,7 +85,7 @@ class ChatbotReplyClaimIntegrationTest {
     @Autowired
     ChatbotReplyClaimService claimService;
 
-    @Autowired
+    @MockitoSpyBean
     ChatbotReplyOutboxRepository outboxRepository;
 
     @Autowired
@@ -155,6 +159,92 @@ class ChatbotReplyClaimIntegrationTest {
         assertThat(lastMessageAt(job)).isEqualTo(previousLastMessageAt);
 
         assertThat(redis.getExpire(key(job), TimeUnit.MILLISECONDS)).isPositive().isLessThanOrEqualTo(150_000L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1})
+    @DisplayName("130초 넘게 대기한 지정 이벤트는 선점 시각을 갱신하고 실패 횟수와 다른 이벤트를 보존한다")
+    void claimsOnlyRequestedPendingEvent(int failureCount) {
+        Job first = job("PENDING", 0);
+        Job requested = job("PENDING", failureCount);
+        jdbc.update("UPDATE Chatbot_reply_outbox SET processing_started_at = created_at WHERE event_id = ?",
+            requested.eventId());
+        Job last = job("PENDING", 0);
+        ChatbotReplyOutbox firstBefore = outbox(first);
+        LocalDateTime requestedCreatedAt = outbox(requested).getCreatedAt();
+        ChatbotReplyOutbox lastBefore = outbox(last);
+        LocalDateTime previousLastMessageAt = lastMessageAt(requested);
+        LocalDateTime before = databaseTime();
+
+        Claim claim = claimService.claim(requested.eventId()).orElseThrow();
+
+        then(outboxRepository).should(never()).findLastEventId();
+
+        then(outboxRepository).should(never()).findClaimCandidatesForUpdate(any(), anyLong(), anyLong(), anyInt());
+
+        assertThat(claim.eventId()).isEqualTo(requested.eventId());
+
+        assertThat(claim.attempt()).isEqualTo(failureCount);
+
+        assertThat(claim.lockToken()).isNotEqualTo(requested.token());
+
+        assertOwnedBy(requested, claim, failureCount);
+
+        assertThat(outbox(requested).getProcessingStartedAt()).isBetween(before, databaseTime());
+
+        assertThat(outbox(requested).getCreatedAt()).isEqualTo(requestedCreatedAt);
+
+        assertThat(lastMessageAt(requested)).isEqualTo(previousLastMessageAt);
+
+        assertThat(outbox(first)).usingRecursiveComparison().isEqualTo(firstBefore);
+
+        assertThat(outbox(last)).usingRecursiveComparison().isEqualTo(lastBefore);
+
+        assertThat(redis.opsForValue().get(key(first))).isEqualTo(first.token());
+
+        assertThat(redis.opsForValue().get(key(last))).isEqualTo(last.token());
+    }
+
+    @Test
+    @DisplayName("지정한 이벤트가 처리 중이면 소유권을 보존하고 다른 대기 이벤트를 대신 선점하지 않는다")
+    void preservesActiveRequestedEventWithoutClaimingAnotherEvent() {
+        Job requested = job("PROCESSING", 1);
+        jdbc.update("UPDATE Chatbot_reply_outbox SET processing_started_at = ? WHERE event_id = ?",
+            databaseTime(), requested.eventId());
+        Job waiting = job("PENDING", 0);
+        ChatbotReplyOutbox requestedBefore = outbox(requested);
+        ChatbotReplyOutbox waitingBefore = outbox(waiting);
+
+        assertThat(claimService.claim(requested.eventId())).isEmpty();
+
+        assertThat(outbox(requested)).usingRecursiveComparison().isEqualTo(requestedBefore);
+
+        assertThat(outbox(waiting)).usingRecursiveComparison().isEqualTo(waitingBefore);
+
+        assertThat(redis.opsForValue().get(key(requested))).isEqualTo(requested.token());
+
+        assertThat(redis.opsForValue().get(key(waiting))).isEqualTo(waiting.token());
+    }
+
+    @Test
+    @DisplayName("지정한 이벤트의 전체 마감이 지났으면 잠금을 인계하거나 다른 이벤트를 선점하지 않는다")
+    void doesNotClaimExpiredRequestedEventOrAnotherEvent() {
+        Job requested = job("PENDING", 1);
+        jdbc.update("UPDATE Chatbot_reply_outbox SET created_at = ? WHERE event_id = ?",
+            databaseTime().minusSeconds(280), requested.eventId());
+        Job waiting = job("PENDING", 0);
+        ChatbotReplyOutbox requestedBefore = outbox(requested);
+        ChatbotReplyOutbox waitingBefore = outbox(waiting);
+
+        assertThat(claimService.claim(requested.eventId())).isEmpty();
+
+        assertThat(outbox(requested)).usingRecursiveComparison().isEqualTo(requestedBefore);
+
+        assertThat(outbox(waiting)).usingRecursiveComparison().isEqualTo(waitingBefore);
+
+        assertThat(redis.opsForValue().get(key(requested))).isEqualTo(requested.token());
+
+        assertThat(redis.opsForValue().get(key(waiting))).isEqualTo(waiting.token());
     }
 
     @Test

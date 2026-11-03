@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -39,6 +40,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import com.homes.zipsai.building.domain.Building;
+import com.homes.zipsai.building.domain.Room;
 import com.homes.zipsai.building.service.ResidentRoomService;
 import com.homes.zipsai.common.service.RedisMessagePublisher;
 import com.homes.zipsai.conversation.ai.AiConverseClient;
@@ -70,7 +73,7 @@ import com.homes.zipsai.user.domain.UserRole;
 @SpringBootTest
 @DirtiesContext
 @TestPropertySource(properties = {
-    "spring.datasource.url=jdbc:tc:mysql:8.4.11:///zipsai_chatbot_reply_deadline?TC_DAEMON=true",
+    "spring.datasource.url=jdbc:tc:mysql:8.4.11:///zipsai_chatbot_reply_deadline",
     "spring.datasource.username=test",
     "spring.datasource.password=test",
     "spring.jpa.hibernate.ddl-auto=validate",
@@ -91,6 +94,9 @@ class ConversationReplyDeadlineIntegrationTest {
 
     @Autowired
     ConversationService conversationService;
+
+    @Autowired
+    ChatbotReplyWorker worker;
 
     @Autowired
     ConversationReplyLock replyLock;
@@ -153,6 +159,47 @@ class ConversationReplyDeadlineIntegrationTest {
             redis.delete(lockKeys);
         }
         MDC.clear();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"140, 0, 130", "260, 0, 20", "140, -40, 120"})
+    @DisplayName("최초 단건 선점은 접수 시각을 갱신하고 시도·전체 요청·대화 종료 중 이른 마감을 적용한다")
+    void appliesDeadlinesFromActualClaimAfterQueueWait(int queueWaitSeconds, int lastMessageOffset,
+                                                       int expectedRemainingSeconds) {
+        Job job = job(0, lastMessageOffset);
+        jdbc.update("UPDATE Chatbot_reply_outbox SET status = 'PENDING' WHERE event_id = ?", job.eventId());
+        LocalDateTime claimedAt = CREATED_AT.plusSeconds(queueWaitSeconds);
+        checkedAt(claimedAt);
+        Building building = mock(Building.class);
+        given(building.getId()).willReturn(77L);
+        Room room = new Room(building, "101");
+        room.invite();
+        room.moveIn(job.pending().conversation().getUser());
+        given(residentRoomService.getLivingRoom(job.pending().userId())).willReturn(room);
+
+        PendingAiReply pendingReply = worker.claimAndPrepareReply(job.eventId()).orElseThrow();
+        ChatbotReplyOutbox saved = outbox(job);
+
+        assertThat(saved.getProcessingStartedAt()).isEqualTo(claimedAt);
+
+        assertThat(saved.getCreatedAt()).isEqualTo(CREATED_AT);
+
+        assertThat(conversationService.remainingReplyTime(pendingReply))
+            .contains(Duration.ofSeconds(expectedRemainingSeconds));
+
+        LocalDateTime deadline = claimedAt.plusSeconds(expectedRemainingSeconds);
+        checkedAt(deadline.minusNanos(1000));
+
+        assertThat(conversationService.remainingReplyTime(pendingReply)).contains(Duration.ofNanos(1000));
+
+        checkedAt(deadline);
+
+        assertThatThrownBy(() -> conversationService.remainingReplyTime(pendingReply))
+            .isInstanceOf(ApiException.class);
+
+        assertThatThrownBy(() -> conversationService.prepareReply(pendingReply.eventId(), pendingReply.attempt(),
+            pendingReply.lockToken()))
+            .isInstanceOf(ApiException.class);
     }
 
     @ParameterizedTest

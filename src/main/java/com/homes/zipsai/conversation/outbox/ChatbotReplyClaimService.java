@@ -58,6 +58,26 @@ public class ChatbotReplyClaimService {
         this.transactions.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
+    public Optional<Claim> claim(Long eventId) {
+        List<Transfer> transfers = new ArrayList<>(1);
+        boolean repair = false;
+        try {
+            transactions.executeWithoutResult(transaction -> outboxRepository.findByIdForUpdate(eventId)
+                .ifPresent(outbox -> transferOwnership(outbox, transfers)));
+        } catch (RuntimeException exception) {
+            if (transfers.isEmpty()) {
+                throw exception;
+            }
+            repair = true;
+        }
+        if (transfers.isEmpty()) {
+            return Optional.empty();
+        }
+        Transfer transfer = transfers.getFirst();
+        boolean recover = repair;
+        return transactions.execute(transaction -> confirmOrRecoverClaim(transfer, recover));
+    }
+
     public List<Claim> claimBatch() {
         List<Transfer> transfers = new ArrayList<>();
         long lastEventId = transactions.execute(transaction -> outboxRepository.findLastEventId());

@@ -1,6 +1,7 @@
 package com.homes.zipsai.conversation.outbox;
 
 import java.util.Map;
+import java.util.Optional;
 
 import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
@@ -9,6 +10,7 @@ import com.homes.zipsai.conversation.ai.error.AiConverseErrorType.RetryPolicy;
 import com.homes.zipsai.conversation.outbox.ChatbotReplyClaimService.Claim;
 import com.homes.zipsai.conversation.service.ConversationReplyService;
 import com.homes.zipsai.conversation.service.ConversationService;
+import com.homes.zipsai.conversation.service.PendingAiReply;
 import com.homes.zipsai.global.logging.StructuredLogger;
 
 import lombok.RequiredArgsConstructor;
@@ -21,6 +23,17 @@ public class ChatbotReplyWorker {
     private final ConversationService conversationService;
     private final ConversationReplyService replyService;
     private final StructuredLogger structuredLogger;
+
+    public Optional<PendingAiReply> claimAndPrepareReply(Long eventId) {
+        try {
+            return claimService.claim(eventId)
+                .flatMap(claim -> conversationService.prepareReply(claim.eventId(), claim.attempt(),
+                    claim.lockToken()));
+        } catch (RuntimeException exception) {
+            structuredLogger.chatbotReplyFailed(eventId, null, null, exception);
+            throw exception;
+        }
+    }
 
     public void processBatch() {
         Map<String, String> previousMdc = MDC.getCopyOfContextMap();
