@@ -435,14 +435,20 @@ public class ConversationService {
 
     private PendingAiReply prepareReply(ChatbotReplyOutbox outbox, String lockToken, Room room,
                                         Message residentMessage, List<AttachmentResponse> attachments) {
+        AiConverseRequest aiRequest = aiRequest(room, residentMessage, attachments, outbox.isNewConversation(),
+            outbox.getTraceId());
+        return PendingAiReply.of(outbox, lockToken, residentMessage.getConversation(),
+            MessageResponse.of(residentMessage, attachments), aiRequest);
+    }
+
+    private AiConverseRequest aiRequest(Room room, Message residentMessage, List<AttachmentResponse> attachments,
+                                        boolean newConversation, String traceId) {
         Conversation conversation = residentMessage.getConversation();
-        List<HistoryMessage> history = outbox.isNewConversation()
+        List<HistoryMessage> history = newConversation
             ? List.of()
             : getHistory(conversation.getId(), residentMessage.getId());
-        AiConverseRequest aiRequest = AiConverseRequest.of(room, conversation, residentMessage,
-            messageImages(attachments), history, outbox.getTraceId());
-        return PendingAiReply.of(outbox, lockToken, conversation, MessageResponse.of(residentMessage, attachments),
-            aiRequest);
+        return AiConverseRequest.of(room, conversation, residentMessage, messageImages(attachments), history,
+            traceId);
     }
 
     private List<HistoryMessage> getHistory(Long conversationId, Long beforeMessageId) {
