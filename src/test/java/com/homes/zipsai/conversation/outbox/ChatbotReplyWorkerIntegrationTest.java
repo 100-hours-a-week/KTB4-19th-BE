@@ -71,6 +71,7 @@ import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
 import com.homes.zipsai.conversation.service.ConversationReplyService;
 import com.homes.zipsai.conversation.service.ConversationService;
+import com.homes.zipsai.conversation.service.PendingAiReply;
 import com.homes.zipsai.global.config.AsyncConfig;
 import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.user.domain.User;
@@ -214,28 +215,38 @@ class ChatbotReplyWorkerIntegrationTest {
         then(redisMessagePublisher).should().publish(any(), any(ChatbotReplyEvent.class));
     }
 
-    @Test
-    @DisplayName("130초가 지난 처리 중 작업은 실패를 한 번 집계하고 다시 실행한다")
-    void recoversInterruptedReply() {
-        Job job = job("PROCESSING", 1);
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 2})
+    @DisplayName("응답을 잃은 중단 작업은 단건 복구 후 실패 횟수·전체 마감을 유지하고 AI 답변 한 건을 저장한다")
+    void recoversInterruptedReply(int failureCount) {
+        Job job = job("PROCESSING", failureCount);
         jdbc.update("UPDATE Chatbot_reply_outbox SET processing_started_at = ? WHERE event_id = ?",
             NOW.minusSeconds(131), job.eventId());
+        LocalDateTime createdAt = outbox(job).getCreatedAt();
 
-        worker.processBatch();
+        PendingAiReply pending = worker.claimAndPrepareReply(job.eventId()).orElseThrow();
 
-        assertCompleted(job, 2);
+        assertThat(pending.attempt()).isEqualTo(failureCount);
+
+        assertThat(replyService.replySynchronously(pending)).isPresent();
+
+        assertCompleted(job, failureCount);
 
         assertThat(outbox(job).getLockToken()).isNotEqualTo(job.token());
 
         assertThat(outbox(job).getProcessingStartedAt()).isEqualTo(NOW);
 
+        assertThat(outbox(job).getCreatedAt()).isEqualTo(createdAt);
+
+        assertThat(worker.claimAndPrepareReply(job.eventId())).isEmpty();
+
         then(aiConverseClient).should().converse(any(), any());
     }
 
     @Test
-    @DisplayName("중단 복구로 누적 실패가 3회가 되면 AI를 호출하지 않고 최종 실패한다")
+    @DisplayName("이미 AI 실패가 3회인 중단 작업은 새로 선점하거나 AI를 호출하지 않고 최종 실패한다")
     void failsInterruptedReplyAtFailureLimit() {
-        Job job = job("PROCESSING", 2);
+        Job job = job("PROCESSING", 3);
         jdbc.update("UPDATE Chatbot_reply_outbox SET processing_started_at = ? WHERE event_id = ?",
             NOW.minusSeconds(131), job.eventId());
 
