@@ -43,6 +43,8 @@ import com.homes.zipsai.conversation.repository.MessageRepository;
 import com.homes.zipsai.migration.service.OutboxRecorder;
 import com.homes.zipsai.user.domain.User;
 
+import tools.jackson.databind.json.JsonMapper;
+
 @ExtendWith(MockitoExtension.class)
 class ConversationServiceOutboxTest {
 
@@ -89,7 +91,8 @@ class ConversationServiceOutboxTest {
             messageFileGroupRepository, fileRepository, residentRoomService, s3StorageService,
             new StorageProperties(null, null, null, 300, 0), outboxRecorder, chatbotReplyOutboxRepository,
             conversationReplyLock,
-            new ChatbotReplyWorkerProperties(Duration.ofSeconds(130), Duration.ofSeconds(280)));
+            new ChatbotReplyWorkerProperties(Duration.ofSeconds(130), Duration.ofSeconds(280)),
+            JsonMapper.builder().build());
         resident = withId(new User("resident@example.com", "password", "입주민", null), RESIDENT_ID);
         MDC.put("traceId", TRACE_ID);
     }
@@ -198,7 +201,7 @@ class ConversationServiceOutboxTest {
 
     private ChatbotReplyOutbox givenStoredEvent(int attemptCount) {
         ChatbotReplyOutbox outbox = withId(ChatbotReplyOutbox.startNextMessage(storedResidentMessage(), RESIDENT_ID,
-            "trace-retry", "old-token", null, LocalDateTime.of(2026, 10, 22, 10, 7)), EVENT_ID);
+            "trace-retry", "old-token", null, null, LocalDateTime.of(2026, 10, 22, 10, 7)), EVENT_ID);
         outbox.claim("old-token", outbox.getProcessingStartedAt());
         ReflectionTestUtils.setField(outbox, "attemptCount", attemptCount);
         ReflectionTestUtils.setField(outbox, "createdAt", outbox.getProcessingStartedAt());

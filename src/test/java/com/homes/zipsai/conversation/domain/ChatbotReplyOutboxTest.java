@@ -18,7 +18,8 @@ class ChatbotReplyOutboxTest {
     void startsFirstMessageAsPendingNewConversation() {
         Message residentMessage = residentMessage(500L);
 
-        ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startFirstMessage(residentMessage, 7L, "trace-1", "lock-1", NOW);
+        ChatbotReplyOutbox outbox =
+            ChatbotReplyOutbox.startFirstMessage(residentMessage, 7L, "trace-1", "lock-1", null, NOW);
 
         assertThat(outbox)
             .hasFieldOrPropertyWithValue("messageId", 500L)
@@ -38,7 +39,7 @@ class ChatbotReplyOutboxTest {
         Message residentMessage = residentMessage(502L);
 
         ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startNextMessage(
-            residentMessage, 7L, "trace-2", "lock-2", PREVIOUS_LAST_MESSAGE_AT, NOW);
+            residentMessage, 7L, "trace-2", "lock-2", PREVIOUS_LAST_MESSAGE_AT, null, NOW);
 
         assertThat(outbox)
             .hasFieldOrPropertyWithValue("messageId", 502L)
@@ -53,7 +54,7 @@ class ChatbotReplyOutboxTest {
     @DisplayName("시도 번호가 다르면 처리 중인 이벤트로 보지 않는다")
     void isNotProcessingByAnotherAttempt() {
         ChatbotReplyOutbox outbox =
-            ChatbotReplyOutbox.startFirstMessage(residentMessage(500L), 7L, "trace-1", "lock-1", NOW);
+            ChatbotReplyOutbox.startFirstMessage(residentMessage(500L), 7L, "trace-1", "lock-1", null, NOW);
         outbox.claim("lock-1", NOW);
 
         assertThat(outbox.isProcessingBy(0)).isTrue();
@@ -64,7 +65,7 @@ class ChatbotReplyOutboxTest {
     @DisplayName("끝난 이벤트는 같은 시도 번호여도 처리 중으로 보지 않는다")
     void isNotProcessingAfterCompleted() {
         ChatbotReplyOutbox outbox =
-            ChatbotReplyOutbox.startFirstMessage(residentMessage(500L), 7L, "trace-1", "lock-1", NOW);
+            ChatbotReplyOutbox.startFirstMessage(residentMessage(500L), 7L, "trace-1", "lock-1", null, NOW);
 
         outbox.complete();
 
@@ -109,7 +110,7 @@ class ChatbotReplyOutboxTest {
     @DisplayName("처리 중인 이벤트에는 발행 시각을 기록하지 않는다")
     void doesNotMarkPublishedWhileProcessing() {
         ChatbotReplyOutbox outbox =
-            ChatbotReplyOutbox.startFirstMessage(residentMessage(500L), 7L, "trace-1", "lock-1", NOW);
+            ChatbotReplyOutbox.startFirstMessage(residentMessage(500L), 7L, "trace-1", "lock-1", null, NOW);
         outbox.claim("lock-1", NOW);
 
         boolean marked = outbox.markPublished(0, NOW);
@@ -135,7 +136,7 @@ class ChatbotReplyOutboxTest {
 
     private static ChatbotReplyOutbox pendingOutbox(int attempt) {
         ChatbotReplyOutbox outbox =
-            ChatbotReplyOutbox.startFirstMessage(residentMessage(500L), 7L, "trace-1", "lock-1", NOW);
+            ChatbotReplyOutbox.startFirstMessage(residentMessage(500L), 7L, "trace-1", "lock-1", null, NOW);
         outbox.claim("lock-1", NOW);
         outbox.retry(attempt);
         return outbox;

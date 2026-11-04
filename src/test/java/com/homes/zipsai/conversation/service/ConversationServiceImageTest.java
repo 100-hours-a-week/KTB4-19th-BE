@@ -51,6 +51,8 @@ import com.homes.zipsai.global.exception.ValidationFailedException;
 import com.homes.zipsai.migration.service.OutboxRecorder;
 import com.homes.zipsai.user.domain.User;
 
+import tools.jackson.databind.json.JsonMapper;
+
 @ExtendWith(MockitoExtension.class)
 class ConversationServiceImageTest {
 
@@ -93,7 +95,8 @@ class ConversationServiceImageTest {
             messageFileGroupRepository, fileRepository, residentRoomService, s3StorageService,
             new StorageProperties(null, null, null, 300, 0), outboxRecorder, chatbotReplyOutboxRepository,
             conversationReplyLock,
-            new ChatbotReplyWorkerProperties(Duration.ofSeconds(130), Duration.ofSeconds(280)));
+            new ChatbotReplyWorkerProperties(Duration.ofSeconds(130), Duration.ofSeconds(280)),
+            JsonMapper.builder().build());
         resident = user(RESIDENT_ID);
         given(residentRoomService.getLivingRoom(RESIDENT_ID)).willReturn(livingRoom(resident));
     }

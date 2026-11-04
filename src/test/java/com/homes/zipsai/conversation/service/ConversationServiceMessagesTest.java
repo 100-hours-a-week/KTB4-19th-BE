@@ -37,6 +37,8 @@ import com.homes.zipsai.global.exception.NotFoundException;
 import com.homes.zipsai.migration.service.OutboxRecorder;
 import com.homes.zipsai.user.domain.User;
 
+import tools.jackson.databind.json.JsonMapper;
+
 @ExtendWith(MockitoExtension.class)
 class ConversationServiceMessagesTest {
 
@@ -73,7 +75,8 @@ class ConversationServiceMessagesTest {
         conversationService = new ConversationService(conversationRepository, messageRepository,
             messageFileGroupRepository, fileRepository, residentRoomService, s3StorageService,
             new StorageProperties(null, null, null, 300, 0), outboxRecorder, null, null,
-            new ChatbotReplyWorkerProperties(Duration.ofSeconds(130), Duration.ofSeconds(280)));
+            new ChatbotReplyWorkerProperties(Duration.ofSeconds(130), Duration.ofSeconds(280)),
+            JsonMapper.builder().build());
         conversation = withId(Conversation.builder()
             .user(withId(new User("resident@example.com", "password", "입주민", null), RESIDENT_ID))
             .type(ConversationType.INQUIRY)

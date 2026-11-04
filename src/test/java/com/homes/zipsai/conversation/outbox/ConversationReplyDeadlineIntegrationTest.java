@@ -392,7 +392,8 @@ class ConversationReplyDeadlineIntegrationTest {
             entityManager.persist(message);
             String token = UUID.randomUUID().toString();
             ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startNextMessage(message, user.getId(),
-                UUID.randomUUID().toString(), token, previousLastMessageAt, CREATED_AT.plusSeconds(startedOffset));
+                UUID.randomUUID().toString(), token, previousLastMessageAt, null,
+                CREATED_AT.plusSeconds(startedOffset));
             outbox.claim(token, CREATED_AT.plusSeconds(startedOffset));
             entityManager.persist(outbox);
             entityManager.flush();

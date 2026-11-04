@@ -404,7 +404,7 @@ class ChatbotReplySaveRetryIntegrationTest {
             String token = UUID.randomUUID().toString();
             LocalDateTime startedAt = CREATED_AT.plusSeconds(startedOffset);
             ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startNextMessage(message, user.getId(),
-                UUID.randomUUID().toString(), token, messageAt.minusSeconds(10), startedAt);
+                UUID.randomUUID().toString(), token, messageAt.minusSeconds(10), null, startedAt);
             outbox.claim(token, startedAt);
             entityManager.persist(outbox);
             entityManager.flush();

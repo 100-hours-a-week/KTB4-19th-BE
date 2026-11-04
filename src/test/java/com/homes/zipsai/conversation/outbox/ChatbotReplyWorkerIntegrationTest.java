@@ -400,7 +400,7 @@ class ChatbotReplyWorkerIntegrationTest {
             entityManager.persist(message);
             String token = UUID.randomUUID().toString();
             ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startNextMessage(message, user.getId(),
-                UUID.randomUUID().toString(), token, NOW.minusSeconds(20), NOW.minusSeconds(5));
+                UUID.randomUUID().toString(), token, NOW.minusSeconds(20), null, NOW.minusSeconds(5));
             outbox.claim(token, NOW.minusSeconds(5));
             if ("PENDING".equals(status)) {
                 outbox.retry(failureCount);

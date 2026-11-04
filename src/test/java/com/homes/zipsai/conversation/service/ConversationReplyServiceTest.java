@@ -360,7 +360,7 @@ class ConversationReplyServiceTest {
         Message residentMessage = new Message(null, "천장에서 물이 새요", SenderType.RESIDENT, MessageType.TEXT, TURN_ID);
         ReflectionTestUtils.setField(residentMessage, "id", 20L);
         ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startFirstMessage(residentMessage, RESIDENT_ID, "trace-1",
-            LOCK_TOKEN, LocalDateTime.of(2026, 11, 2, 10, 0));
+            LOCK_TOKEN, null, LocalDateTime.of(2026, 11, 2, 10, 0));
         ReflectionTestUtils.setField(outbox, "id", EVENT_ID);
         return outbox;
     }

@@ -211,7 +211,7 @@ class ChatbotReplyRelayIntegrationTest {
                 MessageType.TEXT, UUID.randomUUID().toString());
             entityManager.persist(message);
             ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startNextMessage(message, user.getId(),
-                UUID.randomUUID().toString(), UUID.randomUUID().toString(), null, now);
+                UUID.randomUUID().toString(), UUID.randomUUID().toString(), null, null, now);
             entityManager.persist(outbox);
             entityManager.flush();
             jdbc.update("""
