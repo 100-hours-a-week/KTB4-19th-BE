@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 
 @Component
 @ConditionalOnProperty(name = "app.conversation.reply-worker.enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = "app.conversation.reply-consumer.enabled", havingValue = "false", matchIfMissing = true)
 @RequiredArgsConstructor
 public class ChatbotReplyScheduler {
 

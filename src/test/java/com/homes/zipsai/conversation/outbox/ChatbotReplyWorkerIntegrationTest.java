@@ -10,6 +10,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -31,6 +32,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.slf4j.MDC;
+import org.springframework.amqp.core.MessageProperties;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.task.TaskExecutor;
@@ -59,6 +61,7 @@ import com.homes.zipsai.conversation.ai.AiConverseResponse;
 import com.homes.zipsai.conversation.ai.AiRoute;
 import com.homes.zipsai.conversation.ai.error.AiConverseErrorType;
 import com.homes.zipsai.conversation.ai.error.AiConverseException;
+import com.homes.zipsai.conversation.consumer.ChatbotReplyRequestListener;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutboxStatus;
 import com.homes.zipsai.conversation.domain.Conversation;
@@ -76,6 +79,7 @@ import com.homes.zipsai.global.config.AsyncConfig;
 import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.domain.UserRole;
+import com.rabbitmq.client.Channel;
 
 @SpringBootTest
 @DirtiesContext
@@ -105,6 +109,9 @@ class ChatbotReplyWorkerIntegrationTest {
 
     @Autowired
     ConversationReplyService replyService;
+
+    @Autowired
+    ChatbotReplyRequestListener listener;
 
     @Autowired
     EntityManager entityManager;
@@ -396,6 +403,65 @@ class ChatbotReplyWorkerIntegrationTest {
         assertThat(redis.hasKey(key(expired))).isFalse();
 
         then(aiConverseClient).should().converse(any(), any());
+    }
+
+    @Test
+    @DisplayName("요청 수신은 AI 답변 한 건을 커밋한 뒤 ACK한다")
+    void consumesPendingReplyAndAcknowledgesCommittedAnswer() throws Exception {
+        Job requested = job("PENDING", 0);
+        Channel channel = mock(Channel.class);
+        doAnswer(invocation -> {
+            assertCompleted(requested, 0);
+            return null;
+        }).when(channel).basicAck(37L, false);
+
+        listener.onMessage(delivery(requested), channel);
+
+        then(channel).should().basicAck(37L, false);
+
+        then(channel).shouldHaveNoMoreInteractions();
+
+        then(aiConverseClient).should().converse(any(), any());
+    }
+
+    @Test
+    @DisplayName("AI 오류의 실패 횟수·PENDING 커밋 후 NACK하고 재전달한 같은 요청의 답변을 한 번 저장한다")
+    void consumesRetryableFailureThenRedelivery() throws Exception {
+        Job job = job("PENDING", 1);
+        Channel channel = mock(Channel.class);
+        doThrow(new AiConverseException(AiConverseErrorType.HTTP_ERROR, new AiUnavailableException(), null))
+            .doAnswer(invocation -> response(invocation.getArgument(0)))
+            .when(aiConverseClient).converse(any(), any());
+        doAnswer(invocation -> {
+            assertState(job, ChatbotReplyOutboxStatus.PENDING, 2);
+            return null;
+        }).when(channel).basicNack(37L, false, true);
+        doAnswer(invocation -> {
+            assertCompleted(job, 2);
+            return null;
+        }).when(channel).basicAck(37L, false);
+
+        listener.onMessage(delivery(job), channel);
+        listener.onMessage(delivery(job), channel);
+
+        then(channel).should().basicNack(37L, false, true);
+
+        then(channel).should().basicAck(37L, false);
+
+        then(channel).shouldHaveNoMoreInteractions();
+
+        ArgumentCaptor<AiConverseRequest> requests = ArgumentCaptor.forClass(AiConverseRequest.class);
+        then(aiConverseClient).should(times(2)).converse(requests.capture(), any());
+
+        assertThat(requests.getAllValues()).extracting(AiConverseRequest::turnId).containsOnly(job.turnId());
+    }
+
+    private static org.springframework.amqp.core.Message delivery(Job job) {
+        MessageProperties properties = new MessageProperties();
+        properties.setContentType(MessageProperties.CONTENT_TYPE_JSON);
+        properties.setDeliveryTag(37L);
+        return new org.springframework.amqp.core.Message(
+            ("{\"eventId\":" + job.eventId() + "}").getBytes(StandardCharsets.UTF_8), properties);
     }
 
     private Job job(String status, int failureCount) {
