@@ -45,8 +45,7 @@ public class ChatbotReplyRelayService {
             LocalDateTime publishedAt = outboxRepository.currentTime();
             int marked = 0;
             for (ChatbotReplyOutbox outbox : candidates) {
-                if (confirmed.contains(outbox.getId())
-                        && outbox.markPublished(outbox.getAttemptCount(), publishedAt)) {
+                if (confirmed.contains(outbox.getId()) && outbox.markPublished(publishedAt)) {
                     marked++;
                 }
             }
