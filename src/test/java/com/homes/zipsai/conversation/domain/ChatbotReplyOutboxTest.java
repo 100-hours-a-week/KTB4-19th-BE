@@ -107,6 +107,17 @@ class ChatbotReplyOutboxTest {
     }
 
     @Test
+    @DisplayName("시도 번호 없이 발행 확인을 받으면 현재 시도의 발행 시각을 남긴다")
+    void marksPublishedForCurrentAttempt() {
+        ChatbotReplyOutbox outbox = pendingOutbox(1);
+
+        boolean marked = outbox.markPublished(NOW);
+
+        assertThat(marked).isTrue();
+        assertThat(outbox.getPublishedAt()).isEqualTo(NOW);
+    }
+
+    @Test
     @DisplayName("처리 중인 이벤트에는 발행 시각을 기록하지 않는다")
     void doesNotMarkPublishedWhileProcessing() {
         ChatbotReplyOutbox outbox =

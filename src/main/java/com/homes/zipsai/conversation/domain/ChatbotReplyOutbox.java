@@ -126,6 +126,10 @@ public class ChatbotReplyOutbox extends BaseTimeEntity {
         this.publishedAt = null;
     }
 
+    public boolean markPublished(LocalDateTime now) {
+        return markPublished(attemptCount, now);
+    }
+
     public boolean markPublished(int attempt, LocalDateTime now) {
         if (status != ChatbotReplyOutboxStatus.PENDING || attemptCount != attempt || publishedAt != null) {
             return false;
