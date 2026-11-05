@@ -24,6 +24,9 @@ import org.springframework.stereotype.Component;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
 
 import lombok.RequiredArgsConstructor;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 @Component
 @RequiredArgsConstructor
@@ -33,14 +36,18 @@ public class ChatbotReplyRequestSender {
 
     private final RabbitTemplate rabbitTemplate;
     private final ChatbotReplyRelayProperties relayProperties;
+    private final ObjectMapper objectMapper;
 
     public Set<Long> sendBatch(List<ChatbotReplyOutbox> outboxes) {
         List<Sent> sent = new ArrayList<>();
         for (ChatbotReplyOutbox outbox : outboxes) {
+            Message message = message(outbox);
+            if (message == null) {
+                continue;
+            }
             CorrelationData correlation = new CorrelationData(String.valueOf(outbox.getId()));
             try {
-                rabbitTemplate.send(relayProperties.exchange(), relayProperties.routingKey(), message(outbox),
-                    correlation);
+                rabbitTemplate.send(relayProperties.exchange(), relayProperties.routingKey(), message, correlation);
                 sent.add(new Sent(outbox.getId(), correlation));
             } catch (AmqpException exception) {
                 LOGGER.warn("챗봇 요청을 발행하지 못했습니다. eventId={}", outbox.getId(), exception);
@@ -85,9 +92,21 @@ public class ChatbotReplyRequestSender {
         }
     }
 
-    private static Message message(ChatbotReplyOutbox outbox) {
-        String body = "{\"eventId\":" + outbox.getId() + "}";
-        return MessageBuilder.withBody(body.getBytes(StandardCharsets.UTF_8))
+    private Message message(ChatbotReplyOutbox outbox) {
+        if (outbox.getMessageData() == null) {
+            LOGGER.warn("AI 요청이 저장되지 않은 챗봇 요청은 발행하지 않습니다. eventId={}", outbox.getId());
+            return null;
+        }
+        byte[] body;
+        try {
+            ObjectNode node = objectMapper.createObjectNode().put("eventId", outbox.getId());
+            node.set("request", objectMapper.readTree(outbox.getMessageData()));
+            body = objectMapper.writeValueAsBytes(node);
+        } catch (JacksonException exception) {
+            LOGGER.warn("저장된 AI 요청을 읽지 못해 챗봇 요청을 발행하지 않습니다. eventId={}", outbox.getId(), exception);
+            return null;
+        }
+        return MessageBuilder.withBody(body)
             .setContentType(MessageProperties.CONTENT_TYPE_JSON)
             .setContentEncoding(StandardCharsets.UTF_8.name())
             .setDeliveryMode(MessageDeliveryMode.PERSISTENT)
