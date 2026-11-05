@@ -25,7 +25,7 @@ public class ChatbotReplyOutboxCleanupScheduler {
     private final JobOperator jobOperator;
     private final Job chatbotReplyOutboxCleanupJob;
 
-    @Scheduled(cron = "0 0 4 * * *", zone = "Asia/Seoul")
+    @Scheduled(cron = "0 0 18 * * *", zone = "Asia/Seoul")
     @SchedulerLock(name = "chatbotReplyOutboxCleanup", lockAtLeastFor = "1m", lockAtMostFor = "30m")
     public void cleanUpChatbotReplyOutbox() {
         try {
