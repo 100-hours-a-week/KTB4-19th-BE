@@ -247,22 +247,33 @@ class ChatbotReplyClaimIntegrationTest {
         assertThat(redis.opsForValue().get(key(waiting))).isEqualTo(waiting.token());
     }
 
-    @Test
-    @DisplayName("130초가 지난 미기록 시도는 실패를 한 번 집계하고 같은 작업을 다시 집계하지 않는다")
-    void countsInterruptedAttemptOnce() {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    @DisplayName("130초가 지난 중단 작업은 단건·배치 복구 모두 실패 횟수를 유지하고 새 소유권만 반환한다")
+    void preservesFailureCountOnInterruptedRecovery(boolean singleEvent) {
         Job job = job("PROCESSING", 1);
+        LocalDateTime createdAt = outbox(job).getCreatedAt();
+        LocalDateTime before = databaseTime();
 
-        List<Claim> claims = claimService.claimBatch();
+        List<Claim> claims = singleEvent
+            ? claimService.claim(job.eventId()).stream().toList() : claimService.claimBatch();
 
         assertThat(claims).extracting(Claim::eventId).containsExactly(job.eventId());
 
-        assertOwnedBy(job, claims.getFirst(), 2);
+        assertOwnedBy(job, claims.getFirst(), 1);
 
-        assertThat(claims.getFirst().attempt()).isEqualTo(2);
+        assertThat(claims.getFirst().attempt()).isEqualTo(1);
 
-        assertThat(claimService.claimBatch()).isEmpty();
+        assertThat(claims.getFirst().lockToken()).isNotEqualTo(job.token());
 
-        assertThat(outbox(job).getAttemptCount()).isEqualTo(2);
+        assertThat(outbox(job).getProcessingStartedAt()).isBetween(before, databaseTime());
+
+        assertThat(outbox(job).getCreatedAt()).isEqualTo(createdAt);
+
+        assertThat(singleEvent ? claimService.claim(job.eventId()).stream().toList() : claimService.claimBatch())
+            .isEmpty();
+
+        assertOwnedBy(job, claims.getFirst(), 1);
     }
 
     @Test
@@ -399,10 +410,13 @@ class ChatbotReplyClaimIntegrationTest {
         assertThat(outbox(job).getLockToken()).isEqualTo(job.token());
     }
 
-    @Test
-    @DisplayName("Redis 교체 후 DB 커밋이 롤백되면 발급한 토큰으로 DB를 복구하고 실패를 한 번만 집계한다")
-    void repairsDatabaseAfterRolledBackCommit() {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    @DisplayName("단건·배치 복구의 DB 커밋이 롤백돼도 새 Redis 토큰으로 복구하고 실패 횟수는 유지한다")
+    void repairsDatabaseAfterRolledBackCommit(boolean singleEvent) {
         Job job = job("PROCESSING", 1);
+        LocalDateTime createdAt = outbox(job).getCreatedAt();
+        LocalDateTime before = databaseTime();
         AtomicBoolean intercepted = new AtomicBoolean();
         doAnswer(invocation -> {
             if (!job.token().equals(redis.opsForValue().get(key(job)))
@@ -413,13 +427,22 @@ class ChatbotReplyClaimIntegrationTest {
             return invocation.callRealMethod();
         }).when(transactionManager).commit(any());
 
-        List<Claim> claims = claimService.claimBatch();
+        List<Claim> claims = singleEvent
+            ? claimService.claim(job.eventId()).stream().toList() : claimService.claimBatch();
+
+        assertThat(intercepted).isTrue();
 
         assertThat(claims).extracting(Claim::eventId).containsExactly(job.eventId());
 
-        assertOwnedBy(job, claims.getFirst(), 2);
+        assertOwnedBy(job, claims.getFirst(), 1);
+
+        assertThat(claims.getFirst().attempt()).isEqualTo(1);
 
         assertThat(claims.getFirst().lockToken()).isNotEqualTo(job.token());
+
+        assertThat(outbox(job).getProcessingStartedAt()).isBetween(before, databaseTime());
+
+        assertThat(outbox(job).getCreatedAt()).isEqualTo(createdAt);
     }
 
     private Job job(String status, int failures) {

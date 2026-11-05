@@ -282,8 +282,11 @@ class ChatbotReplyRequestListenerTest {
     }
 
     @Test
-    @DisplayName("활성 작업의 선점이 비어 있으면 실패 정리 없이 NACK한다")
+    @DisplayName("활성 PROCESSING 중복은 상태·실패 횟수·토큰·시각을 보존하고 추가 AI 실행 없이 NACK한다")
     void requeuesActiveDuplicate() throws Exception {
+        LocalDateTime startedAt = LocalDateTime.now().minusSeconds(10);
+        outbox.claim(LOCK_TOKEN, startedAt);
+        outbox.recordFailure();
         given(chatbotReplyOutboxRepository.findById(EVENT_ID)).willReturn(Optional.of(outbox));
         given(chatbotReplyWorker.claimAndPrepareReply(EVENT_ID)).willReturn(Optional.empty());
         given(chatbotReplyOutboxRepository.currentTime()).willReturn(LocalDateTime.now());
@@ -291,6 +294,14 @@ class ChatbotReplyRequestListenerTest {
         listener.onMessage(message("{\"eventId\":900}", DELIVERY_TAG), channel);
 
         then(channel).should().basicNack(DELIVERY_TAG, false, true);
+
+        assertThat(outbox.getStatus()).isEqualTo(ChatbotReplyOutboxStatus.PROCESSING);
+
+        assertThat(outbox.getAttemptCount()).isEqualTo(1);
+
+        assertThat(outbox.getLockToken()).isEqualTo(LOCK_TOKEN);
+
+        assertThat(outbox.getProcessingStartedAt()).isEqualTo(startedAt);
 
         verifyNoInteractions(conversationReplyService, conversationService);
 

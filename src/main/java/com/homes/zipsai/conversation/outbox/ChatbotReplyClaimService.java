@@ -153,8 +153,7 @@ public class ChatbotReplyClaimService {
         Duration ttl = remaining.compareTo(lockProperties.ttl()) < 0 ? remaining : lockProperties.ttl();
         boolean interrupted = outbox.getStatus() == ChatbotReplyOutboxStatus.PROCESSING;
         Claim previous = new Claim(outbox.getId(), outbox.getAttemptCount(), outbox.getLockToken());
-        Claim current = new Claim(outbox.getId(), previous.attempt() + (interrupted ? 1 : 0),
-            UUID.randomUUID().toString());
+        Claim current = new Claim(outbox.getId(), previous.attempt(), UUID.randomUUID().toString());
         Transfer transfer = new Transfer(previous, current, conversation.orElseThrow().getId(),
             outbox.getProcessingStartedAt(), now, interrupted);
         transfers.add(transfer);
