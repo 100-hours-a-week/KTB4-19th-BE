@@ -8,6 +8,7 @@ import jakarta.persistence.LockModeType;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -70,6 +71,20 @@ public interface ChatbotReplyOutboxRepository extends JpaRepository<ChatbotReply
         """, nativeQuery = true)
     List<ChatbotReplyOutbox> findRelayCandidatesForUpdate(@Param("updatedBefore") LocalDateTime updatedBefore,
                                                          @Param("limit") int limit);
+
+    @Query(value = """
+        SELECT event_id FROM Chatbot_reply_outbox
+        WHERE status = :status AND updated_at < :updatedBefore
+        ORDER BY event_id
+        LIMIT :limit FOR UPDATE
+        """, nativeQuery = true)
+    List<Long> findExpiredIdsForUpdate(@Param("status") String status,
+                                       @Param("updatedBefore") LocalDateTime updatedBefore,
+                                       @Param("limit") int limit);
+
+    @Modifying
+    @Query(value = "DELETE FROM Chatbot_reply_outbox WHERE event_id IN (:eventIds)", nativeQuery = true)
+    int deleteAllByEventIds(@Param("eventIds") List<Long> eventIds);
 
     @Query("select coalesce(max(outbox.id), 0) from ChatbotReplyOutbox outbox")
     long findLastEventId();
