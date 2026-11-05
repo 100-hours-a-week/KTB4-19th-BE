@@ -28,6 +28,8 @@ class ChatbotReplyQueueTopologyIntegrationTest {
 
     private static final String EXCHANGE = "chatbot.reply";
     private static final String REQUEST_QUEUE = "chatbot.reply.request";
+    private static final Duration DELAYED_RETRY_MIN = Duration.ofSeconds(1);
+    private static final Duration DELAYED_RETRY_MAX = Duration.ofSeconds(2);
     private static final GenericContainer<?> RABBITMQ =
         new GenericContainer<>(DockerImageName.parse("rabbitmq:4.3.6-management")).withExposedPorts(5672);
 
@@ -44,7 +46,8 @@ class ChatbotReplyQueueTopologyIntegrationTest {
         GenericApplicationContext context = new GenericApplicationContext();
         context.registerBean("chatbotReplyQueues", Declarables.class,
             () -> new ChatbotReplyQueueConfiguration().chatbotReplyQueues(new ChatbotReplyRelayProperties(EXCHANGE,
-                REQUEST_QUEUE, Duration.ofSeconds(10), Duration.ofSeconds(5), 50)));
+                REQUEST_QUEUE, Duration.ofSeconds(10), Duration.ofSeconds(5), 50),
+                new ChatbotReplyQueueProperties(DELAYED_RETRY_MIN, DELAYED_RETRY_MAX)));
         context.refresh();
         rabbitAdmin.setApplicationContext(context);
         rabbitAdmin.afterPropertiesSet();
@@ -91,6 +94,19 @@ class ChatbotReplyQueueTopologyIntegrationTest {
         }
 
         assertThat(takeMessageId(ChatbotReplyQueueConfiguration.DEAD_LETTER_QUEUE)).isEqualTo("902");
+    }
+
+    @Test
+    @DisplayName("다시 넣기로 거절한 요청은 최소 대기 시간이 지난 뒤에 다시 배달된다")
+    void redeliversRequeuedRequestAfterDelayedRetryMin() {
+        rabbitTemplate.send(EXCHANGE, REQUEST_QUEUE, message("903"));
+        rejectNext(REQUEST_QUEUE, true);
+        long rejectedAt = System.nanoTime();
+
+        String messageId = takeMessageId(REQUEST_QUEUE);
+
+        assertThat(messageId).isEqualTo("903");
+        assertThat(Duration.ofNanos(System.nanoTime() - rejectedAt)).isGreaterThanOrEqualTo(DELAYED_RETRY_MIN);
     }
 
     private static Message message(String eventId) {
