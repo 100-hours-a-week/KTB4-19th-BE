@@ -123,7 +123,7 @@ class ConversationReplyDeadlineIntegrationTest {
     ChatbotReplyOutboxRepository outboxRepository;
 
     @Autowired
-    ChatbotReplyRequestSender chatbotReplyRequestSender;
+    ChatbotReplyRequestPublisher chatbotReplyRequestPublisher;
 
     @MockitoBean
     AiConverseClient aiConverseClient;
@@ -154,7 +154,7 @@ class ConversationReplyDeadlineIntegrationTest {
         jdbc.update("DELETE FROM Chatbot_reply_outbox");
         replyService = new ConversationReplyService(conversationService, aiConverseClient, redisMessagePublisher,
             new ChatbotReplyPubSubProperties(CHANNEL), replyLock, new ChatbotReplyShutdownSignal(), structuredLogger,
-            outboxRepository, chatbotReplyRequestSender);
+            chatbotReplyRequestPublisher);
     }
 
     @AfterEach

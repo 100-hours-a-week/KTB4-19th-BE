@@ -134,7 +134,7 @@ class ChatbotReplySaveRetryIntegrationTest {
     ChatbotReplyOutboxRepository outboxRepository;
 
     @Autowired
-    ChatbotReplyRequestSender chatbotReplyRequestSender;
+    ChatbotReplyRequestPublisher chatbotReplyRequestPublisher;
 
     @MockitoSpyBean
     MessageRepository messageRepository;
@@ -178,7 +178,7 @@ class ChatbotReplySaveRetryIntegrationTest {
         doAnswer(invocation -> checkedAt.get()).when(outboxRepository).currentTime();
         replyService = new ConversationReplyService(conversationService, aiConverseClient, redisMessagePublisher,
             new ChatbotReplyPubSubProperties(CHANNEL), replyLock, shutdownSignal, structuredLogger,
-            outboxRepository, chatbotReplyRequestSender);
+            chatbotReplyRequestPublisher);
     }
 
     @AfterEach
@@ -372,7 +372,7 @@ class ChatbotReplySaveRetryIntegrationTest {
         RedisMessagePublisher publisher = new RedisMessagePublisher(failingRedis, objectMapper, publisherLogger);
         ConversationReplyService synchronousService = new ConversationReplyService(conversationService,
             aiConverseClient, publisher, new ChatbotReplyPubSubProperties(CHANNEL), replyLock, shutdownSignal,
-            structuredLogger, outboxRepository, chatbotReplyRequestSender);
+            structuredLogger, chatbotReplyRequestPublisher);
 
         ConversationReplyResponse result = synchronousService.replySynchronously(job.pending()).orElseThrow();
 

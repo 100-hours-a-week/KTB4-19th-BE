@@ -119,7 +119,7 @@ class ChatbotReplyRetryIntegrationTest {
     ChatbotReplyOutboxRepository outboxRepository;
 
     @Autowired
-    ChatbotReplyRequestSender chatbotReplyRequestSender;
+    ChatbotReplyRequestPublisher chatbotReplyRequestPublisher;
 
     @MockitoBean
     AiConverseClient aiConverseClient;
@@ -153,7 +153,7 @@ class ChatbotReplyRetryIntegrationTest {
         jdbc.update("DELETE FROM Chatbot_reply_outbox");
         replyService = new ConversationReplyService(conversationService, aiConverseClient, redisMessagePublisher,
             new ChatbotReplyPubSubProperties(CHANNEL), replyLock, shutdownSignal, structuredLogger,
-            outboxRepository, chatbotReplyRequestSender);
+            chatbotReplyRequestPublisher);
         checkedAt(CREATED_AT.plusSeconds(10));
     }
 
