@@ -6,7 +6,6 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.time.LocalDateTime;
-import java.util.Map;
 import java.util.UUID;
 
 import javax.sql.DataSource;
@@ -108,7 +107,7 @@ class ChatbotReplyRelayIntegrationTest {
     void setUp() {
         jdbc.update("DELETE FROM Chatbot_reply_outbox");
         amqpAdmin.declareExchange(new DirectExchange(EXCHANGE, true, false));
-        amqpAdmin.declareQueue(new Queue(QUEUE, true, false, false, Map.of("x-queue-type", "quorum")));
+        amqpAdmin.initialize();
         amqpAdmin.declareBinding(binding());
         amqpAdmin.purgeQueue(QUEUE, false);
     }
