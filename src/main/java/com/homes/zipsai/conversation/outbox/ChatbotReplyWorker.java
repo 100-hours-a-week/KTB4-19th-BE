@@ -26,12 +26,31 @@ public class ChatbotReplyWorker {
     private final StructuredLogger structuredLogger;
 
     public Optional<PendingAiReply> claimAndPrepareReply(Long eventId, AiConverseRequest request) {
+        Long conversationId = null;
+        String turnId = request.turnId();
         try {
-            return claimService.claim(eventId)
-                .flatMap(claim -> conversationService.prepareReply(claim.eventId(), claim.attempt(),
-                    claim.lockToken(), request));
+            conversationId = Long.valueOf(request.conversationId());
+        } catch (NumberFormatException ignored) {
+
+        }
+        Claim claimed = null;
+        try {
+            Optional<Claim> claim = claimService.claim(eventId);
+            if (claim.isEmpty()) {
+                return Optional.empty();
+            }
+            claimed = claim.orElseThrow();
+            return conversationService.prepareReply(claimed.eventId(), claimed.attempt(), claimed.lockToken(), request);
         } catch (RuntimeException exception) {
-            structuredLogger.chatbotReplyFailed(eventId, null, null, exception);
+            structuredLogger.chatbotReplyFailed(eventId, conversationId, turnId, exception);
+            if (claimed != null) {
+                try {
+                    claimService.retry(claimed);
+                } catch (RuntimeException retryException) {
+                    structuredLogger.chatbotReplyFailed(eventId, conversationId, turnId, retryException);
+                    throw retryException;
+                }
+            }
             throw exception;
         }
     }

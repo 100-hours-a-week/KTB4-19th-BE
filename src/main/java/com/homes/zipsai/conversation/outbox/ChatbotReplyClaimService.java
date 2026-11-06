@@ -92,7 +92,9 @@ public class ChatbotReplyClaimService {
                     List<ChatbotReplyOutbox> candidates = outboxRepository.findClaimCandidatesForUpdate(
                         expiredBefore, cursor, lastEventId, MAX_CLAIMS - transfers.size());
                     for (ChatbotReplyOutbox outbox : candidates) {
-                        transferOwnership(outbox, transfers);
+                        if (RetryPolicy.LIMITED.shouldRetry(outbox.getAttemptCount())) {
+                            transferOwnership(outbox, transfers);
+                        }
                     }
                     return candidates.isEmpty() ? lastEventId : candidates.getLast().getId();
                 });
@@ -210,7 +212,7 @@ public class ChatbotReplyClaimService {
     }
 
     private boolean isEligible(ChatbotReplyOutbox outbox, LocalDateTime now) {
-        return outbox.getDeletedAt() == null && RetryPolicy.LIMITED.shouldRetry(outbox.getAttemptCount())
+        return outbox.getDeletedAt() == null
             && (outbox.getStatus() == ChatbotReplyOutboxStatus.PENDING
             || (outbox.getStatus() == ChatbotReplyOutboxStatus.PROCESSING
                 && !now.isBefore(outbox.getProcessingStartedAt().plus(workerProperties.attemptTimeout()))));
