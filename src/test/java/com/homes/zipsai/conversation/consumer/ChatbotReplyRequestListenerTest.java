@@ -2,6 +2,7 @@ package com.homes.zipsai.conversation.consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.nullable;
@@ -62,12 +63,15 @@ import com.homes.zipsai.conversation.outbox.ChatbotReplyWorkerProperties;
 import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
 import com.homes.zipsai.conversation.service.ConversationReplyService;
 import com.homes.zipsai.conversation.service.ConversationService;
-import com.homes.zipsai.conversation.service.DiscardedMessage;
 import com.homes.zipsai.conversation.service.PendingAiReply;
 import com.homes.zipsai.global.exception.InternalServerException;
 import com.homes.zipsai.global.logging.StructuredLogger;
 import com.rabbitmq.client.Channel;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -112,6 +116,7 @@ class ChatbotReplyRequestListenerTest {
         outbox = ChatbotReplyOutbox.startNextMessage(mock(com.homes.zipsai.conversation.domain.Message.class),
             1L, "consumer-trace", LOCK_TOKEN, LocalDateTime.now(), null, LocalDateTime.now());
         ReflectionTestUtils.setField(outbox, "id", EVENT_ID);
+        ReflectionTestUtils.setField(outbox, "createdAt", LocalDateTime.now());
     }
 
     @ParameterizedTest
@@ -218,7 +223,7 @@ class ChatbotReplyRequestListenerTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"LOOKUP", "CLAIM", "REPLY"})
-    @DisplayName("AI 실행 전 조회·선점·동기 경로의 DB 연결 오류는 실패 처리 없이 NACK한다")
+    @DisplayName("Outbox 조회·선점·동기 답변 처리 중 DB 장애가 나면 최종 실패 처리 없이 reject(true)한다")
     void requeuesDatabaseFailure(String stage) throws Exception {
         DataAccessResourceFailureException failure = new DataAccessResourceFailureException("AI 실행 전 DB 오류");
         if ("LOOKUP".equals(stage)) {
@@ -228,17 +233,16 @@ class ChatbotReplyRequestListenerTest {
             given(chatbotReplyWorker.claimAndPrepareReply(EVENT_ID, request())).willThrow(failure);
         } else {
             preparePending(EVENT_ID);
+            given(chatbotReplyOutboxRepository.currentTime()).willReturn(LocalDateTime.now());
             given(pending.conversation().getId()).willReturn(10L);
             given(conversationReplyService.replySynchronously(pending)).willThrow(failure);
         }
 
         listener.onMessage(requestMessage(EVENT_ID, DELIVERY_TAG), channel);
 
-        then(channel).should().basicNack(DELIVERY_TAG, false, true);
+        then(channel).should().basicReject(DELIVERY_TAG, true);
 
-        assertThat(outbox.getAttemptCount()).isZero();
-
-        verifyNoInteractions(conversationService);
+        then(conversationReplyService).should(never()).failReply(any(), anyInt(), any());
 
         then(conversationReplyService).should(never()).reply(any());
 
@@ -250,75 +254,108 @@ class ChatbotReplyRequestListenerTest {
             verifyNoInteractions(conversationReplyService);
         }
 
-        if ("CLAIM".equals(stage)) {
-            verifyNoInteractions(structuredLogger);
+        if ("LOOKUP".equals(stage)) {
+            then(structuredLogger).should().chatbotReplyFailed(EVENT_ID, 10L, "listener-turn", failure);
         }
 
         then(channel).shouldHaveNoMoreInteractions();
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"LOOKUP_DB", "MISSING", "RECHECK_DB", "RECHECK_MISSING"})
+    @DisplayName("답변 준비 전 조회 실패와 없는 Outbox 로그에도 수신한 대화와 턴 식별자를 기록한다")
+    void logsRequestIdentifiersBeforePreparingReply(String stage) throws Exception {
+        DataAccessResourceFailureException failure = new DataAccessResourceFailureException("조회 DB 장애");
+        if ("LOOKUP_DB".equals(stage)) {
+            given(chatbotReplyOutboxRepository.findById(EVENT_ID)).willThrow(failure);
+        } else if ("MISSING".equals(stage)) {
+            given(chatbotReplyOutboxRepository.findById(EVENT_ID)).willReturn(Optional.empty());
+        } else {
+            if ("RECHECK_DB".equals(stage)) {
+                given(chatbotReplyOutboxRepository.findById(EVENT_ID))
+                    .willReturn(Optional.of(outbox)).willThrow(failure);
+            } else {
+                given(chatbotReplyOutboxRepository.findById(EVENT_ID))
+                    .willReturn(Optional.of(outbox)).willReturn(Optional.empty());
+            }
+            given(chatbotReplyWorker.claimAndPrepareReply(EVENT_ID, request())).willReturn(Optional.empty());
+        }
+        Logger logger = (Logger) org.slf4j.LoggerFactory.getLogger("structured-events");
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            ChatbotReplyRequestListener loggingListener = new ChatbotReplyRequestListener(chatbotReplyWorker,
+                conversationReplyService, conversationService, chatbotReplyOutboxRepository, OBJECT_MAPPER,
+                new StructuredLogger(OBJECT_MAPPER),
+                new ChatbotReplyWorkerProperties(Duration.ofSeconds(130), Duration.ofSeconds(280)));
+
+            loggingListener.onMessage(requestMessage(EVENT_ID, DELIVERY_TAG), channel);
+
+            assertThat(appender.list).hasSize(1);
+
+            JsonNode event = OBJECT_MAPPER.readTree(appender.list.getFirst().getFormattedMessage());
+            assertThat(event.path("event_id").longValue()).isEqualTo(EVENT_ID);
+
+            assertThat(event.path("conversation_id").isIntegralNumber()).isTrue();
+
+            assertThat(event.path("conversation_id").longValue()).isEqualTo(10L);
+
+            assertThat(event.path("turn_id").asText()).isEqualTo("listener-turn");
+
+            then(channel).should().basicReject(DELIVERY_TAG, stage.endsWith("_DB"));
+
+            then(channel).shouldHaveNoMoreInteractions();
+
+            verifyNoInteractions(conversationReplyService);
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+    }
+
+    @ParameterizedTest
     @EnumSource(value = AiConverseErrorType.class, names = {"HTTP_ERROR", "STREAM_ERROR", "INCOMPLETE_STREAM",
         "RESPONSE_JSON_ERROR", "TURN_ID_MISMATCH", "INVALID_RESPONSE", "REQUEST_SERIALIZATION_ERROR"})
-    @DisplayName("AI 오류 종류를 기존 처리로 전달하고 재시도 대기 반환 후 NACK한다")
+    @DisplayName("재시도 가능한 AI 오류는 최종 실패 처리·통지 없이 reject(true)한다")
     void requeuesRetryableFailure(AiConverseErrorType type) throws Exception {
         preparePending(EVENT_ID);
+        given(chatbotReplyOutboxRepository.currentTime()).willReturn(LocalDateTime.now());
         given(conversationReplyService.replySynchronously(pending)).willThrow(failure(type));
-        given(conversationService.handleAiReplyFailure(pending, type)).willAnswer(invocation -> {
-            then(channel).shouldHaveNoInteractions();
-
-            assertThat(outbox.getAttemptCount()).isZero();
-            outbox.retry(0);
-            return Optional.empty();
-        });
 
         listener.onMessage(requestMessage(EVENT_ID, DELIVERY_TAG), channel);
 
-        InOrder order = inOrder(conversationReplyService, conversationService, channel);
+        InOrder order = inOrder(conversationReplyService, channel);
         order.verify(conversationReplyService).replySynchronously(pending);
 
-        order.verify(conversationService).handleAiReplyFailure(pending, type);
-
-        order.verify(channel).basicNack(DELIVERY_TAG, false, true);
-
-        assertThat(outbox.getAttemptCount()).isZero();
-
-        then(conversationReplyService).should().replySynchronously(pending);
+        order.verify(channel).basicReject(DELIVERY_TAG, true);
 
         then(conversationReplyService).should(never()).reply(any());
 
-        then(conversationService).shouldHaveNoMoreInteractions();
+        then(conversationReplyService).should(never()).failReply(any(), anyInt(), any());
+
+        then(conversationReplyService).should(never()).publishFailure(any(), any(), any());
 
         then(channel).shouldHaveNoMoreInteractions();
     }
 
     @ParameterizedTest
     @EnumSource(value = AiConverseErrorType.class, names = {"TIMEOUT", "CONNECTION_FAILURE",
-        "SERVICE_UNAVAILABLE", "GATEWAY_TIMEOUT", "HTTP_ERROR"})
-    @DisplayName("재시도 가능 여부와 관계없이 기존 처리가 최종 실패를 확정하면 ACK한다")
-    void acknowledgesFinalFailure(AiConverseErrorType type) throws Exception {
+        "SERVICE_UNAVAILABLE", "GATEWAY_TIMEOUT"})
+    @DisplayName("재시도 불가 AI 오류는 최종 실패 처리·통지 없이 reject(false)한다")
+    void rejectsNonRetryableFailure(AiConverseErrorType type) throws Exception {
         preparePending(EVENT_ID);
         given(conversationReplyService.replySynchronously(pending)).willThrow(failure(type));
-        given(conversationService.handleAiReplyFailure(pending, type)).willAnswer(invocation -> {
-            then(channel).shouldHaveNoInteractions();
-            outbox.fail();
-            return Optional.of(new DiscardedMessage(1L, 10L));
-        });
 
         listener.onMessage(requestMessage(EVENT_ID, DELIVERY_TAG), channel);
 
-        InOrder order = inOrder(conversationReplyService, conversationService, channel);
-        order.verify(conversationReplyService).replySynchronously(pending);
+        then(channel).should().basicReject(DELIVERY_TAG, false);
 
-        order.verify(conversationService).handleAiReplyFailure(pending, type);
+        verifyNoInteractions(conversationService);
 
-        order.verify(channel).basicAck(DELIVERY_TAG, false);
+        then(conversationReplyService).should(never()).failReply(any(), anyInt(), any());
 
-        then(chatbotReplyOutboxRepository).should().findById(EVENT_ID);
-
-        then(chatbotReplyOutboxRepository).shouldHaveNoMoreInteractions();
-
-        then(conversationService).shouldHaveNoMoreInteractions();
+        then(conversationReplyService).should(never()).publishFailure(any(), any(), any());
 
         then(channel).shouldHaveNoMoreInteractions();
     }
@@ -352,8 +389,8 @@ class ChatbotReplyRequestListenerTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    @DisplayName("빈 선점 또는 준비 중 마감 오류의 만료 작업은 기존 최종 정리 반환 후 ACK한다")
-    void acknowledgesCleanupAfterEmptyClaim(boolean deadlineFailure) throws Exception {
+    @DisplayName("전체 요청 마감이 지난 작업은 AI 호출·최종 실패 처리 없이 reject(false)한다")
+    void rejectsExpiredClaimWithoutCleanup(boolean deadlineFailure) throws Exception {
         LocalDateTime now = LocalDateTime.now();
         ReflectionTestUtils.setField(outbox, "createdAt", now.minusSeconds(300));
         given(chatbotReplyOutboxRepository.findById(EVENT_ID)).willReturn(Optional.of(outbox));
@@ -366,22 +403,31 @@ class ChatbotReplyRequestListenerTest {
         given(chatbotReplyOutboxRepository.currentTime()).willReturn(now);
         given(chatbotReplyOutboxRepository.findCleanupCandidate(EVENT_ID, now.minusSeconds(280),
             now.minus(Conversation.IDLE_TIME_TO_CLOSE))).willReturn(Optional.of(outbox));
-        doAnswer(invocation -> {
-            then(channel).shouldHaveNoInteractions();
-            outbox.fail();
-            return null;
-        }).when(conversationReplyService).failReply(EVENT_ID, 0, LOCK_TOKEN);
 
         listener.onMessage(requestMessage(EVENT_ID, DELIVERY_TAG), channel);
 
-        InOrder order = inOrder(conversationReplyService, channel);
-        order.verify(conversationReplyService).failReply(EVENT_ID, 0, LOCK_TOKEN);
+        then(channel).should().basicReject(DELIVERY_TAG, false);
 
-        order.verify(channel).basicAck(DELIVERY_TAG, false);
-
-        then(conversationReplyService).shouldHaveNoMoreInteractions();
+        verifyNoInteractions(conversationReplyService, conversationService);
 
         then(channel).shouldHaveNoMoreInteractions();
+    }
+
+    @Test
+    @DisplayName("조회한 eventId의 Outbox가 없으면 오류를 기록하고 추가 처리 없이 reject(false)한다")
+    void rejectsMissingOutbox() throws Exception {
+        given(chatbotReplyOutboxRepository.findById(EVENT_ID)).willReturn(Optional.empty());
+
+        listener.onMessage(requestMessage(EVENT_ID, DELIVERY_TAG), channel);
+
+        then(channel).should().basicReject(DELIVERY_TAG, false);
+
+        then(channel).shouldHaveNoMoreInteractions();
+
+        then(structuredLogger).should().chatbotReplyFailed(eq(EVENT_ID),
+            eq(10L), eq("listener-turn"), any(Throwable.class));
+
+        verifyNoInteractions(chatbotReplyWorker, conversationReplyService, conversationService);
     }
 
     @Test

@@ -2,8 +2,12 @@ package com.homes.zipsai.conversation.outbox;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
@@ -17,8 +21,10 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import jakarta.persistence.EntityManager;
 
@@ -39,6 +45,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
@@ -47,6 +54,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.GenericContainer;
@@ -81,6 +89,7 @@ import com.homes.zipsai.conversation.service.ConversationService;
 import com.homes.zipsai.conversation.service.PendingAiReply;
 import com.homes.zipsai.global.config.AsyncConfig;
 import com.homes.zipsai.global.exception.AiUnavailableException;
+import com.homes.zipsai.global.logging.StructuredLogger;
 import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.domain.UserRole;
 import com.rabbitmq.client.Channel;
@@ -145,6 +154,9 @@ class ChatbotReplyWorkerIntegrationTest {
 
     @MockitoSpyBean
     ConversationService conversationService;
+
+    @MockitoSpyBean
+    StructuredLogger structuredLogger;
 
     @MockitoBean
     AiConverseClient aiConverseClient;
@@ -463,27 +475,56 @@ class ChatbotReplyWorkerIntegrationTest {
         then(messageFileGroupRepository).should(never()).findAllByMessageIds(any());
     }
 
-    @Test
-    @DisplayName("AI 오류의 실패 횟수·PENDING 커밋 후 NACK하고 재전달한 같은 요청의 답변을 한 번 저장한다")
-    void consumesRetryableFailureThenRedelivery() throws Exception {
-        Job job = job("PENDING", 1);
+    @ParameterizedTest
+    @CsvSource({"HTTP_ERROR, 2, 3", "REQUEST_SERIALIZATION_ERROR, 1, 1"})
+    @DisplayName("재시도 가능한 AI 오류는 DB 실패 횟수 제한 없이 PENDING 커밋 후 reject(true)하고 재전달로 완료한다")
+    void consumesRetryableFailureThenRedelivery(AiConverseErrorType errorType, int previousFailures,
+                                                int failures) throws Exception {
+        Job job = job("PENDING", previousFailures);
+        LocalDateTime publishedAt = NOW.minusSeconds(4);
+        jdbc.update("UPDATE Chatbot_reply_outbox SET published_at = ? WHERE event_id = ?", publishedAt, job.eventId());
+        LocalDateTime createdAt = outbox(job).getCreatedAt();
+        List<String> retryTokens = new ArrayList<>();
         Channel channel = mock(Channel.class);
-        doThrow(new AiConverseException(AiConverseErrorType.HTTP_ERROR, new AiUnavailableException(), null))
+        doThrow(new AiConverseException(errorType, new AiUnavailableException(), null))
             .doAnswer(invocation -> response(invocation.getArgument(0)))
             .when(aiConverseClient).converse(any(), any());
         doAnswer(invocation -> {
-            assertState(job, ChatbotReplyOutboxStatus.PENDING, 2);
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+
+            assertState(job, ChatbotReplyOutboxStatus.PENDING, failures);
+            ChatbotReplyOutbox retry = outbox(job);
+            retryTokens.add(retry.getLockToken());
+
+            assertThat(retry.getPublishedAt()).isEqualTo(publishedAt);
+
+            assertThat(retry.getCreatedAt()).isEqualTo(createdAt);
+
+            assertThat(retry.getProcessingStartedAt()).isEqualTo(NOW);
+
+            assertThat(retry.getLockToken()).isNotEqualTo(job.token());
+
+            assertThat(redis.opsForValue().get(key(job))).isEqualTo(retry.getLockToken());
+
+            assertThat(messageRepository.existsById(job.messageId())).isTrue();
+
+            then(redisMessagePublisher).shouldHaveNoInteractions();
             return null;
-        }).when(channel).basicNack(37L, false, true);
+        }).when(channel).basicReject(37L, true);
         doAnswer(invocation -> {
-            assertCompleted(job, 2);
+            assertCompleted(job, failures);
+
+            assertThat(outbox(job).getLockToken()).isNotEqualTo(retryTokens.getFirst());
+
+            assertThat(outbox(job).getCreatedAt()).isEqualTo(createdAt);
             return null;
         }).when(channel).basicAck(37L, false);
 
         listener.onMessage(delivery(job), channel);
-        listener.onMessage(delivery(job), channel);
 
-        then(channel).should().basicNack(37L, false, true);
+        then(channel).should().basicReject(37L, true);
+
+        listener.onMessage(delivery(job), channel);
 
         then(channel).should().basicAck(37L, false);
 
@@ -493,6 +534,137 @@ class ChatbotReplyWorkerIntegrationTest {
         then(aiConverseClient).should(times(2)).converse(requests.capture(), any());
 
         assertThat(requests.getAllValues()).extracting(AiConverseRequest::turnId).containsOnly(job.turnId());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("선점 후 요청 준비가 실패하면 자기 작업만 PENDING으로 되돌리고 다른 소유자의 작업은 보존한 채 reject(true)한다")
+    void returnsOwnedClaimToPendingAfterPreparationFailure(boolean ownershipTransferred) throws Exception {
+        Job job = job("PENDING", 1);
+        LocalDateTime publishedAt = NOW.minusSeconds(4);
+        jdbc.update("UPDATE Chatbot_reply_outbox SET published_at = ? WHERE event_id = ?", publishedAt, job.eventId());
+        LocalDateTime createdAt = outbox(job).getCreatedAt();
+        String otherToken = UUID.randomUUID().toString();
+        List<String> claimTokens = new ArrayList<>();
+        DataAccessResourceFailureException failure = new DataAccessResourceFailureException("요청 준비 DB 장애");
+        doAnswer(invocation -> {
+            claimTokens.add(invocation.getArgument(2, String.class));
+            if (ownershipTransferred) {
+                TransactionTemplate transfer = new TransactionTemplate(transactions.getTransactionManager());
+                transfer.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                transfer.executeWithoutResult(status -> jdbc.update("""
+                    UPDATE Chatbot_reply_outbox SET lock_token = ?, processing_started_at = ? WHERE event_id = ?
+                    """, otherToken, NOW.plusSeconds(1), job.eventId()));
+                redis.opsForValue().set(key(job), otherToken, LOCK_TTL);
+            }
+            throw failure;
+        }).when(conversationService).prepareReply(eq(job.eventId()), eq(1), any(), eq(receivedRequest(job)));
+        Channel channel = mock(Channel.class);
+        doAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+
+            assertState(job, ownershipTransferred ? ChatbotReplyOutboxStatus.PROCESSING
+                : ChatbotReplyOutboxStatus.PENDING, 1);
+            ChatbotReplyOutbox retry = outbox(job);
+            String token = ownershipTransferred ? otherToken : claimTokens.getFirst();
+
+            assertThat(retry.getLockToken()).isEqualTo(token);
+
+            assertThat(redis.opsForValue().get(key(job))).isEqualTo(token);
+
+            assertThat(retry.getPublishedAt()).isEqualTo(publishedAt);
+
+            assertThat(retry.getCreatedAt()).isEqualTo(createdAt);
+
+            assertThat(retry.getProcessingStartedAt()).isEqualTo(ownershipTransferred ? NOW.plusSeconds(1) : NOW);
+            return null;
+        }).when(channel).basicReject(37L, true);
+
+        listener.onMessage(delivery(job), channel);
+
+        then(channel).should().basicReject(37L, true);
+
+        then(channel).shouldHaveNoMoreInteractions();
+
+        assertThat(messageRepository.existsById(job.messageId())).isTrue();
+
+        then(aiConverseClient).shouldHaveNoInteractions();
+
+        then(redisMessagePublisher).shouldHaveNoInteractions();
+
+        then(structuredLogger).should().chatbotReplyFailed(job.eventId(), job.conversationId(), job.turnId(), failure);
+    }
+
+    @Test
+    @DisplayName("PENDING 전환이 DB 장애로 실패하면 상태·잠금을 보존하고 DB 재시도 없이 오류 기록 후 reject(true)한다")
+    void rejectsPendingTransitionDatabaseFailure() throws Exception {
+        Job job = job("PENDING", 1);
+        AtomicInteger transitionAttempts = new AtomicInteger();
+        DataAccessResourceFailureException failure = new DataAccessResourceFailureException("PENDING 전환 DB 장애");
+        doAnswer(invocation -> {
+            doAnswer(transition -> {
+                transitionAttempts.incrementAndGet();
+                throw failure;
+            }).when(outboxRepository).findByIdForUpdate(job.eventId());
+            throw new AiConverseException(AiConverseErrorType.HTTP_ERROR, new AiUnavailableException(), null);
+        }).when(aiConverseClient).converse(any(), any());
+        Channel channel = mock(Channel.class);
+
+        listener.onMessage(delivery(job), channel);
+
+        then(channel).should().basicReject(37L, true);
+
+        then(channel).shouldHaveNoMoreInteractions();
+
+        assertThat(transitionAttempts).hasValue(1);
+
+        assertState(job, ChatbotReplyOutboxStatus.PROCESSING, 1);
+
+        assertThat(messageRepository.existsById(job.messageId())).isTrue();
+
+        assertThat(redis.opsForValue().get(key(job))).isEqualTo(outbox(job).getLockToken());
+
+        then(structuredLogger).should().chatbotReplyFailed(job.eventId(), job.conversationId(), job.turnId(), failure);
+
+        then(aiConverseClient).should().converse(eq(receivedRequest(job)), any());
+
+        then(redisMessagePublisher).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("같은 AI 응답의 저장 재시도 시간이 끝나면 AI 재호출·최종 실패 처리 없이 PENDING 커밋 후 reject(true)한다")
+    void rejectsExhaustedSaveRetryAfterPendingCommit() throws Exception {
+        Job job = job("PENDING", 1);
+        AiConverseResponse aiResponse = response(receivedRequest(job));
+        doReturn(aiResponse).when(aiConverseClient).converse(any(), any());
+        doReturn(Optional.of(Duration.ofMillis(30))).when(conversationService).remainingReplyTime(any());
+        doThrow(new DataAccessResourceFailureException("동일 응답 저장 DB 장애"))
+            .when(conversationService).saveAiReply(any(), any());
+        Channel channel = mock(Channel.class);
+        doAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+
+            assertState(job, ChatbotReplyOutboxStatus.PENDING, 1);
+
+            assertThat(redis.opsForValue().get(key(job))).isEqualTo(outbox(job).getLockToken());
+            return null;
+        }).when(channel).basicReject(37L, true);
+
+        listener.onMessage(delivery(job), channel);
+
+        then(conversationService).should(atLeastOnce()).saveAiReply(any(), same(aiResponse));
+
+        then(channel).should().basicReject(37L, true);
+
+        then(channel).shouldHaveNoMoreInteractions();
+
+        assertThat(messageRepository.existsById(job.messageId())).isTrue();
+
+        then(aiConverseClient).should().converse(eq(receivedRequest(job)), any());
+
+        then(conversationService).should(never()).discardUnansweredMessage(any(), anyInt(), any());
+
+        then(redisMessagePublisher).shouldHaveNoInteractions();
     }
 
     private org.springframework.amqp.core.Message delivery(Job job) {
