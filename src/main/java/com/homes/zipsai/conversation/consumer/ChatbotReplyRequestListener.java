@@ -12,6 +12,7 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.TransactionException;
 
+import com.homes.zipsai.conversation.ai.AiConverseRequest;
 import com.homes.zipsai.conversation.ai.error.AiConverseException;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutboxStatus;
@@ -28,9 +29,11 @@ import com.homes.zipsai.global.logging.StructuredLogger;
 import com.rabbitmq.client.Channel;
 
 import lombok.RequiredArgsConstructor;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.DateTimeFeature;
 
 @Component
 @RequiredArgsConstructor
@@ -49,9 +52,42 @@ public class ChatbotReplyRequestListener implements ChannelAwareMessageListener 
         Map<String, String> previousMdc = MDC.getCopyOfContextMap();
         MDC.clear();
         try {
-            long eventId = eventId(message);
             long deliveryTag = message.getMessageProperties().getDeliveryTag();
-            if (process(eventId)) {
+            RequestMessage request;
+            JsonNode body = null;
+            try {
+                body = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS,
+                        DeserializationFeature.FAIL_ON_READING_DUP_TREE_KEY)
+                    .readTree(message.getBody());
+                request = parseRequest(body);
+            } catch (JacksonException | IllegalArgumentException exception) {
+                Long eventId = null;
+                Long conversationId = null;
+                String turnId = null;
+                if (body != null) {
+                    JsonNode event = body.path("eventId");
+                    if (event.isIntegralNumber() && event.canConvertToLong()) {
+                        eventId = event.longValue();
+                    }
+                    JsonNode payload = body.path("request");
+                    JsonNode conversation = payload.path("conversation_id");
+                    if (conversation.isString()) {
+                        try {
+                            conversationId = Long.valueOf(conversation.asString());
+                        } catch (NumberFormatException ignored) {
+
+                        }
+                    }
+                    JsonNode turn = payload.path("turn_id");
+                    if (turn.isString()) {
+                        turnId = turn.asString();
+                    }
+                }
+                structuredLogger.chatbotReplyFailed(eventId, conversationId, turnId, exception);
+                channel.basicReject(deliveryTag, false);
+                return;
+            }
+            if (process(request.eventId(), request.request())) {
                 channel.basicAck(deliveryTag, false);
             } else {
                 channel.basicNack(deliveryTag, false, true);
@@ -65,18 +101,19 @@ public class ChatbotReplyRequestListener implements ChannelAwareMessageListener 
         }
     }
 
-    private long eventId(Message message) {
-        JsonNode body = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS,
-                DeserializationFeature.FAIL_ON_READING_DUP_TREE_KEY)
-            .readTree(message.getBody());
-        if (body == null || !body.isObject() || body.size() != 1 || !body.has("eventId")
-                || !body.get("eventId").isIntegralNumber() || !body.get("eventId").canConvertToLong()) {
-            throw new IllegalArgumentException("Expected a single numeric eventId");
+    private RequestMessage parseRequest(JsonNode body) {
+        if (body == null || !body.isObject() || body.size() != 2 || !body.has("eventId")
+                || !body.get("eventId").isIntegralNumber() || !body.get("eventId").canConvertToLong()
+                || !body.has("request") || !body.get("request").isObject()) {
+            throw new IllegalArgumentException("Expected a numeric eventId and a request object");
         }
-        return body.get("eventId").longValue();
+        return new RequestMessage(body.get("eventId").longValue(),
+            objectMapper.readerFor(AiConverseRequest.class)
+                .without(DateTimeFeature.ADJUST_DATES_TO_CONTEXT_TIME_ZONE)
+                .readValue(body.get("request")));
     }
 
-    private boolean process(long eventId) {
+    private boolean process(long eventId, AiConverseRequest request) {
         ChatbotReplyOutbox outbox;
         try {
             outbox = chatbotReplyOutboxRepository.findById(eventId).orElseThrow();
@@ -90,7 +127,7 @@ public class ChatbotReplyRequestListener implements ChannelAwareMessageListener 
         }
         Optional<PendingAiReply> prepared;
         try {
-            prepared = chatbotReplyWorker.claimAndPrepareReply(eventId);
+            prepared = chatbotReplyWorker.claimAndPrepareReply(eventId, request);
         } catch (DataAccessException | TransactionException exception) {
             return false;
         } catch (InternalServerException exception) {
@@ -144,5 +181,8 @@ public class ChatbotReplyRequestListener implements ChannelAwareMessageListener 
     private boolean isTerminal(ChatbotReplyOutbox outbox) {
         return outbox.getStatus() == ChatbotReplyOutboxStatus.COMPLETED
             || outbox.getStatus() == ChatbotReplyOutboxStatus.FAILED;
+    }
+
+    private record RequestMessage(long eventId, AiConverseRequest request) {
     }
 }
