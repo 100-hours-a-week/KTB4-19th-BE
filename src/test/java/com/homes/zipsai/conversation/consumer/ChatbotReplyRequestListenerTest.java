@@ -1,8 +1,10 @@
 package com.homes.zipsai.conversation.consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.doAnswer;
@@ -14,6 +16,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -45,6 +49,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.homes.zipsai.conversation.ai.AiConverseRequest;
+import com.homes.zipsai.conversation.ai.AiRoute;
 import com.homes.zipsai.conversation.ai.error.AiConverseErrorType;
 import com.homes.zipsai.conversation.ai.error.AiConverseException;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
@@ -64,6 +69,7 @@ import com.homes.zipsai.global.logging.StructuredLogger;
 import com.rabbitmq.client.Channel;
 
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 @ExtendWith(MockitoExtension.class)
 class ChatbotReplyRequestListenerTest {
@@ -71,6 +77,7 @@ class ChatbotReplyRequestListenerTest {
     private static final long EVENT_ID = 900L;
     private static final long DELIVERY_TAG = 37L;
     private static final String LOCK_TOKEN = "consumer-listener-token";
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @Mock
     ChatbotReplyWorker chatbotReplyWorker;
@@ -100,7 +107,7 @@ class ChatbotReplyRequestListenerTest {
     @BeforeEach
     void setUp() {
         listener = new ChatbotReplyRequestListener(chatbotReplyWorker, conversationReplyService, conversationService,
-            chatbotReplyOutboxRepository, new ObjectMapper(), structuredLogger,
+            chatbotReplyOutboxRepository, OBJECT_MAPPER, structuredLogger,
             new ChatbotReplyWorkerProperties(Duration.ofSeconds(130), Duration.ofSeconds(280)));
         outbox = ChatbotReplyOutbox.startNextMessage(mock(com.homes.zipsai.conversation.domain.Message.class),
             1L, "consumer-trace", LOCK_TOKEN, LocalDateTime.now(), null, LocalDateTime.now());
@@ -109,7 +116,7 @@ class ChatbotReplyRequestListenerTest {
 
     @ParameterizedTest
     @CsvSource({"900, 37", "1234, 81"})
-    @DisplayName("입력 eventId만 동기 처리하고 서비스 반환 후 해당 delivery tag만 ACK한다")
+    @DisplayName("새 메시지의 eventId만 동기 처리하고 서비스 반환 후 해당 delivery tag만 ACK한다")
     void acknowledgesSynchronousResult(long eventId, long deliveryTag) throws Exception {
         String previousTraceId = MDC.get("traceId");
         preparePending(eventId);
@@ -121,10 +128,10 @@ class ChatbotReplyRequestListenerTest {
             return Optional.of(savedReply);
         });
 
-        listener.onMessage(message("{\"eventId\":" + eventId + "}", deliveryTag), channel);
+        listener.onMessage(requestMessage(eventId, deliveryTag), channel);
 
         InOrder order = inOrder(chatbotReplyWorker, conversationReplyService, channel);
-        order.verify(chatbotReplyWorker).claimAndPrepareReply(eventId);
+        order.verify(chatbotReplyWorker).claimAndPrepareReply(eventId, request());
 
         order.verify(conversationReplyService).replySynchronously(pending);
 
@@ -143,18 +150,54 @@ class ChatbotReplyRequestListenerTest {
         assertThat(MDC.get("traceId")).isEqualTo(previousTraceId);
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"", "{", "[]", "1", "{}", "{\"eventId\":null}",
-        "{\"eventId\":\"900\"}", "{\"eventId\":true}", "{\"eventId\":900,\"attempt\":1}",
-        "{\"eventId\":1.5}", "{\"eventId\":9223372036854775808}", "{\"eventId\":900} {}",
-        "{\"eventId\":900,\"eventId\":1234}"})
-    @DisplayName("숫자 eventId 단일 필드 객체가 아니면 업무 처리 전에 형식 오류를 알린다")
-    void rejectsInvalidPayload(String body) {
-        assertThatThrownBy(() -> listener.onMessage(message(body, DELIVERY_TAG), channel))
-            .isInstanceOf(RuntimeException.class);
+    @Test
+    @DisplayName("잘못된 메시지는 기록하고 업무 처리 없이 재큐잉하지 않는 reject로 반환한다")
+    void rejectsInvalidPayload() throws Exception {
+        listener.onMessage(message("{\"invalid\":true}", DELIVERY_TAG), channel);
+
+        then(structuredLogger).should().chatbotReplyFailed(nullable(Long.class), any(), any(), any(Throwable.class));
+
+        then(channel).should().basicReject(DELIVERY_TAG, false);
+
+        then(channel).shouldHaveNoMoreInteractions();
 
         verifyNoInteractions(chatbotReplyOutboxRepository, chatbotReplyWorker, conversationReplyService,
             conversationService);
+    }
+
+    @Test
+    @DisplayName("요청 역직렬화가 실패해도 읽을 수 있는 식별자를 기록하고 업무 처리 없이 reject한다")
+    void logsIdentifiersWhenRequestDeserializationFails() throws Exception {
+        ObjectNode invalidRequest = OBJECT_MAPPER.valueToTree(request());
+        invalidRequest.put("current_route", "unknown");
+        String body = OBJECT_MAPPER.writeValueAsString(Map.of("eventId", EVENT_ID, "request", invalidRequest));
+
+        listener.onMessage(message(body, DELIVERY_TAG), channel);
+
+        then(channel).should().basicReject(DELIVERY_TAG, false);
+
+        then(channel).shouldHaveNoMoreInteractions();
+
+        verifyNoInteractions(chatbotReplyOutboxRepository, chatbotReplyWorker, conversationReplyService,
+            conversationService);
+
+        then(structuredLogger).should().chatbotReplyFailed(eq(EVENT_ID), eq(10L), eq("listener-turn"),
+            any(Throwable.class));
+    }
+
+    @Test
+    @DisplayName("request가 null이어도 읽을 수 있는 eventId를 기록하고 업무 처리 없이 reject한다")
+    void logsEventIdWhenRequestIsInvalid() throws Exception {
+        listener.onMessage(message("{\"eventId\":900,\"request\":null}", DELIVERY_TAG), channel);
+
+        then(channel).should().basicReject(DELIVERY_TAG, false);
+
+        then(channel).shouldHaveNoMoreInteractions();
+
+        verifyNoInteractions(chatbotReplyOutboxRepository, chatbotReplyWorker, conversationReplyService,
+            conversationService);
+
+        then(structuredLogger).should().chatbotReplyFailed(eq(EVENT_ID), isNull(), isNull(), any(Throwable.class));
     }
 
     @ParameterizedTest
@@ -164,7 +207,7 @@ class ChatbotReplyRequestListenerTest {
         ReflectionTestUtils.setField(outbox, "status", status);
         given(chatbotReplyOutboxRepository.findById(EVENT_ID)).willReturn(Optional.of(outbox));
 
-        listener.onMessage(message("{\"eventId\":900}", DELIVERY_TAG), channel);
+        listener.onMessage(requestMessage(EVENT_ID, DELIVERY_TAG), channel);
 
         then(channel).should().basicAck(DELIVERY_TAG, false);
 
@@ -182,15 +225,14 @@ class ChatbotReplyRequestListenerTest {
             given(chatbotReplyOutboxRepository.findById(EVENT_ID)).willThrow(failure);
         } else if ("CLAIM".equals(stage)) {
             given(chatbotReplyOutboxRepository.findById(EVENT_ID)).willReturn(Optional.of(outbox));
-            given(chatbotReplyWorker.claimAndPrepareReply(EVENT_ID)).willThrow(failure);
+            given(chatbotReplyWorker.claimAndPrepareReply(EVENT_ID, request())).willThrow(failure);
         } else {
             preparePending(EVENT_ID);
             given(pending.conversation().getId()).willReturn(10L);
-            given(pending.aiRequest().turnId()).willReturn("listener-turn");
             given(conversationReplyService.replySynchronously(pending)).willThrow(failure);
         }
 
-        listener.onMessage(message("{\"eventId\":900}", DELIVERY_TAG), channel);
+        listener.onMessage(requestMessage(EVENT_ID, DELIVERY_TAG), channel);
 
         then(channel).should().basicNack(DELIVERY_TAG, false, true);
 
@@ -230,7 +272,7 @@ class ChatbotReplyRequestListenerTest {
             return Optional.empty();
         });
 
-        listener.onMessage(message("{\"eventId\":900}", DELIVERY_TAG), channel);
+        listener.onMessage(requestMessage(EVENT_ID, DELIVERY_TAG), channel);
 
         InOrder order = inOrder(conversationReplyService, conversationService, channel);
         order.verify(conversationReplyService).replySynchronously(pending);
@@ -263,7 +305,7 @@ class ChatbotReplyRequestListenerTest {
             return Optional.of(new DiscardedMessage(1L, 10L));
         });
 
-        listener.onMessage(message("{\"eventId\":900}", DELIVERY_TAG), channel);
+        listener.onMessage(requestMessage(EVENT_ID, DELIVERY_TAG), channel);
 
         InOrder order = inOrder(conversationReplyService, conversationService, channel);
         order.verify(conversationReplyService).replySynchronously(pending);
@@ -288,10 +330,10 @@ class ChatbotReplyRequestListenerTest {
         outbox.claim(LOCK_TOKEN, startedAt);
         outbox.recordFailure();
         given(chatbotReplyOutboxRepository.findById(EVENT_ID)).willReturn(Optional.of(outbox));
-        given(chatbotReplyWorker.claimAndPrepareReply(EVENT_ID)).willReturn(Optional.empty());
+        given(chatbotReplyWorker.claimAndPrepareReply(EVENT_ID, request())).willReturn(Optional.empty());
         given(chatbotReplyOutboxRepository.currentTime()).willReturn(LocalDateTime.now());
 
-        listener.onMessage(message("{\"eventId\":900}", DELIVERY_TAG), channel);
+        listener.onMessage(requestMessage(EVENT_ID, DELIVERY_TAG), channel);
 
         then(channel).should().basicNack(DELIVERY_TAG, false, true);
 
@@ -316,9 +358,10 @@ class ChatbotReplyRequestListenerTest {
         ReflectionTestUtils.setField(outbox, "createdAt", now.minusSeconds(300));
         given(chatbotReplyOutboxRepository.findById(EVENT_ID)).willReturn(Optional.of(outbox));
         if (deadlineFailure) {
-            given(chatbotReplyWorker.claimAndPrepareReply(EVENT_ID)).willThrow(new InternalServerException());
+            given(chatbotReplyWorker.claimAndPrepareReply(EVENT_ID, request()))
+                .willThrow(new InternalServerException());
         } else {
-            given(chatbotReplyWorker.claimAndPrepareReply(EVENT_ID)).willReturn(Optional.empty());
+            given(chatbotReplyWorker.claimAndPrepareReply(EVENT_ID, request())).willReturn(Optional.empty());
         }
         given(chatbotReplyOutboxRepository.currentTime()).willReturn(now);
         given(chatbotReplyOutboxRepository.findCleanupCandidate(EVENT_ID, now.minusSeconds(280),
@@ -329,7 +372,7 @@ class ChatbotReplyRequestListenerTest {
             return null;
         }).when(conversationReplyService).failReply(EVENT_ID, 0, LOCK_TOKEN);
 
-        listener.onMessage(message("{\"eventId\":900}", DELIVERY_TAG), channel);
+        listener.onMessage(requestMessage(EVENT_ID, DELIVERY_TAG), channel);
 
         InOrder order = inOrder(conversationReplyService, channel);
         order.verify(conversationReplyService).failReply(EVENT_ID, 0, LOCK_TOKEN);
@@ -368,7 +411,7 @@ class ChatbotReplyRequestListenerTest {
                 }));
 
             context.getBean(ChatbotReplyRequestListener.class)
-                .onMessage(message("{\"eventId\":900}", DELIVERY_TAG), channel);
+                .onMessage(requestMessage(EVENT_ID, DELIVERY_TAG), channel);
         }
 
         then(channel).should().basicAck(DELIVERY_TAG, false);
@@ -378,13 +421,23 @@ class ChatbotReplyRequestListenerTest {
         ReflectionTestUtils.setField(outbox, "id", eventId);
         outbox.claim(LOCK_TOKEN, LocalDateTime.now());
         pending = new PendingAiReply(eventId, 0, LOCK_TOKEN, 1L, mock(Conversation.class),
-            mock(MessageResponse.class), mock(AiConverseRequest.class));
+            mock(MessageResponse.class), request());
         given(chatbotReplyOutboxRepository.findById(eventId)).willReturn(Optional.of(outbox));
-        given(chatbotReplyWorker.claimAndPrepareReply(eventId)).willReturn(Optional.of(pending));
+        given(chatbotReplyWorker.claimAndPrepareReply(eventId, request())).willReturn(Optional.of(pending));
     }
 
     private static AiConverseException failure(AiConverseErrorType type) {
         return new AiConverseException(type, new InternalServerException(), null);
+    }
+
+    private static AiConverseRequest request() {
+        return new AiConverseRequest(77L, "101", "1", "10", "listener-turn", "consumer-trace", AiRoute.KNOWLEDGE,
+            null, new AiConverseRequest.MessagePayload("20", "보일러 문의", List.of()), List.of(), null);
+    }
+
+    private static Message requestMessage(long eventId, long tag) {
+        return message(OBJECT_MAPPER.writeValueAsString(
+            Map.of("eventId", eventId, "request", request())), tag);
     }
 
     private static Message message(String body, long tag) {

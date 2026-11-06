@@ -11,10 +11,10 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -34,6 +34,7 @@ import org.springframework.amqp.rabbit.listener.AbstractMessageListenerContainer
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.context.LifecycleAutoConfiguration;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.ClassPathBeanDefinitionScanner;
 import org.springframework.context.support.DefaultLifecycleProcessor;
@@ -51,6 +52,7 @@ import com.homes.zipsai.conversation.config.ChatbotReplyPubSubProperties;
 import com.homes.zipsai.conversation.config.ChatbotReplyQueueConfiguration;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyResponse;
+import com.homes.zipsai.conversation.outbox.ChatbotReplyRelayProperties;
 import com.homes.zipsai.conversation.outbox.ChatbotReplyRelayWorker;
 import com.homes.zipsai.conversation.outbox.ChatbotReplyRequestPublisher;
 import com.homes.zipsai.conversation.outbox.ChatbotReplyWorker;
@@ -115,7 +117,8 @@ class ChatbotReplyConsumerRuntimeTest {
         .withBean(ChatbotReplyWorker.class, () -> worker)
         .withBean(ChatbotReplyRelayWorker.class, () -> relayWorker)
         .withBean(ChatbotReplyShutdownSignal.class, () -> shutdownSignal)
-        .withUserConfiguration(ChatbotReplyScheduler.class, ChatbotReplyRelayScheduler.class)
+        .withUserConfiguration(ChatbotReplyScheduler.class, ChatbotReplyRelayScheduler.class,
+            RelayPropertiesConfiguration.class)
         .withPropertyValues("app.conversation.reply-consumer.queue=" + QUEUE,
             "app.conversation.reply-worker.enabled=true");
 
@@ -234,7 +237,7 @@ class ChatbotReplyConsumerRuntimeTest {
             AiConverseResponse response = new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, request.turnId(),
                 new AiConverseResponse.Data(AiRoute.KNOWLEDGE, null, "보일러 점검을 요청해 주세요.", null));
             given(outboxRepository.findById(EVENT_ID)).willReturn(Optional.of(outbox));
-            given(worker.claimAndPrepareReply(EVENT_ID)).willReturn(Optional.of(pending));
+            given(worker.claimAndPrepareReply(EVENT_ID, request)).willReturn(Optional.of(pending));
             given(conversationService.remainingReplyTime(pending)).willReturn(Optional.of(Duration.ofSeconds(20)));
             given(aiConverseClient.converse(eq(request), any())).willAnswer(invocation -> {
                 aiStarted.countDown();
@@ -254,7 +257,7 @@ class ChatbotReplyConsumerRuntimeTest {
                 Future<?> delivery = executor.submit(() -> {
                     receiver.get().handleDelivery(CONSUMER_TAG, new Envelope(DELIVERY_TAG, false, "", QUEUE),
                         new AMQP.BasicProperties.Builder().contentType("application/json").build(),
-                        ("{\"eventId\":" + EVENT_ID + "}").getBytes(StandardCharsets.UTF_8));
+                        new ObjectMapper().writeValueAsBytes(Map.of("eventId", EVENT_ID, "request", request)));
                     return null;
                 });
                 try {
@@ -283,5 +286,9 @@ class ChatbotReplyConsumerRuntimeTest {
 
             assertThat(shutdownSignal.isShuttingDown()).isTrue();
         });
+    }
+
+    @EnableConfigurationProperties(ChatbotReplyRelayProperties.class)
+    static class RelayPropertiesConfiguration {
     }
 }

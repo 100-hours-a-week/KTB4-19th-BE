@@ -97,7 +97,7 @@ public class ConversationTestFixture {
             }
             outbox.claim(outbox.getLockToken(), LocalDateTime.now());
             chatbotReplyOutboxRepository.save(outbox);
-            conversationService.prepareReply(outbox.getId(), outbox.getAttemptCount(), outbox.getLockToken())
+            conversationService.prepareBatchReply(outbox.getId(), outbox.getAttemptCount(), outbox.getLockToken())
                 .ifPresent(conversationReplyService::reply);
         }
     }
