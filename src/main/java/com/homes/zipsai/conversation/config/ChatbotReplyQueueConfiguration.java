@@ -16,7 +16,6 @@ import com.homes.zipsai.conversation.outbox.ChatbotReplyRelayProperties;
 public class ChatbotReplyQueueConfiguration {
 
     public static final String DEAD_LETTER_EXCHANGE = "chatbot.reply.dlx";
-    public static final String DEAD_LETTER_QUEUE = "chatbot.reply.request.dlq";
     public static final int DELIVERY_LIMIT = 2;
     public static final String DELAYED_RETRY_TYPE = "all";
 
@@ -24,21 +23,21 @@ public class ChatbotReplyQueueConfiguration {
     Declarables chatbotReplyQueues(ChatbotReplyRelayProperties relayProperties,
                                    ChatbotReplyQueueProperties queueProperties) {
         DirectExchange requestExchange = new DirectExchange(relayProperties.exchange());
-        Queue requestQueue = QueueBuilder.durable(relayProperties.routingKey())
+        Queue requestQueue = QueueBuilder.durable(queueProperties.queue())
             .quorum()
             .deliveryLimit(DELIVERY_LIMIT)
             .withArgument("x-delayed-retry-type", DELAYED_RETRY_TYPE)
             .withArgument("x-delayed-retry-min", queueProperties.delayedRetryMin().toMillis())
             .withArgument("x-delayed-retry-max", queueProperties.delayedRetryMax().toMillis())
             .deadLetterExchange(DEAD_LETTER_EXCHANGE)
-            .deadLetterRoutingKey(DEAD_LETTER_QUEUE)
+            .deadLetterRoutingKey(queueProperties.deadLetterQueue())
             .build();
         DirectExchange deadLetterExchange = new DirectExchange(DEAD_LETTER_EXCHANGE);
-        Queue deadLetterQueue = QueueBuilder.durable(DEAD_LETTER_QUEUE).quorum().build();
+        Queue deadLetterQueue = QueueBuilder.durable(queueProperties.deadLetterQueue()).quorum().build();
 
         return new Declarables(requestExchange, requestQueue,
             BindingBuilder.bind(requestQueue).to(requestExchange).with(relayProperties.routingKey()),
             deadLetterExchange, deadLetterQueue,
-            BindingBuilder.bind(deadLetterQueue).to(deadLetterExchange).with(DEAD_LETTER_QUEUE));
+            BindingBuilder.bind(deadLetterQueue).to(deadLetterExchange).with(queueProperties.deadLetterQueue()));
     }
 }

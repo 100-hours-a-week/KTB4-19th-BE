@@ -7,7 +7,7 @@ import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
-import com.homes.zipsai.conversation.config.ChatbotReplyQueueConfiguration;
+import com.homes.zipsai.conversation.config.ChatbotReplyQueueProperties;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutboxStatus;
 import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
@@ -25,7 +25,10 @@ public class ChatbotReplyDeadLetterConsumer {
     private final ChatbotReplyOutboxRepository outboxRepository;
     private final ConversationReplyService replyService;
 
-    @RabbitListener(queues = ChatbotReplyQueueConfiguration.DEAD_LETTER_QUEUE)
+    @RabbitListener(
+        queues = "${app.conversation.reply-queue.dead-letter-queue:"
+            + ChatbotReplyQueueProperties.DEFAULT_DEAD_LETTER_QUEUE + "}",
+        concurrency = "${app.conversation.reply-dead-letter.concurrency:1}")
     public void consume(Message message) {
         Long eventId = Long.valueOf(message.getMessageProperties().getMessageId());
         outboxRepository.findById(eventId)
