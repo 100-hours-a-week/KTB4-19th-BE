@@ -1,7 +1,6 @@
 package com.homes.zipsai.conversation.service;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -19,14 +18,12 @@ import com.homes.zipsai.conversation.ai.AiConverseResponse;
 import com.homes.zipsai.conversation.ai.error.AiConverseErrorType;
 import com.homes.zipsai.conversation.ai.error.AiConverseException;
 import com.homes.zipsai.conversation.config.ChatbotReplyPubSubProperties;
-import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyDeltaResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyFailedResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyResponse;
 import com.homes.zipsai.conversation.event.ChatbotReplyEvent;
-import com.homes.zipsai.conversation.outbox.ChatbotReplyRequestSender;
+import com.homes.zipsai.conversation.outbox.ChatbotReplyRequestPublisher;
 import com.homes.zipsai.conversation.outbox.ChatbotReplyWorkerProperties;
-import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
 import com.homes.zipsai.global.config.AsyncConfig;
 import com.homes.zipsai.global.exception.ApiException;
 import com.homes.zipsai.global.exception.InternalServerException;
@@ -46,14 +43,12 @@ public class ConversationReplyService {
     private final ConversationReplyLock conversationReplyLock;
     private final ChatbotReplyShutdownSignal chatbotReplyShutdownSignal;
     private final StructuredLogger structuredLogger;
-    private final ChatbotReplyOutboxRepository chatbotReplyOutboxRepository;
-    private final ChatbotReplyRequestSender chatbotReplyRequestSender;
+    private final ChatbotReplyRequestPublisher chatbotReplyRequestPublisher;
 
     @Async(AsyncConfig.CHATBOT_REPLY_EXECUTOR)
-    public void publishReplyRequest(Long eventId) {
-        ChatbotReplyOutbox outbox = chatbotReplyOutboxRepository.findById(eventId).orElseThrow();
-        if (chatbotReplyRequestSender.sendBatch(List.of(outbox)).contains(eventId)) {
-            conversationService.markReplyPublished(eventId, outbox.getAttemptCount());
+    public void publishReplyRequest(PendingAiReply pendingReply) {
+        if (chatbotReplyRequestPublisher.publish(pendingReply)) {
+            conversationService.markReplyPublished(pendingReply.eventId(), pendingReply.attempt());
         }
     }
 

@@ -66,6 +66,7 @@ import com.homes.zipsai.migration.domain.OutboxOperation;
 import com.homes.zipsai.migration.service.OutboxRecorder;
 
 import lombok.RequiredArgsConstructor;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 @RequiredArgsConstructor
@@ -87,6 +88,7 @@ public class ConversationService {
     private final ChatbotReplyOutboxRepository chatbotReplyOutboxRepository;
     private final ConversationReplyLock conversationReplyLock;
     private final ChatbotReplyWorkerProperties chatbotReplyWorkerProperties;
+    private final ObjectMapper objectMapper;
 
     @Transactional(readOnly = true)
     public ConversationListResponse getConversations(Long userId, String keyword, String cursor, int size) {
@@ -172,10 +174,14 @@ public class ConversationService {
         String lockToken = conversationReplyLock.acquire(conversation.getId());
         Message residentMessage = saveResidentMessage(conversation, content);
         List<AttachmentResponse> attachments = attachImages(residentMessage, images);
+        String traceId = MDC.get("traceId");
+        AiConverseRequest aiRequest = aiRequest(room, residentMessage, attachments, true, traceId);
         ChatbotReplyOutbox outbox = chatbotReplyOutboxRepository.save(ChatbotReplyOutbox.startFirstMessage(
-            residentMessage, userId, MDC.get("traceId"), lockToken, LocalDateTime.now()));
+            residentMessage, userId, traceId, lockToken, objectMapper.writeValueAsString(aiRequest),
+            LocalDateTime.now()));
 
-        return prepareReply(outbox, lockToken, room, residentMessage, attachments);
+        return PendingAiReply.of(outbox, lockToken, conversation, MessageResponse.of(residentMessage, attachments),
+            aiRequest);
     }
 
     @Transactional
@@ -189,10 +195,14 @@ public class ConversationService {
 
         Message residentMessage = saveResidentMessage(conversation, content);
         List<AttachmentResponse> attachments = attachImages(residentMessage, images);
+        String traceId = MDC.get("traceId");
+        AiConverseRequest aiRequest = aiRequest(room, residentMessage, attachments, false, traceId);
         ChatbotReplyOutbox outbox = chatbotReplyOutboxRepository.save(ChatbotReplyOutbox.startNextMessage(
-            residentMessage, userId, MDC.get("traceId"), lockToken, previousLastMessageAt, LocalDateTime.now()));
+            residentMessage, userId, traceId, lockToken, previousLastMessageAt,
+            objectMapper.writeValueAsString(aiRequest), LocalDateTime.now()));
 
-        return prepareReply(outbox, lockToken, room, residentMessage, attachments);
+        return PendingAiReply.of(outbox, lockToken, conversation, MessageResponse.of(residentMessage, attachments),
+            aiRequest);
     }
 
     @Transactional
@@ -435,14 +445,20 @@ public class ConversationService {
 
     private PendingAiReply prepareReply(ChatbotReplyOutbox outbox, String lockToken, Room room,
                                         Message residentMessage, List<AttachmentResponse> attachments) {
+        AiConverseRequest aiRequest = aiRequest(room, residentMessage, attachments, outbox.isNewConversation(),
+            outbox.getTraceId());
+        return PendingAiReply.of(outbox, lockToken, residentMessage.getConversation(),
+            MessageResponse.of(residentMessage, attachments), aiRequest);
+    }
+
+    private AiConverseRequest aiRequest(Room room, Message residentMessage, List<AttachmentResponse> attachments,
+                                        boolean newConversation, String traceId) {
         Conversation conversation = residentMessage.getConversation();
-        List<HistoryMessage> history = outbox.isNewConversation()
+        List<HistoryMessage> history = newConversation
             ? List.of()
             : getHistory(conversation.getId(), residentMessage.getId());
-        AiConverseRequest aiRequest = AiConverseRequest.of(room, conversation, residentMessage,
-            messageImages(attachments), history, outbox.getTraceId());
-        return PendingAiReply.of(outbox, lockToken, conversation, MessageResponse.of(residentMessage, attachments),
-            aiRequest);
+        return AiConverseRequest.of(room, conversation, residentMessage, messageImages(attachments), history,
+            traceId);
     }
 
     private List<HistoryMessage> getHistory(Long conversationId, Long beforeMessageId) {

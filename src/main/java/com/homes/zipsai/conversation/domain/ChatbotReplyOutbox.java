@@ -14,6 +14,9 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 import com.homes.zipsai.global.domain.BaseTimeEntity;
 
 import lombok.AccessLevel;
@@ -51,6 +54,10 @@ public class ChatbotReplyOutbox extends BaseTimeEntity {
     @Column(name = "previous_last_message_at")
     private LocalDateTime previousLastMessageAt;
 
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "message_data")
+    private String messageData;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private ChatbotReplyOutboxStatus status;
@@ -65,28 +72,31 @@ public class ChatbotReplyOutbox extends BaseTimeEntity {
     private LocalDateTime processingStartedAt;
 
     private ChatbotReplyOutbox(Long messageId, Long userId, String traceId, String lockToken, boolean newConversation,
-                               LocalDateTime previousLastMessageAt, LocalDateTime processingStartedAt) {
+                               LocalDateTime previousLastMessageAt, String messageData,
+                               LocalDateTime processingStartedAt) {
         this.messageId = messageId;
         this.userId = userId;
         this.traceId = traceId;
         this.lockToken = lockToken;
         this.newConversation = newConversation;
         this.previousLastMessageAt = previousLastMessageAt;
+        this.messageData = messageData;
         this.status = ChatbotReplyOutboxStatus.PENDING;
         this.attemptCount = FIRST_ATTEMPT;
         this.processingStartedAt = processingStartedAt;
     }
 
     public static ChatbotReplyOutbox startFirstMessage(Message residentMessage, Long userId, String traceId,
-                                                       String lockToken, LocalDateTime now) {
-        return new ChatbotReplyOutbox(residentMessage.getId(), userId, traceId, lockToken, true, null, now);
+                                                       String lockToken, String messageData, LocalDateTime now) {
+        return new ChatbotReplyOutbox(residentMessage.getId(), userId, traceId, lockToken, true, null, messageData,
+            now);
     }
 
     public static ChatbotReplyOutbox startNextMessage(Message residentMessage, Long userId, String traceId,
                                                       String lockToken, LocalDateTime previousLastMessageAt,
-                                                      LocalDateTime now) {
+                                                      String messageData, LocalDateTime now) {
         return new ChatbotReplyOutbox(residentMessage.getId(), userId, traceId, lockToken, false,
-            previousLastMessageAt, now);
+            previousLastMessageAt, messageData, now);
     }
 
     public boolean isProcessingBy(int attempt) {
@@ -114,6 +124,10 @@ public class ChatbotReplyOutbox extends BaseTimeEntity {
         this.attemptCount = attemptCount;
         this.status = ChatbotReplyOutboxStatus.PENDING;
         this.publishedAt = null;
+    }
+
+    public boolean markPublished(LocalDateTime now) {
+        return markPublished(attemptCount, now);
     }
 
     public boolean markPublished(int attempt, LocalDateTime now) {

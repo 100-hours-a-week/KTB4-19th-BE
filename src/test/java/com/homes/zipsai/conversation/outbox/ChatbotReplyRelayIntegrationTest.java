@@ -6,7 +6,6 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.time.LocalDateTime;
-import java.util.Map;
 import java.util.UUID;
 
 import javax.sql.DataSource;
@@ -43,6 +42,9 @@ import com.homes.zipsai.conversation.domain.SenderType;
 import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.domain.UserRole;
 
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+
 @SpringBootTest
 @DirtiesContext
 @TestPropertySource(properties = {
@@ -62,6 +64,8 @@ class ChatbotReplyRelayIntegrationTest {
 
     private static final String EXCHANGE = "chatbot.reply";
     private static final String QUEUE = "chatbot.reply.request";
+    private static final String MESSAGE_DATA = """
+        {"message": "보일러가 안 켜져요", "trace_id": "trace-1", "history": []}""";
     private static final GenericContainer<?> REDIS =
         new GenericContainer<>(DockerImageName.parse("redis:8.2.10-alpine")).withExposedPorts(6379);
     private static final GenericContainer<?> RABBITMQ =
@@ -88,6 +92,9 @@ class ChatbotReplyRelayIntegrationTest {
     @Autowired
     RabbitTemplate rabbitTemplate;
 
+    @Autowired
+    ObjectMapper objectMapper;
+
     @DynamicPropertySource
     static void containerProperties(DynamicPropertyRegistry registry) {
         REDIS.start();
@@ -108,7 +115,7 @@ class ChatbotReplyRelayIntegrationTest {
     void setUp() {
         jdbc.update("DELETE FROM Chatbot_reply_outbox");
         amqpAdmin.declareExchange(new DirectExchange(EXCHANGE, true, false));
-        amqpAdmin.declareQueue(new Queue(QUEUE, true, false, false, Map.of("x-queue-type", "quorum")));
+        amqpAdmin.initialize();
         amqpAdmin.declareBinding(binding());
         amqpAdmin.purgeQueue(QUEUE, false);
     }
@@ -116,7 +123,7 @@ class ChatbotReplyRelayIntegrationTest {
     @Test
     @DisplayName("발행 기록이 없고 10초가 지난 대기 요청을 발행하고 브로커 확인 후 발행 시각을 남긴다")
     void publishesPendingRequestAndMarksPublished() {
-        Long eventId = outbox("PENDING", 1, 11, false);
+        Long eventId = outbox("PENDING", 11, false);
 
         int marked = relayService.relayBatch();
 
@@ -127,8 +134,12 @@ class ChatbotReplyRelayIntegrationTest {
         org.springframework.amqp.core.Message message = rabbitTemplate.receive(QUEUE, 5_000);
         assertThat(message).isNotNull();
 
-        assertThat(new String(message.getBody(), StandardCharsets.UTF_8))
-            .isEqualTo("{\"eventId\":" + eventId + "}");
+        JsonNode body = objectMapper.readTree(new String(message.getBody(), StandardCharsets.UTF_8));
+        assertThat(body.get("eventId").asLong()).isEqualTo(eventId);
+
+        assertThat(body.get("request")).isEqualTo(objectMapper.readTree(MESSAGE_DATA));
+
+        assertThat(message.getMessageProperties().getMessageId()).isEqualTo(String.valueOf(eventId));
 
         assertThat(relayService.relayBatch()).isZero();
     }
@@ -136,9 +147,9 @@ class ChatbotReplyRelayIntegrationTest {
     @Test
     @DisplayName("최근에 바뀐 요청, 처리 중인 요청, 이미 발행한 요청은 발행하지 않는다")
     void skipsIneligibleRequests() {
-        Long recent = outbox("PENDING", 0, 3, false);
-        Long processing = outbox("PROCESSING", 0, 11, false);
-        Long published = outbox("PENDING", 0, 11, true);
+        Long recent = outbox("PENDING", 3, false);
+        Long processing = outbox("PROCESSING", 11, false);
+        Long published = outbox("PENDING", 11, true);
         LocalDateTime publishedAt = publishedAt(published);
 
         int marked = relayService.relayBatch();
@@ -157,7 +168,7 @@ class ChatbotReplyRelayIntegrationTest {
     @Test
     @DisplayName("큐로 라우팅되지 않은 요청은 발행 시각을 남기지 않아 다음 주기에 다시 발행한다")
     void doesNotMarkUnroutedRequest() {
-        Long eventId = outbox("PENDING", 0, 11, false);
+        Long eventId = outbox("PENDING", 11, false);
         amqpAdmin.removeBinding(binding());
 
         int marked = relayService.relayBatch();
@@ -176,8 +187,8 @@ class ChatbotReplyRelayIntegrationTest {
     @Test
     @DisplayName("다른 릴레이가 잠근 요청은 건너뛰고 잠기지 않은 요청만 발행한다")
     void skipsRequestLockedByAnotherRelay() throws Exception {
-        Long locked = outbox("PENDING", 0, 11, false);
-        Long free = outbox("PENDING", 0, 11, false);
+        Long locked = outbox("PENDING", 11, false);
+        Long free = outbox("PENDING", 11, false);
 
         try (Connection connection = dataSource.getConnection()) {
             connection.setAutoCommit(false);
@@ -199,7 +210,31 @@ class ChatbotReplyRelayIntegrationTest {
         assertThat(publishedAt(free)).isNotNull();
     }
 
-    private Long outbox(String status, int attempt, int updatedSecondsAgo, boolean published) {
+    @Test
+    @DisplayName("AI 요청이 저장되지 않은 요청은 건너뛰고 나머지 요청만 발행한다")
+    void skipsRequestWithoutMessageData() {
+        Long withoutMessageData = outbox("PENDING", 11, false, null);
+        Long withMessageData = outbox("PENDING", 11, false);
+
+        int marked = relayService.relayBatch();
+
+        assertThat(marked).isEqualTo(1);
+
+        assertThat(publishedAt(withoutMessageData)).isNull();
+
+        assertThat(publishedAt(withMessageData)).isNotNull();
+
+        org.springframework.amqp.core.Message message = rabbitTemplate.receive(QUEUE, 5_000);
+        assertThat(message.getMessageProperties().getMessageId()).isEqualTo(String.valueOf(withMessageData));
+
+        assertThat(rabbitTemplate.receive(QUEUE, 500)).isNull();
+    }
+
+    private Long outbox(String status, int updatedSecondsAgo, boolean published) {
+        return outbox(status, updatedSecondsAgo, published, MESSAGE_DATA);
+    }
+
+    private Long outbox(String status, int updatedSecondsAgo, boolean published, String messageData) {
         LocalDateTime now = databaseTime();
         return transactions.execute(transaction -> {
             User user = new User(UUID.randomUUID() + "@example.com", "password", "입주민", null);
@@ -211,13 +246,13 @@ class ChatbotReplyRelayIntegrationTest {
                 MessageType.TEXT, UUID.randomUUID().toString());
             entityManager.persist(message);
             ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startNextMessage(message, user.getId(),
-                UUID.randomUUID().toString(), UUID.randomUUID().toString(), null, now);
+                UUID.randomUUID().toString(), UUID.randomUUID().toString(), null, messageData, now);
             entityManager.persist(outbox);
             entityManager.flush();
             jdbc.update("""
-                UPDATE Chatbot_reply_outbox SET status = ?, attempt_count = ?, published_at = ?, updated_at = ?
+                UPDATE Chatbot_reply_outbox SET status = ?, published_at = ?, updated_at = ?
                 WHERE event_id = ?
-                """, status, attempt, published ? now.minusSeconds(20) : null,
+                """, status, published ? now.minusSeconds(20) : null,
                 now.minusSeconds(updatedSecondsAgo), outbox.getId());
             return outbox.getId();
         });

@@ -2,7 +2,6 @@ package com.homes.zipsai.conversation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -12,7 +11,6 @@ import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -32,7 +30,7 @@ import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
-import com.homes.zipsai.conversation.outbox.ChatbotReplyRequestSender;
+import com.homes.zipsai.conversation.outbox.ChatbotReplyRequestPublisher;
 import com.homes.zipsai.conversation.service.ConversationReplyLock;
 import com.homes.zipsai.global.logging.StructuredLogger;
 
@@ -55,7 +53,7 @@ class ConversationAsyncReplyTest {
     ConversationTestFixture conversationTestFixture;
 
     @MockitoBean
-    ChatbotReplyRequestSender chatbotReplyRequestSender;
+    ChatbotReplyRequestPublisher chatbotReplyRequestPublisher;
 
     @MockitoBean
     ConversationReplyLock conversationReplyLock;
@@ -75,10 +73,10 @@ class ConversationAsyncReplyTest {
             conversationTestFixture.authenticatedAs(conversationTestFixture.livingResident("302"));
         CompletableFuture<Thread> publishThread = new CompletableFuture<>();
         CompletableFuture<String> publishTraceId = new CompletableFuture<>();
-        given(chatbotReplyRequestSender.sendBatch(anyList())).willAnswer(invocation -> {
+        given(chatbotReplyRequestPublisher.publish(any())).willAnswer(invocation -> {
             publishThread.complete(Thread.currentThread());
             publishTraceId.complete(MDC.get("traceId"));
-            return Set.of();
+            return false;
         });
 
         MvcTestResult result = mockMvcTester.post().uri(CONVERSATIONS).with(resident)
@@ -99,7 +97,7 @@ class ConversationAsyncReplyTest {
     void logsPublishTaskWithRequestTraceId() throws Exception {
         RequestPostProcessor resident =
             conversationTestFixture.authenticatedAs(conversationTestFixture.livingResident("302"));
-        given(chatbotReplyRequestSender.sendBatch(anyList())).willReturn(Set.of());
+        given(chatbotReplyRequestPublisher.publish(any())).willReturn(false);
 
         MvcTestResult result = mockMvcTester.post().uri(CONVERSATIONS).with(resident)
             .contentType(MediaType.APPLICATION_JSON)

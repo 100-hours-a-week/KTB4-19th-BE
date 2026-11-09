@@ -459,7 +459,7 @@ class ChatbotReplyClaimIntegrationTest {
             entityManager.persist(message);
             String token = UUID.randomUUID().toString();
             ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startNextMessage(message, user.getId(),
-                UUID.randomUUID().toString(), token, null, startedAt);
+                UUID.randomUUID().toString(), token, null, null, startedAt);
             entityManager.persist(outbox);
             entityManager.flush();
             jdbc.update("""

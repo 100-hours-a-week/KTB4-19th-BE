@@ -103,7 +103,7 @@ class ChatbotReplyRequestListenerTest {
             chatbotReplyOutboxRepository, new ObjectMapper(), structuredLogger,
             new ChatbotReplyWorkerProperties(Duration.ofSeconds(130), Duration.ofSeconds(280)));
         outbox = ChatbotReplyOutbox.startNextMessage(mock(com.homes.zipsai.conversation.domain.Message.class),
-            1L, "consumer-trace", LOCK_TOKEN, LocalDateTime.now(), LocalDateTime.now());
+            1L, "consumer-trace", LOCK_TOKEN, LocalDateTime.now(), null, LocalDateTime.now());
         ReflectionTestUtils.setField(outbox, "id", EVENT_ID);
     }
 

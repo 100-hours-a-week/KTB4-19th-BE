@@ -69,7 +69,7 @@ class ConversationMessageServiceTest {
             conversationMessageService.createConversation(RESIDENT_ID, "천장에서 물이 새요", List.of());
 
         assertThat(response.conversationId()).isEqualTo(CONVERSATION_ID);
-        then(conversationReplyService).should().publishReplyRequest(900L);
+        then(conversationReplyService).should().publishReplyRequest(pendingAiReply);
         then(conversationReplyLock).shouldHaveNoInteractions();
     }
 
@@ -90,7 +90,7 @@ class ConversationMessageServiceTest {
         inOrder.verify(conversationReplyLock).acquire(CONVERSATION_ID);
         inOrder.verify(conversationService).saveNextMessage(RESIDENT_ID, CONVERSATION_ID, "안방이요", List.of(),
             LOCK_TOKEN);
-        inOrder.verify(conversationReplyService).publishReplyRequest(900L);
+        inOrder.verify(conversationReplyService).publishReplyRequest(pendingAiReply);
     }
 
     @Test

@@ -48,10 +48,11 @@ import com.homes.zipsai.conversation.ai.AiConverseResponse;
 import com.homes.zipsai.conversation.ai.AiRoute;
 import com.homes.zipsai.conversation.config.ChatbotReplyPubSubConfiguration;
 import com.homes.zipsai.conversation.config.ChatbotReplyPubSubProperties;
+import com.homes.zipsai.conversation.config.ChatbotReplyQueueConfiguration;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyResponse;
 import com.homes.zipsai.conversation.outbox.ChatbotReplyRelayWorker;
-import com.homes.zipsai.conversation.outbox.ChatbotReplyRequestSender;
+import com.homes.zipsai.conversation.outbox.ChatbotReplyRequestPublisher;
 import com.homes.zipsai.conversation.outbox.ChatbotReplyWorker;
 import com.homes.zipsai.conversation.outbox.ChatbotReplyWorkerProperties;
 import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
@@ -92,8 +93,8 @@ class ChatbotReplyConsumerRuntimeTest {
     private final CountDownLatch canceled = new CountDownLatch(1);
     private final ConversationReplyService replyService = new ConversationReplyService(conversationService,
         aiConverseClient, mock(RedisMessagePublisher.class), new ChatbotReplyPubSubProperties("test:reply"),
-        mock(ConversationReplyLock.class), shutdownSignal, mock(StructuredLogger.class), outboxRepository,
-        mock(ChatbotReplyRequestSender.class));
+        mock(ConversationReplyLock.class), shutdownSignal, mock(StructuredLogger.class),
+        mock(ChatbotReplyRequestPublisher.class));
     private final ChatbotReplyRequestListener listener = new ChatbotReplyRequestListener(worker, replyService,
         conversationService, outboxRepository, new ObjectMapper(), mock(StructuredLogger.class),
         new ChatbotReplyWorkerProperties(Duration.ofSeconds(130), Duration.ofSeconds(280)));
@@ -104,6 +105,7 @@ class ChatbotReplyConsumerRuntimeTest {
                 (BeanDefinitionRegistry) context.getBeanFactory(), true, context.getEnvironment(), context);
             scanner.addExcludeFilter(new AssignableTypeFilter(ChatbotReplyRequestListener.class));
             scanner.addExcludeFilter(new AssignableTypeFilter(ChatbotReplyPubSubConfiguration.class));
+            scanner.addExcludeFilter(new AssignableTypeFilter(ChatbotReplyQueueConfiguration.class));
             scanner.scan(ChatbotReplyRequestListener.class.getPackageName(),
                 ChatbotReplyPubSubConfiguration.class.getPackageName());
         })
@@ -223,7 +225,7 @@ class ChatbotReplyConsumerRuntimeTest {
             CountDownLatch finishAi = new CountDownLatch(1);
             ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startNextMessage(
                 mock(com.homes.zipsai.conversation.domain.Message.class), 1L, "consumer-trace", "token",
-                LocalDateTime.now(), LocalDateTime.now());
+                LocalDateTime.now(), null, LocalDateTime.now());
             outbox.claim("token", LocalDateTime.now());
             AiConverseRequest request = new AiConverseRequest(null, null, null, null, "consumer-turn",
                 "consumer-trace", null, null, null, List.of(), null);

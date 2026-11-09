@@ -22,6 +22,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.core.task.SyncTaskExecutor;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.core.task.TaskExecutor;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
@@ -44,6 +45,7 @@ import com.homes.zipsai.conversation.repository.MessageRepository;
 import com.homes.zipsai.conversation.service.ConversationReplyLock;
 import com.homes.zipsai.global.config.AsyncConfig;
 
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest
@@ -133,6 +135,32 @@ class ConversationMockAiTest {
                 """.formatted(firstImage, secondImage));
         assertThat(result).bodyJson().extractingPath("$.data.messages[0].attachments[0].fileUrl")
             .asString().startsWith("https://s3.test/");
+    }
+
+    @Test
+    @DisplayName("첫 메시지와 후속 메시지의 답변 이벤트에 AI에 보낸 요청과 같은 JSON이 저장된다")
+    void savesRequestSentToAiAsMessageData() throws Exception {
+        String email = conversationTestFixture.livingResident("303");
+        RequestPostProcessor resident = conversationTestFixture.authenticatedAs(email);
+        long image = conversationTestFixture.uploadedFile(email, "jpg");
+        given(aiConverseClient.converse(any(), any())).willAnswer(ConversationMockAiTest::collectingReply);
+
+        long conversationId = startConversation(resident, "천장에서 물이 새요", image);
+        sendMessage(resident, conversationId, "안방이요");
+
+        ArgumentCaptor<AiConverseRequest> aiConverseRequestCaptor = ArgumentCaptor.forClass(AiConverseRequest.class);
+        then(aiConverseClient).should(times(2)).converse(aiConverseRequestCaptor.capture(), any());
+        List<JsonNode> sentRequests = aiConverseRequestCaptor.getAllValues().stream()
+            .map(request -> objectMapper.readTree(objectMapper.writeValueAsString(request)))
+            .toList();
+
+        List<JsonNode> savedRequests = chatbotReplyOutboxRepository.findAll(Sort.by("id")).stream()
+            .filter(outbox -> outbox.getMessageData() != null)
+            .map(outbox -> objectMapper.readTree(outbox.getMessageData()))
+            .filter(request -> request.get("conversation_id").asString().equals(String.valueOf(conversationId)))
+            .toList();
+
+        assertThat(savedRequests).containsExactlyElementsOf(sentRequests);
     }
 
     @Test

@@ -45,6 +45,8 @@ import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
 import com.homes.zipsai.migration.service.OutboxRecorder;
 
+import tools.jackson.databind.json.JsonMapper;
+
 @ExtendWith(MockitoExtension.class)
 class ConversationServiceAiReplyTest {
 
@@ -89,7 +91,8 @@ class ConversationServiceAiReplyTest {
         conversationService = new ConversationService(conversationRepository, messageRepository,
             messageFileGroupRepository, fileRepository, residentRoomService, s3StorageService,
             new StorageProperties(null, null, null, 300, 0), outboxRecorder, chatbotReplyOutboxRepository, null,
-            new ChatbotReplyWorkerProperties(Duration.ofSeconds(130), Duration.ofSeconds(280)));
+            new ChatbotReplyWorkerProperties(Duration.ofSeconds(130), Duration.ofSeconds(280)),
+            JsonMapper.builder().build());
         conversation = Conversation.builder()
             .type(ConversationType.INQUIRY)
             .title("분리수거 요일이 언제인가요?")
@@ -394,7 +397,7 @@ class ConversationServiceAiReplyTest {
 
     private ChatbotReplyOutbox processingOutbox() {
         ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startFirstMessage(residentMessage(), 1L, "trace-1", "lock-token",
-            REPLIED_AT);
+            null, REPLIED_AT);
         outbox.claim("lock-token", REPLIED_AT);
         ReflectionTestUtils.setField(outbox, "id", EVENT_ID);
         ReflectionTestUtils.setField(outbox, "createdAt", REPLIED_AT);
@@ -403,7 +406,7 @@ class ConversationServiceAiReplyTest {
 
     private ChatbotReplyOutbox followUpOutbox(LocalDateTime previousLastMessageAt) {
         ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startNextMessage(residentMessage(), 1L, "trace-1", "lock-token",
-            previousLastMessageAt, REPLIED_AT);
+            previousLastMessageAt, null, REPLIED_AT);
         outbox.claim("lock-token", REPLIED_AT);
         ReflectionTestUtils.setField(outbox, "id", EVENT_ID);
         ReflectionTestUtils.setField(outbox, "createdAt", REPLIED_AT);

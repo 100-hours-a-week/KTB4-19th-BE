@@ -10,10 +10,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.function.Consumer;
 
 import org.junit.jupiter.api.AfterEach;
@@ -34,18 +32,15 @@ import com.homes.zipsai.conversation.ai.AiConverseRequest;
 import com.homes.zipsai.conversation.ai.AiConverseResponse;
 import com.homes.zipsai.conversation.ai.AiRoute;
 import com.homes.zipsai.conversation.config.ChatbotReplyPubSubProperties;
-import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
-import com.homes.zipsai.conversation.domain.Message;
 import com.homes.zipsai.conversation.domain.MessageType;
 import com.homes.zipsai.conversation.domain.SenderType;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyDeltaResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyResponse;
 import com.homes.zipsai.conversation.dto.response.MessageResponse;
 import com.homes.zipsai.conversation.event.ChatbotReplyEvent;
-import com.homes.zipsai.conversation.outbox.ChatbotReplyRequestSender;
-import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
+import com.homes.zipsai.conversation.outbox.ChatbotReplyRequestPublisher;
 import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.global.logging.StructuredLogger;
 
@@ -78,10 +73,7 @@ class ConversationReplyServiceTest {
     StructuredLogger structuredLogger;
 
     @Mock
-    ChatbotReplyOutboxRepository chatbotReplyOutboxRepository;
-
-    @Mock
-    ChatbotReplyRequestSender chatbotReplyRequestSender;
+    ChatbotReplyRequestPublisher chatbotReplyRequestPublisher;
 
     ConversationReplyService conversationReplyService;
 
@@ -89,7 +81,7 @@ class ConversationReplyServiceTest {
     void setUp() {
         conversationReplyService = new ConversationReplyService(conversationService, aiConverseClient,
             redisMessagePublisher, new ChatbotReplyPubSubProperties(CHANNEL), conversationReplyLock,
-            chatbotReplyShutdownSignal, structuredLogger, chatbotReplyOutboxRepository, chatbotReplyRequestSender);
+            chatbotReplyShutdownSignal, structuredLogger, chatbotReplyRequestPublisher);
     }
 
     @AfterEach
@@ -100,11 +92,10 @@ class ConversationReplyServiceTest {
     @Test
     @DisplayName("브로커가 답변 요청을 확인하면 발행 완료를 기록한다")
     void marksPublishedWhenBrokerConfirms() {
-        ChatbotReplyOutbox outbox = outbox();
-        given(chatbotReplyOutboxRepository.findById(EVENT_ID)).willReturn(Optional.of(outbox));
-        given(chatbotReplyRequestSender.sendBatch(List.of(outbox))).willReturn(Set.of(EVENT_ID));
+        PendingAiReply pendingReply = publishedReply();
+        given(chatbotReplyRequestPublisher.publish(pendingReply)).willReturn(true);
 
-        conversationReplyService.publishReplyRequest(EVENT_ID);
+        conversationReplyService.publishReplyRequest(pendingReply);
 
         then(conversationService).should().markReplyPublished(EVENT_ID, 0);
     }
@@ -112,11 +103,10 @@ class ConversationReplyServiceTest {
     @Test
     @DisplayName("브로커가 답변 요청을 확인하지 않으면 발행 완료를 기록하지 않는다")
     void doesNotMarkPublishedWhenBrokerDoesNotConfirm() {
-        ChatbotReplyOutbox outbox = outbox();
-        given(chatbotReplyOutboxRepository.findById(EVENT_ID)).willReturn(Optional.of(outbox));
-        given(chatbotReplyRequestSender.sendBatch(List.of(outbox))).willReturn(Set.of());
+        PendingAiReply pendingReply = publishedReply();
+        given(chatbotReplyRequestPublisher.publish(pendingReply)).willReturn(false);
 
-        conversationReplyService.publishReplyRequest(EVENT_ID);
+        conversationReplyService.publishReplyRequest(pendingReply);
 
         then(conversationService).should(never()).markReplyPublished(any(), anyInt());
     }
@@ -356,13 +346,8 @@ class ConversationReplyServiceTest {
         return pendingReply;
     }
 
-    private static ChatbotReplyOutbox outbox() {
-        Message residentMessage = new Message(null, "천장에서 물이 새요", SenderType.RESIDENT, MessageType.TEXT, TURN_ID);
-        ReflectionTestUtils.setField(residentMessage, "id", 20L);
-        ChatbotReplyOutbox outbox = ChatbotReplyOutbox.startFirstMessage(residentMessage, RESIDENT_ID, "trace-1",
-            LOCK_TOKEN, LocalDateTime.of(2026, 11, 2, 10, 0));
-        ReflectionTestUtils.setField(outbox, "id", EVENT_ID);
-        return outbox;
+    private static PendingAiReply publishedReply() {
+        return new PendingAiReply(EVENT_ID, 0, LOCK_TOKEN, RESIDENT_ID, null, null, null);
     }
 
     private static MessageResponse assistantMessage() {
