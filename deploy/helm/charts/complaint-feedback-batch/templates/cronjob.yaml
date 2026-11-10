@@ -1,0 +1,73 @@
+{{- include "v3.validate" . -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "v3.name" . }}
+  labels:
+    {{- include "v3.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.schedule | quote }}
+  timeZone: Asia/Seoul
+  suspend: {{ .Values.suspend }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 1800
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 7
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 14400
+      template:
+        metadata:
+          labels:
+            {{- include "v3.labels" . | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ printf "%s-sa" .Values.workload }}
+          automountServiceAccountToken: false
+          terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            fsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          nodeSelector:
+            {{- toYaml .Values.nodeSelector | nindent 12 }}
+          containers:
+            - name: {{ include "v3.name" . }}
+              image: {{ printf "%s:%s" .Values.image.repository (required "Set image.tag to a tested commit SHA before deployment" .Values.image.tag) | quote }}
+              imagePullPolicy: IfNotPresent
+              {{- with .Values.command }}
+              command:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              {{- with .Values.args }}
+              args:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              env:
+                - name: ZIPSAI_VERSION
+                  value: {{ .Values.image.tag | quote }}
+                {{- range $key, $value := .Values.env }}
+                - name: {{ $key }}
+                  value: {{ $value | quote }}
+                {{- end }}
+              {{- if .Values.externalSecret.enabled }}
+              envFrom:
+                - secretRef:
+                    name: {{ printf "%s-secret" .Values.workload }}
+              {{- end }}
+              resources:
+                {{- toYaml .Values.resources | nindent 16 }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: [ALL]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}

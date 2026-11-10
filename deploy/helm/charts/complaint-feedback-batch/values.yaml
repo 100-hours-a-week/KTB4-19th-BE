@@ -1,0 +1,71 @@
+workload: ''
+environment: ''
+component: batch
+image:
+  repository: 929368845727.dkr.ecr.ap-northeast-2.amazonaws.com/zipsai-backend
+  tag: ''
+command: []
+args: []
+replicaCount: 1
+containerPort: 8080
+service:
+  enabled: false
+  port: 8080
+  annotations: {}
+env: {}
+externalSecret:
+  enabled: true
+  forceSync: '1'
+  parameters: {}
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: '1'
+    memory: 2Gi
+nodeSelector:
+  kubernetes.io/os: linux
+  kubernetes.io/arch: amd64
+  environment: staging
+  role: general
+tolerations: []
+spread:
+  enabled: false
+hpa:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 12
+  targetCPUUtilizationPercentage: 70
+pdb:
+  enabled: false
+  minAvailable: 1
+rollingUpdate:
+  maxSurge: 1
+  maxUnavailable: 0
+terminationGracePeriodSeconds: 150
+preStopSeconds: 0
+probes:
+  startup:
+    httpGet:
+      path: /api/actuator/health/liveness
+      port: http
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 12
+  readiness:
+    httpGet:
+      path: /api/actuator/health/readiness
+      port: http
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  liveness:
+    httpGet:
+      path: /api/actuator/health/liveness
+      port: http
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+schedule: 0 0 * * *
+suspend: true
