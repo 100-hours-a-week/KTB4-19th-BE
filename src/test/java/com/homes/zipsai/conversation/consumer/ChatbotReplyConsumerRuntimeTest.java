@@ -9,6 +9,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 
 import java.time.Duration;
@@ -16,12 +17,13 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -35,6 +37,7 @@ import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.context.LifecycleAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.ClassPathBeanDefinitionScanner;
 import org.springframework.context.support.DefaultLifecycleProcessor;
@@ -90,7 +93,8 @@ class ChatbotReplyConsumerRuntimeTest {
     private final AiConverseClient aiConverseClient = mock(AiConverseClient.class);
     private final ChatbotReplyOutboxRepository outboxRepository = mock(ChatbotReplyOutboxRepository.class);
     private final ChatbotReplyShutdownSignal shutdownSignal = new ChatbotReplyShutdownSignal();
-    private final AtomicReference<Consumer> receiver = new AtomicReference<>();
+    private final AtomicInteger consumerSequence = new AtomicInteger();
+    private final Map<String, Consumer> receivers = new ConcurrentHashMap<>();
     private final CountDownLatch subscribed = new CountDownLatch(1);
     private final CountDownLatch canceled = new CountDownLatch(1);
     private final ConversationReplyService replyService = new ConversationReplyService(conversationService,
@@ -102,6 +106,7 @@ class ChatbotReplyConsumerRuntimeTest {
         new ChatbotReplyWorkerProperties(Duration.ofSeconds(130), Duration.ofSeconds(280)));
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
+        .withInitializer(new ConfigDataApplicationContextInitializer())
         .withInitializer(context -> {
             ClassPathBeanDefinitionScanner scanner = new ClassPathBeanDefinitionScanner(
                 (BeanDefinitionRegistry) context.getBeanFactory(), true, context.getEnvironment(), context);
@@ -119,7 +124,7 @@ class ChatbotReplyConsumerRuntimeTest {
         .withBean(ChatbotReplyShutdownSignal.class, () -> shutdownSignal)
         .withUserConfiguration(ChatbotReplyScheduler.class, ChatbotReplyRelayScheduler.class,
             RelayPropertiesConfiguration.class)
-        .withPropertyValues("app.conversation.reply-consumer.queue=" + QUEUE,
+        .withPropertyValues("spring.config.location=file:src/main/resources/application.properties",
             "app.conversation.reply-worker.enabled=true");
 
     @BeforeEach
@@ -131,16 +136,19 @@ class ChatbotReplyConsumerRuntimeTest {
         given(channel.queueDeclarePassive(QUEUE)).willReturn(mock(AMQP.Queue.DeclareOk.class));
         doAnswer(invocation -> {
             Consumer consumer = invocation.getArgument(6);
-            receiver.set(consumer);
-            consumer.handleConsumeOk(CONSUMER_TAG);
+            int index = consumerSequence.getAndIncrement();
+            String tag = index == 0 ? CONSUMER_TAG : CONSUMER_TAG + "-" + index;
+            receivers.put(tag, consumer);
+            consumer.handleConsumeOk(tag);
             subscribed.countDown();
-            return CONSUMER_TAG;
+            return tag;
         }).when(channel).basicConsume(eq(QUEUE), eq(false), anyString(), anyBoolean(), anyBoolean(), any(), any());
         doAnswer(invocation -> {
-            receiver.get().handleCancelOk(CONSUMER_TAG);
+            String tag = invocation.getArgument(0);
+            receivers.get(tag).handleCancelOk(tag);
             canceled.countDown();
             return null;
-        }).when(channel).basicCancel(CONSUMER_TAG);
+        }).when(channel).basicCancel(anyString());
     }
 
     @Test
@@ -174,10 +182,10 @@ class ChatbotReplyConsumerRuntimeTest {
     }
 
     @Test
-    @DisplayName("Consumer 실행은 설정한 큐와 기존 수동 ACK Listener를 등록하고 유효 마감까지 종료를 기다린다")
+    @DisplayName("Helm Consumer 설정으로 요청 큐를 수동 ACK로 구독하고 종료 대기 시간을 유지한다")
     void registersManualConsumerWithShutdownBudget() {
-        contextRunner.withPropertyValues("app.conversation.reply-consumer.enabled=true",
-            "app.conversation.reply-relay.enabled=true").run(context -> {
+        contextRunner.withPropertyValues("APP_RUNTIME_MODE=consumer", "RABBITMQ_REPLY_QUEUE=" + QUEUE,
+            "RABBITMQ_PREFETCH=1", "RABBITMQ_CONSUMER_CONCURRENCY=8").run(context -> {
                 assertThat(context).hasNotFailed();
 
                 assertThat(context).hasSingleBean(AbstractMessageListenerContainer.class);
@@ -190,6 +198,8 @@ class ChatbotReplyConsumerRuntimeTest {
                 assertThat(container.getAcknowledgeMode()).isEqualTo(AcknowledgeMode.MANUAL);
 
                 assertThat(subscribed.await(5, TimeUnit.SECONDS)).isTrue();
+
+                then(channel).should(timeout(5000).times(8)).basicQos(1, false);
 
                 Long shutdownTimeout = ReflectionTestUtils.invokeMethod(container, "getShutdownTimeout");
                 assertThat(shutdownTimeout).isGreaterThanOrEqualTo(Duration.ofSeconds(130).toMillis());
@@ -204,7 +214,7 @@ class ChatbotReplyConsumerRuntimeTest {
     @Test
     @DisplayName("Consumer 역할에서는 배치와 Relay 설정이 켜져 있어도 두 Scheduler를 등록하지 않는다")
     void doesNotRegisterBatchOrRelayInConsumerRole() {
-        contextRunner.withPropertyValues("app.conversation.reply-consumer.enabled=true",
+        contextRunner.withPropertyValues("CHATBOT_REPLY_CONSUMER_ENABLED=true", "CHATBOT_REPLY_REQUEST_QUEUE=" + QUEUE,
             "app.conversation.reply-relay.enabled=true").run(context -> {
                 assertThat(context).hasNotFailed();
 
@@ -217,7 +227,8 @@ class ChatbotReplyConsumerRuntimeTest {
     @Test
     @DisplayName("정상 종료는 신규 수신을 멈춘 뒤 진행 중 AI 응답의 DB 재저장·ACK까지 기다린다")
     void drainsReplyBeforeSignalingShutdown() {
-        contextRunner.withPropertyValues("app.conversation.reply-consumer.enabled=true").run(context -> {
+        contextRunner.withPropertyValues("CHATBOT_REPLY_CONSUMER_ENABLED=true",
+            "CHATBOT_REPLY_REQUEST_QUEUE=" + QUEUE).run(context -> {
             assertThat(context).hasNotFailed();
 
             assertThat(context).hasSingleBean(AbstractMessageListenerContainer.class);
@@ -255,7 +266,7 @@ class ChatbotReplyConsumerRuntimeTest {
 
             try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
                 Future<?> delivery = executor.submit(() -> {
-                    receiver.get().handleDelivery(CONSUMER_TAG, new Envelope(DELIVERY_TAG, false, "", QUEUE),
+                    receivers.get(CONSUMER_TAG).handleDelivery(CONSUMER_TAG, new Envelope(DELIVERY_TAG, false, "", QUEUE),
                         new AMQP.BasicProperties.Builder().contentType("application/json").build(),
                         new ObjectMapper().writeValueAsBytes(Map.of("eventId", EVENT_ID, "request", request)));
                     return null;
