@@ -1,6 +1,8 @@
 package com.homes.zipsai.conversation;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.given;
 
 import java.util.Map;
 
@@ -54,6 +56,7 @@ class ResidentConversationApiTest {
     @BeforeEach
     void setUp() {
         resident = conversationTestFixture.authenticatedAs(conversationTestFixture.livingResident("302"));
+        given(conversationReplyLock.acquire(any())).willReturn("lock-token");
     }
 
     @Test
@@ -184,15 +187,19 @@ class ResidentConversationApiTest {
     }
 
     private MvcTestResult startConversation(RequestPostProcessor authentication, String content) {
-        return mockMvcTester.post().uri(CONVERSATIONS).with(authentication)
+        MvcTestResult result = mockMvcTester.post().uri(CONVERSATIONS).with(authentication)
             .contentType(MediaType.APPLICATION_JSON).content(messageBody(content))
             .exchange();
+        conversationTestFixture.replyToPendingMessages();
+        return result;
     }
 
     private MvcTestResult sendMessage(RequestPostProcessor authentication, long conversationId, String content) {
-        return mockMvcTester.post().uri(CONVERSATIONS + "/{id}/messages", conversationId).with(authentication)
-            .contentType(MediaType.APPLICATION_JSON).content(messageBody(content))
+        MvcTestResult result = mockMvcTester.post().uri(CONVERSATIONS + "/{id}/messages", conversationId)
+            .with(authentication).contentType(MediaType.APPLICATION_JSON).content(messageBody(content))
             .exchange();
+        conversationTestFixture.replyToPendingMessages();
+        return result;
     }
 
     private MvcTestResult getMessages(RequestPostProcessor authentication, long conversationId) {

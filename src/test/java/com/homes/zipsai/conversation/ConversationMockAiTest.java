@@ -20,7 +20,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.task.SyncTaskExecutor;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.core.task.TaskExecutor;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
@@ -37,11 +39,13 @@ import com.homes.zipsai.conversation.ai.AiConverseRequest;
 import com.homes.zipsai.conversation.ai.AiConverseResponse;
 import com.homes.zipsai.conversation.ai.AiRoute;
 import com.homes.zipsai.conversation.domain.Message;
+import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
 import com.homes.zipsai.conversation.service.ConversationReplyLock;
 import com.homes.zipsai.global.config.AsyncConfig;
 
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest
@@ -69,6 +73,9 @@ class ConversationMockAiTest {
     @Autowired
     MessageRepository messageRepository;
 
+    @Autowired
+    ChatbotReplyOutboxRepository chatbotReplyOutboxRepository;
+
     @MockitoBean
     AiConverseClient aiConverseClient;
 
@@ -90,6 +97,7 @@ class ConversationMockAiTest {
         given(s3StorageService.prepareDownload(anyString(), any()))
             .willAnswer(invocation ->
                 new S3StorageService.PresignedDownload("https://s3.test/" + invocation.getArgument(0)));
+        given(conversationReplyLock.acquire(any())).willReturn("lock-token");
     }
 
     @Test
@@ -127,6 +135,32 @@ class ConversationMockAiTest {
                 """.formatted(firstImage, secondImage));
         assertThat(result).bodyJson().extractingPath("$.data.messages[0].attachments[0].fileUrl")
             .asString().startsWith("https://s3.test/");
+    }
+
+    @Test
+    @DisplayName("첫 메시지와 후속 메시지의 답변 이벤트에 AI에 보낸 요청과 같은 JSON이 저장된다")
+    void savesRequestSentToAiAsMessageData() throws Exception {
+        String email = conversationTestFixture.livingResident("303");
+        RequestPostProcessor resident = conversationTestFixture.authenticatedAs(email);
+        long image = conversationTestFixture.uploadedFile(email, "jpg");
+        given(aiConverseClient.converse(any(), any())).willAnswer(ConversationMockAiTest::collectingReply);
+
+        long conversationId = startConversation(resident, "천장에서 물이 새요", image);
+        sendMessage(resident, conversationId, "안방이요");
+
+        ArgumentCaptor<AiConverseRequest> aiConverseRequestCaptor = ArgumentCaptor.forClass(AiConverseRequest.class);
+        then(aiConverseClient).should(times(2)).converse(aiConverseRequestCaptor.capture(), any());
+        List<JsonNode> sentRequests = aiConverseRequestCaptor.getAllValues().stream()
+            .map(request -> objectMapper.readTree(objectMapper.writeValueAsString(request)))
+            .toList();
+
+        List<JsonNode> savedRequests = chatbotReplyOutboxRepository.findAll(Sort.by("id")).stream()
+            .filter(outbox -> outbox.getMessageData() != null)
+            .map(outbox -> objectMapper.readTree(outbox.getMessageData()))
+            .filter(request -> request.get("conversation_id").asString().equals(String.valueOf(conversationId)))
+            .toList();
+
+        assertThat(savedRequests).containsExactlyElementsOf(sentRequests);
     }
 
     @Test
@@ -215,6 +249,25 @@ class ConversationMockAiTest {
                 AiConverseResponse.Result.builder().missingFields(List.of("location")).build()));
     }
 
+    @Test
+    @DisplayName("새 대화방의 답변 잠금을 잡지 못하면 대화방, 메시지, 답변 이벤트를 모두 남기지 않는다")
+    void rollsBackFirstMessageWhenReplyLockCannotBeAcquired() {
+        String email = conversationTestFixture.livingResident("302");
+        RequestPostProcessor resident = conversationTestFixture.authenticatedAs(email);
+        long conversations = conversationRepository.count();
+        long messages = messageRepository.count();
+        long events = chatbotReplyOutboxRepository.count();
+        given(conversationReplyLock.acquire(any())).willThrow(new RedisConnectionFailureException("Redis 연결 실패"));
+
+        MvcTestResult result = postConversation(resident, "천장에서 물이 새요");
+
+        assertThat(result).hasStatus5xxServerError();
+        assertThat(conversationRepository.count()).isEqualTo(conversations);
+        assertThat(messageRepository.count()).isEqualTo(messages);
+        assertThat(chatbotReplyOutboxRepository.count()).isEqualTo(events);
+        then(aiConverseClient).shouldHaveNoInteractions();
+    }
+
     private long startConversation(RequestPostProcessor resident, String content, Long... attachmentIds)
         throws Exception {
         MvcTestResult created = postConversation(resident, content, attachmentIds);
@@ -224,16 +277,20 @@ class ConversationMockAiTest {
     }
 
     private MvcTestResult postConversation(RequestPostProcessor resident, String content, Long... attachmentIds) {
-        return mockMvcTester.post().uri(CONVERSATIONS).with(resident)
+        MvcTestResult result = mockMvcTester.post().uri(CONVERSATIONS).with(resident)
             .contentType(MediaType.APPLICATION_JSON).content(messageBody(content, attachmentIds))
             .exchange();
+        conversationTestFixture.replyToPendingMessages();
+        return result;
     }
 
     private MvcTestResult sendMessage(RequestPostProcessor resident, long conversationId, String content,
                                       Long... attachmentIds) {
-        return mockMvcTester.post().uri(CONVERSATIONS + "/{id}/messages", conversationId).with(resident)
-            .contentType(MediaType.APPLICATION_JSON).content(messageBody(content, attachmentIds))
+        MvcTestResult result = mockMvcTester.post().uri(CONVERSATIONS + "/{id}/messages", conversationId)
+            .with(resident).contentType(MediaType.APPLICATION_JSON).content(messageBody(content, attachmentIds))
             .exchange();
+        conversationTestFixture.replyToPendingMessages();
+        return result;
     }
 
     private MvcTestResult createComplaint(RequestPostProcessor resident, long conversationId) {

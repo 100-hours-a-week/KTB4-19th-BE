@@ -10,6 +10,8 @@ import org.slf4j.MDC;
 import org.springframework.core.NestedExceptionUtils;
 import org.springframework.stereotype.Component;
 
+import com.homes.zipsai.conversation.ai.error.AiConverseException;
+import com.homes.zipsai.global.exception.ApiException;
 import com.homes.zipsai.global.exception.InvalidPubSubFieldException;
 
 import tools.jackson.core.JacksonException;
@@ -88,6 +90,28 @@ public class StructuredLogger {
             fields.put("root_cause_type", NestedExceptionUtils.getMostSpecificCause(exception).getClass().getName());
             fields.put("level", "ERROR");
             log(event("building_coordinate_retry_error", MDC.get("traceId"), null, fields));
+        } catch (RuntimeException ignored) {
+
+        }
+    }
+
+    public void chatbotReplyFailed(Long eventId, Long conversationId, String turnId, Throwable exception) {
+        try {
+            Map<String, Object> fields = new LinkedHashMap<>();
+            fields.put("event_id", eventId);
+            fields.put("conversation_id", conversationId);
+            fields.put("turn_id", turnId);
+            fields.put("outcome", "fail");
+            fields.put("error_code", exception instanceof ApiException apiException
+                ? apiException.code : "INTERNAL_SERVER_ERROR");
+            if (exception instanceof AiConverseException aiException) {
+                fields.put("error_type", aiException.getErrorType().name());
+                fields.put("retry_policy", aiException.getErrorType().getRetryPolicy().name());
+            }
+            fields.put("exception_type", exception.getClass().getName());
+            fields.put("root_cause_type", NestedExceptionUtils.getMostSpecificCause(exception).getClass().getName());
+            fields.put("level", "ERROR");
+            log(event("chatbot_reply_error", MDC.get("traceId"), null, fields));
         } catch (RuntimeException ignored) {
 
         }

@@ -21,7 +21,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.homes.zipsai.conversation.ai.AiConverseRequest;
@@ -60,28 +59,26 @@ class ConversationMessageServiceTest {
     }
 
     @Test
-    @DisplayName("첫 메시지를 저장하면 AI 답변을 맡기고 대화 ID를 바로 돌려준다")
-    void handsOverReplyAndReturnsConversationId() {
-        PendingAiReply pendingAiReply = pendingAiReply(true);
+    @DisplayName("첫 메시지를 저장하면 답변 요청을 발행하고 대화 ID를 바로 돌려준다")
+    void publishesReplyRequestAndReturnsConversationId() {
+        PendingAiReply pendingAiReply = pendingAiReply();
         given(conversationService.saveFirstMessage(RESIDENT_ID, "천장에서 물이 새요", List.of()))
             .willReturn(pendingAiReply);
-        given(conversationReplyLock.acquire(CONVERSATION_ID)).willReturn(LOCK_TOKEN);
 
         ConversationCreateResponse response =
             conversationMessageService.createConversation(RESIDENT_ID, "천장에서 물이 새요", List.of());
 
         assertThat(response.conversationId()).isEqualTo(CONVERSATION_ID);
-        InOrder inOrder = inOrder(conversationReplyLock, conversationReplyService);
-        inOrder.verify(conversationReplyLock).acquire(CONVERSATION_ID);
-        inOrder.verify(conversationReplyService).reply(RESIDENT_ID, pendingAiReply, LOCK_TOKEN);
+        then(conversationReplyService).should().publishReplyRequest(pendingAiReply);
+        then(conversationReplyLock).shouldHaveNoInteractions();
     }
 
     @Test
-    @DisplayName("메시지를 저장하면 AI 답변을 맡기고 저장한 메시지를 바로 돌려준다")
-    void handsOverReplyAndReturnsSavedMessage() {
-        PendingAiReply pendingAiReply = pendingAiReply(false);
+    @DisplayName("메시지를 저장하면 답변 요청을 발행하고 저장한 메시지를 바로 돌려준다")
+    void publishesReplyRequestAndReturnsSavedMessage() {
+        PendingAiReply pendingAiReply = pendingAiReply();
         given(conversationReplyLock.acquire(CONVERSATION_ID)).willReturn(LOCK_TOKEN);
-        given(conversationService.saveNextMessage(RESIDENT_ID, CONVERSATION_ID, "안방이요", List.of()))
+        given(conversationService.saveNextMessage(RESIDENT_ID, CONVERSATION_ID, "안방이요", List.of(), LOCK_TOKEN))
             .willReturn(pendingAiReply);
 
         MessageSendResponse response =
@@ -91,8 +88,9 @@ class ConversationMessageServiceTest {
         assertThat(response.conversationId()).isEqualTo(CONVERSATION_ID);
         InOrder inOrder = inOrder(conversationReplyLock, conversationService, conversationReplyService);
         inOrder.verify(conversationReplyLock).acquire(CONVERSATION_ID);
-        inOrder.verify(conversationService).saveNextMessage(RESIDENT_ID, CONVERSATION_ID, "안방이요", List.of());
-        inOrder.verify(conversationReplyService).reply(RESIDENT_ID, pendingAiReply, LOCK_TOKEN);
+        inOrder.verify(conversationService).saveNextMessage(RESIDENT_ID, CONVERSATION_ID, "안방이요", List.of(),
+            LOCK_TOKEN);
+        inOrder.verify(conversationReplyService).publishReplyRequest(pendingAiReply);
     }
 
     @Test
@@ -105,41 +103,26 @@ class ConversationMessageServiceTest {
             conversationMessageService.sendMessage(RESIDENT_ID, CONVERSATION_ID, "두 번째 메시지", List.of()))
             .isInstanceOf(ConflictException.class)
             .hasFieldOrPropertyWithValue("code", "CONVERSATION_BUSY");
-        then(conversationService).should(never()).saveNextMessage(anyLong(), anyLong(), anyString(), anyList());
-        then(conversationReplyService).should(never()).reply(any(), any(), any());
+        then(conversationService).should(never())
+            .saveNextMessage(anyLong(), anyLong(), anyString(), anyList(), anyString());
+        then(conversationReplyService).should(never()).publishReplyRequest(any());
     }
 
     @Test
-    @DisplayName("메시지를 저장하지 못하면 대화방 답변 잠금을 풀고 AI에 맡기지 않는다")
+    @DisplayName("메시지를 저장하지 못하면 대화방 답변 잠금을 풀고 답변 요청을 발행하지 않는다")
     void releasesLockWhenMessageCannotBeSaved() {
         given(conversationReplyLock.acquire(CONVERSATION_ID)).willReturn(LOCK_TOKEN);
-        given(conversationService.saveNextMessage(RESIDENT_ID, CONVERSATION_ID, "안방이요", List.of()))
+        given(conversationService.saveNextMessage(RESIDENT_ID, CONVERSATION_ID, "안방이요", List.of(), LOCK_TOKEN))
             .willThrow(new NotFoundException(NotFoundException.Resource.CONVERSATION));
 
         assertThatThrownBy(() ->
             conversationMessageService.sendMessage(RESIDENT_ID, CONVERSATION_ID, "안방이요", List.of()))
             .isInstanceOf(NotFoundException.class);
         then(conversationReplyLock).should().release(CONVERSATION_ID, LOCK_TOKEN);
-        then(conversationReplyService).should(never()).reply(any(), any(), any());
+        then(conversationReplyService).should(never()).publishReplyRequest(any());
     }
 
-    @Test
-    @DisplayName("첫 메시지의 대화방 답변 잠금을 잡지 못하면 저장한 대화와 메시지를 지우고 AI에 맡기지 않는다")
-    void discardsFirstMessageWhenLockCannotBeAcquired() {
-        PendingAiReply pendingAiReply = pendingAiReply(true);
-        given(conversationService.saveFirstMessage(RESIDENT_ID, "천장에서 물이 새요", List.of()))
-            .willReturn(pendingAiReply);
-        willThrow(new RedisConnectionFailureException("Redis 연결 실패"))
-            .given(conversationReplyLock).acquire(CONVERSATION_ID);
-
-        assertThatThrownBy(() ->
-            conversationMessageService.createConversation(RESIDENT_ID, "천장에서 물이 새요", List.of()))
-            .isInstanceOf(RedisConnectionFailureException.class);
-        then(conversationService).should().discardUnansweredMessage(pendingAiReply);
-        then(conversationReplyService).should(never()).reply(any(), any(), any());
-    }
-
-    private static PendingAiReply pendingAiReply(boolean newConversation) {
+    private static PendingAiReply pendingAiReply() {
         Conversation conversation = Conversation.builder()
             .type(ConversationType.INQUIRY)
             .title("천장에서 물이 새요")
@@ -149,6 +132,6 @@ class ConversationMessageServiceTest {
             new MessageResponse(20L, SenderType.RESIDENT, MessageType.TEXT, "천장에서 물이 새요", List.of(), null, null);
         AiConverseRequest aiRequest =
             new AiConverseRequest(null, null, null, null, "turn-1", null, null, null, null, List.of(), null);
-        return new PendingAiReply(conversation, residentMessage, newConversation, null, aiRequest);
+        return new PendingAiReply(900L, 0, LOCK_TOKEN, RESIDENT_ID, conversation, residentMessage, aiRequest);
     }
 }

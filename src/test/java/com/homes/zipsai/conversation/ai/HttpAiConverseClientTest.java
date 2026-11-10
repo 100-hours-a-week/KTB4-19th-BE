@@ -2,15 +2,22 @@ package com.homes.zipsai.conversation.ai;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.mock;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withException;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import java.io.IOException;
 import java.io.OutputStream;
+import java.net.ConnectException;
 import java.net.InetSocketAddress;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -18,10 +25,16 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.MDC;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -31,10 +44,16 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.test.web.client.ResponseCreator;
 import org.springframework.web.client.RestClient;
 
+import com.homes.zipsai.conversation.ai.error.AiConverseErrorType;
+import com.homes.zipsai.conversation.ai.error.AiConverseException;
 import com.homes.zipsai.global.exception.AiUnavailableException;
+import com.homes.zipsai.global.exception.ApiException;
+import com.homes.zipsai.global.exception.InternalServerException;
 import com.homes.zipsai.global.exception.TooManyRequestsException;
 import com.sun.net.httpserver.HttpServer;
 
+import tools.jackson.core.JsonGenerator;
+import tools.jackson.databind.exc.InvalidDefinitionException;
 import tools.jackson.databind.json.JsonMapper;
 
 class HttpAiConverseClientTest {
@@ -127,29 +146,37 @@ class HttpAiConverseClientTest {
     }
 
     @Test
-    @DisplayName("AI 서버가 답변 도중 오류 이벤트를 보내면 AI 사용 불가 예외로 바꾼다")
-    void mapsErrorEventToAiUnavailable() {
+    @DisplayName("AI 스트림의 명시적 오류는 실패 횟수를 늘릴 원인으로 보존한다")
+    void classifiesStreamError() {
         mockRestServiceServer.expect(requestTo(CONVERSE_STREAM_URL))
             .andRespond(withStream(status(), delta("관리비는 "),
                 "{\"type\":\"error\",\"message\":\"응답 생성에 실패했습니다.\"}", done()));
 
         assertThatThrownBy(() -> httpAiConverseClient.converse(request(), delta -> { }))
-            .isInstanceOf(AiUnavailableException.class);
+            .isInstanceOfSatisfying(AiConverseException.class, exception -> {
+                assertThat(exception.getErrorType()).isEqualTo(AiConverseErrorType.STREAM_ERROR);
+
+                assertThat(exception.code).isEqualTo("AI_UNAVAILABLE");
+            });
     }
 
     @Test
-    @DisplayName("최종 응답 없이 스트림이 끝나면 AI 사용 불가 예외로 바꾼다")
-    void mapsStreamWithoutCompleteToAiUnavailable() {
+    @DisplayName("정상 연결에서 최종 응답 없이 끝난 스트림은 연결 실패와 구분한다")
+    void classifiesIncompleteStream() {
         mockRestServiceServer.expect(requestTo(CONVERSE_STREAM_URL))
             .andRespond(withStream(status(), delta("관리비는 "), done()));
 
         assertThatThrownBy(() -> httpAiConverseClient.converse(request(), delta -> { }))
-            .isInstanceOf(AiUnavailableException.class);
+            .isInstanceOfSatisfying(AiConverseException.class, exception -> {
+                assertThat(exception.getErrorType()).isEqualTo(AiConverseErrorType.INCOMPLETE_STREAM);
+
+                assertThat(exception.code).isEqualTo("AI_UNAVAILABLE");
+            });
     }
 
     @Test
-    @DisplayName("답변 조각이 읽기 제한 시간 넘게 오지 않으면 AI 사용 불가 예외로 바꾼다")
-    void mapsStalledStreamToAiUnavailable() throws Exception {
+    @DisplayName("답변 조각이 읽기 제한 시간 넘게 오지 않으면 최종 실패할 타임아웃으로 구분한다")
+    void classifiesStalledStreamAsTimeout() throws Exception {
         CountDownLatch testFinished = new CountDownLatch(1);
         HttpServer stalledServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         stalledServer.createContext(CONVERSE_STREAM_PATH, exchange -> {
@@ -169,7 +196,9 @@ class HttpAiConverseClientTest {
 
         try {
             assertThatThrownBy(() -> client.converse(request(), delta -> { }))
-                .isInstanceOf(AiUnavailableException.class);
+                .isInstanceOfSatisfying(AiConverseException.class, exception ->
+                    assertThat(exception.getErrorType()).isEqualTo(AiConverseErrorType.TIMEOUT));
+
             assertThat(Duration.ofNanos(System.nanoTime() - startedNanos)).isLessThan(Duration.ofSeconds(3));
         } finally {
             testFinished.countDown();
@@ -340,7 +369,9 @@ class HttpAiConverseClientTest {
 
         try {
             assertThatThrownBy(() -> httpAiConverseClient.converse(request(), delta -> { }))
-                .isInstanceOf(AiUnavailableException.class);
+                .isInstanceOfSatisfying(AiConverseException.class, exception ->
+                    assertThat(exception.getErrorType()).isEqualTo(AiConverseErrorType.RESPONSE_JSON_ERROR));
+
             assertThat(appender.list)
                 .anyMatch(event -> event.getFormattedMessage().contains("읽지 못했습니다")
                     && !event.getFormattedMessage().contains("12345"));
@@ -409,24 +440,101 @@ class HttpAiConverseClientTest {
         mockRestServiceServer.verify();
     }
 
-    @Test
-    @DisplayName("AI 서버가 요청 제한으로 거절하면 요청 과다 예외로 바꾼다")
-    void mapsRateLimitToTooManyRequests() {
+    @ParameterizedTest
+    @CsvSource({
+        "429, HTTP_ERROR",
+        "500, HTTP_ERROR",
+        "400, HTTP_ERROR",
+        "503, SERVICE_UNAVAILABLE",
+        "504, GATEWAY_TIMEOUT"
+    })
+    @DisplayName("AI HTTP 오류의 원인을 구분하면서 기존 외부 오류 응답을 유지한다")
+    void classifiesHttpErrorWithoutChangingPublicError(int status, AiConverseErrorType errorType) {
         mockRestServiceServer.expect(requestTo(CONVERSE_STREAM_URL))
-            .andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
+            .andRespond(withStatus(HttpStatus.valueOf(status)));
+        ApiException expected = switch (status) {
+            case 429 -> new TooManyRequestsException();
+            case 503, 504 -> new AiUnavailableException();
+            default -> new InternalServerException();
+        };
 
         assertThatThrownBy(() -> httpAiConverseClient.converse(request(), delta -> { }))
-            .isInstanceOf(TooManyRequestsException.class);
+            .isInstanceOfSatisfying(AiConverseException.class, exception -> {
+                assertThat(exception.getErrorType()).isEqualTo(errorType);
+
+                assertThat(exception.status).isEqualTo(expected.status);
+
+                assertThat(exception.code).isEqualTo(expected.code);
+
+                assertThat(exception.getMessage()).isEqualTo(expected.getMessage());
+
+                assertThat(exception.details).isEqualTo(expected.details);
+            });
+    }
+
+    @ParameterizedTest
+    @MethodSource("connectionFailures")
+    @DisplayName("연결 거절과 DNS 오류 및 타임아웃은 원인 예외를 보존하며 최종 실패로 구분한다")
+    void classifiesConnectionFailure(IOException cause, AiConverseErrorType errorType) {
+        mockRestServiceServer.expect(requestTo(CONVERSE_STREAM_URL))
+            .andRespond(withException(cause));
+
+        assertThatThrownBy(() -> httpAiConverseClient.converse(request(), delta -> { }))
+            .isInstanceOfSatisfying(AiConverseException.class, exception -> {
+                assertThat(exception.getErrorType()).isEqualTo(errorType);
+
+                assertThat(exception).hasRootCause(cause);
+            });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "{\"type\":\"complete\",\"response\":",
+        "{\"type\":\"complete\",\"response\":{\"data\":12345}}",
+        "{\"type\":\"complete\",\"response\":{\"data\":{\"route\":\"unknown\"}}}"
+    })
+    @DisplayName("응답 JSON 문법과 필드 타입 및 enum 값 오류는 요청 생성 실패와 구분한다")
+    void classifiesUnreadableResponse(String event) {
+        mockRestServiceServer.expect(requestTo(CONVERSE_STREAM_URL))
+            .andRespond(withStream(event));
+
+        assertThatThrownBy(() -> httpAiConverseClient.converse(request(), delta -> { }))
+            .isInstanceOfSatisfying(AiConverseException.class, exception ->
+                assertThat(exception.getErrorType()).isEqualTo(AiConverseErrorType.RESPONSE_JSON_ERROR));
     }
 
     @Test
-    @DisplayName("AI 서버가 응답하지 못하면 AI 사용 불가 예외로 바꾼다")
-    void mapsGatewayTimeoutToAiUnavailable() {
-        mockRestServiceServer.expect(requestTo(CONVERSE_STREAM_URL))
-            .andRespond(withStatus(HttpStatus.GATEWAY_TIMEOUT));
+    @DisplayName("요청 JSON 생성 실패는 AI를 호출하지 않고 실패 횟수를 유지할 백엔드 오류로 구분한다")
+    void classifiesRequestSerializationFailureBeforeCallingAi() {
+        JsonMapper mapper = mock(JsonMapper.class);
+        AiConverseRequest request = request();
+        InvalidDefinitionException cause = InvalidDefinitionException.from((JsonGenerator) null,
+            "Request cannot be serialized", JSON_MAPPER.constructType(AiConverseRequest.class));
+        given(mapper.writeValueAsString(request)).willThrow(cause);
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        HttpAiConverseClient client = new HttpAiConverseClient(builder.baseUrl(BASE_URL).build(),
+            CONVERSE_STREAM_PATH, mapper);
 
-        assertThatThrownBy(() -> httpAiConverseClient.converse(request(), delta -> { }))
-            .isInstanceOf(AiUnavailableException.class);
+        assertThatThrownBy(() -> client.converse(request, delta -> { }))
+            .isInstanceOfSatisfying(AiConverseException.class, exception -> {
+                assertThat(exception.getErrorType()).isEqualTo(AiConverseErrorType.REQUEST_SERIALIZATION_ERROR);
+
+                assertThat(exception.getErrorType().getRetryPolicy())
+                    .isEqualTo(AiConverseErrorType.RetryPolicy.UNLIMITED);
+
+                assertThat(exception).hasCause(cause);
+            });
+
+        server.verify();
+    }
+
+    private static Stream<Arguments> connectionFailures() {
+        return Stream.of(
+            Arguments.of(new ConnectException("Connection refused"), AiConverseErrorType.CONNECTION_FAILURE),
+            Arguments.of(new UnknownHostException("ai.test"), AiConverseErrorType.CONNECTION_FAILURE),
+            Arguments.of(new SocketTimeoutException("Read timed out"), AiConverseErrorType.TIMEOUT),
+            Arguments.of(new IOException("Connection reset"), AiConverseErrorType.CONNECTION_FAILURE));
     }
 
     private static ResponseCreator withStream(String... events) {

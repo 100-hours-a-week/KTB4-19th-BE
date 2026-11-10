@@ -17,6 +17,15 @@ public interface ConversationRepository extends JpaRepository<Conversation, Long
 
     Optional<Conversation> findByIdAndDeletedAtIsNull(Long id);
 
+    @Query(value = """
+        SELECT c.* FROM Conversations c JOIN Messages m ON m.conversation_id = c.conversation_id
+        WHERE m.message_id = :messageId AND m.sender_type = 'RESIDENT' AND m.deleted_at IS NULL
+            AND c.user_id = :userId AND c.deleted_at IS NULL
+        FOR UPDATE
+        """, nativeQuery = true)
+    Optional<Conversation> findByResidentMessageForUpdate(@Param("messageId") Long messageId,
+                                                         @Param("userId") Long userId);
+
     @Query("""
         select c from Conversation c
         where c.user.id = :userId and c.deletedAt is null

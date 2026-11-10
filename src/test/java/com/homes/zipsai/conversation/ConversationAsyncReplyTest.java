@@ -10,14 +10,13 @@ import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.invocation.InvocationOnMock;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -31,12 +30,7 @@ import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
-import com.homes.zipsai.common.service.RedisMessagePublisher;
-import com.homes.zipsai.conversation.ai.AiComplaintState;
-import com.homes.zipsai.conversation.ai.AiConverseClient;
-import com.homes.zipsai.conversation.ai.AiConverseRequest;
-import com.homes.zipsai.conversation.ai.AiConverseResponse;
-import com.homes.zipsai.conversation.ai.AiRoute;
+import com.homes.zipsai.conversation.outbox.ChatbotReplyRequestPublisher;
 import com.homes.zipsai.conversation.service.ConversationReplyLock;
 import com.homes.zipsai.global.logging.StructuredLogger;
 
@@ -59,28 +53,30 @@ class ConversationAsyncReplyTest {
     ConversationTestFixture conversationTestFixture;
 
     @MockitoBean
-    AiConverseClient aiConverseClient;
+    ChatbotReplyRequestPublisher chatbotReplyRequestPublisher;
 
     @MockitoBean
     ConversationReplyLock conversationReplyLock;
 
-    @MockitoBean
-    RedisMessagePublisher redisMessagePublisher;
-
     @MockitoSpyBean
     StructuredLogger structuredLogger;
 
+    @BeforeEach
+    void setUp() {
+        given(conversationReplyLock.acquire(any())).willReturn("lock-token");
+    }
+
     @Test
-    @DisplayName("AI 답변은 요청 스레드가 아닌 챗봇 가상 스레드에서 요청의 traceId를 이어받아 처리한다")
-    void repliesOnChatbotVirtualThreadWithRequestTraceId() throws Exception {
+    @DisplayName("답변 요청 발행은 요청 스레드가 아닌 챗봇 가상 스레드에서 요청의 traceId를 이어받아 처리한다")
+    void publishesReplyRequestOnChatbotVirtualThreadWithRequestTraceId() throws Exception {
         RequestPostProcessor resident =
             conversationTestFixture.authenticatedAs(conversationTestFixture.livingResident("302"));
-        CompletableFuture<Thread> aiThread = new CompletableFuture<>();
-        CompletableFuture<String> aiTraceId = new CompletableFuture<>();
-        given(aiConverseClient.converse(any(), any())).willAnswer(invocation -> {
-            aiThread.complete(Thread.currentThread());
-            aiTraceId.complete(MDC.get("traceId"));
-            return collectingReply(invocation);
+        CompletableFuture<Thread> publishThread = new CompletableFuture<>();
+        CompletableFuture<String> publishTraceId = new CompletableFuture<>();
+        given(chatbotReplyRequestPublisher.publish(any())).willAnswer(invocation -> {
+            publishThread.complete(Thread.currentThread());
+            publishTraceId.complete(MDC.get("traceId"));
+            return false;
         });
 
         MvcTestResult result = mockMvcTester.post().uri(CONVERSATIONS).with(resident)
@@ -89,19 +85,19 @@ class ConversationAsyncReplyTest {
             .exchange();
 
         assertThat(result).hasStatus(HttpStatus.ACCEPTED);
-        Thread thread = aiThread.get(5, TimeUnit.SECONDS);
+        Thread thread = publishThread.get(5, TimeUnit.SECONDS);
         assertThat(thread.isVirtual()).isTrue();
         assertThat(thread.getName()).startsWith("chatbot-reply-");
-        assertThat(aiTraceId.get(5, TimeUnit.SECONDS)).isEqualTo(result.getResponse().getHeader("X-Request-Id"));
-        then(redisMessagePublisher).should(timeout(5000)).publish(any(), any());
+        assertThat(publishTraceId.get(5, TimeUnit.SECONDS))
+            .isEqualTo(result.getResponse().getHeader("X-Request-Id"));
     }
 
     @Test
-    @DisplayName("AI 답변 작업이 끝나면 요청의 traceId로 작업 중 DB 시간과 작업 전체 시간을 남긴다")
-    void logsReplyTaskWithRequestTraceId() throws Exception {
+    @DisplayName("답변 요청 발행 작업이 끝나면 요청의 traceId로 작업 중 DB 시간과 작업 전체 시간을 남긴다")
+    void logsPublishTaskWithRequestTraceId() throws Exception {
         RequestPostProcessor resident =
             conversationTestFixture.authenticatedAs(conversationTestFixture.livingResident("302"));
-        given(aiConverseClient.converse(any(), any())).willAnswer(ConversationAsyncReplyTest::collectingReply);
+        given(chatbotReplyRequestPublisher.publish(any())).willReturn(false);
 
         MvcTestResult result = mockMvcTester.post().uri(CONVERSATIONS).with(resident)
             .contentType(MediaType.APPLICATION_JSON)
@@ -113,12 +109,5 @@ class ConversationAsyncReplyTest {
             .stageDone(eq(traceId), eq(CONVERSATIONS), eq("chatbot_reply"), anyLong(), eq("ok"), isNull());
         then(structuredLogger).should(times(2))
             .stageDone(eq(traceId), eq(CONVERSATIONS), eq("mysql"), anyLong(), eq("ok"), isNull());
-    }
-
-    private static AiConverseResponse collectingReply(InvocationOnMock invocation) {
-        AiConverseRequest request = invocation.getArgument(0);
-        return new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, request.turnId(),
-            new AiConverseResponse.Data(AiRoute.COMPLAINT, AiComplaintState.COLLECTING, "위치가 어디인가요?",
-                AiConverseResponse.Result.builder().missingFields(List.of("location")).build()));
     }
 }

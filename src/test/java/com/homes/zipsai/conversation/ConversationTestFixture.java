@@ -2,6 +2,7 @@ package com.homes.zipsai.conversation;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -18,6 +19,11 @@ import com.homes.zipsai.building.repository.BuildingRepository;
 import com.homes.zipsai.building.repository.RoomRepository;
 import com.homes.zipsai.common.domain.File;
 import com.homes.zipsai.common.repository.FileRepository;
+import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
+import com.homes.zipsai.conversation.domain.ChatbotReplyOutboxStatus;
+import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
+import com.homes.zipsai.conversation.service.ConversationReplyService;
+import com.homes.zipsai.conversation.service.ConversationService;
 import com.homes.zipsai.global.security.AuthPrincipal;
 import com.homes.zipsai.user.domain.TermsType;
 import com.homes.zipsai.user.domain.User;
@@ -33,15 +39,24 @@ public class ConversationTestFixture {
     private final BuildingRepository buildingRepository;
     private final RoomRepository roomRepository;
     private final FileRepository fileRepository;
+    private final ChatbotReplyOutboxRepository chatbotReplyOutboxRepository;
+    private final ConversationService conversationService;
+    private final ConversationReplyService conversationReplyService;
 
     public ConversationTestFixture(UserRepository userRepository, TermsRepository termsRepository,
                                    BuildingRepository buildingRepository, RoomRepository roomRepository,
-                                   FileRepository fileRepository) {
+                                   FileRepository fileRepository,
+                                   ChatbotReplyOutboxRepository chatbotReplyOutboxRepository,
+                                   ConversationService conversationService,
+                                   ConversationReplyService conversationReplyService) {
         this.userRepository = userRepository;
         this.termsRepository = termsRepository;
         this.buildingRepository = buildingRepository;
         this.roomRepository = roomRepository;
         this.fileRepository = fileRepository;
+        this.chatbotReplyOutboxRepository = chatbotReplyOutboxRepository;
+        this.conversationService = conversationService;
+        this.conversationReplyService = conversationReplyService;
     }
 
     @Transactional
@@ -73,6 +88,18 @@ public class ConversationTestFixture {
         File file = pendingFile(email, fileType);
         file.markUploaded(1024, fileType);
         return file.getId();
+    }
+
+    public void replyToPendingMessages() {
+        for (ChatbotReplyOutbox outbox : chatbotReplyOutboxRepository.findAll()) {
+            if (outbox.getStatus() != ChatbotReplyOutboxStatus.PENDING) {
+                continue;
+            }
+            outbox.claim(outbox.getLockToken(), LocalDateTime.now());
+            chatbotReplyOutboxRepository.save(outbox);
+            conversationService.prepareBatchReply(outbox.getId(), outbox.getAttemptCount(), outbox.getLockToken())
+                .ifPresent(conversationReplyService::reply);
+        }
     }
 
     public RequestPostProcessor authenticatedAs(String email) {

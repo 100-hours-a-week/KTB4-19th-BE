@@ -6,9 +6,12 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Service;
@@ -30,7 +33,12 @@ import com.homes.zipsai.conversation.ai.AiConverseRequest.HistoryMessage;
 import com.homes.zipsai.conversation.ai.AiConverseRequest.MessageImage;
 import com.homes.zipsai.conversation.ai.AiConverseResponse;
 import com.homes.zipsai.conversation.ai.AiConverseResponse.ImageObservation;
+import com.homes.zipsai.conversation.ai.error.AiConverseErrorType;
+import com.homes.zipsai.conversation.ai.error.AiConverseErrorType.RetryPolicy;
+import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
+import com.homes.zipsai.conversation.domain.ChatbotReplyOutboxStatus;
 import com.homes.zipsai.conversation.domain.Conversation;
+import com.homes.zipsai.conversation.domain.ConversationStatus;
 import com.homes.zipsai.conversation.domain.ConversationType;
 import com.homes.zipsai.conversation.domain.Message;
 import com.homes.zipsai.conversation.domain.MessageFileGroup;
@@ -43,11 +51,14 @@ import com.homes.zipsai.conversation.dto.response.ConversationMessagesResponse;
 import com.homes.zipsai.conversation.dto.response.ConversationReplyResponse;
 import com.homes.zipsai.conversation.dto.response.MessageResponse;
 import com.homes.zipsai.conversation.dto.response.SummaryCardResponse;
+import com.homes.zipsai.conversation.outbox.ChatbotReplyWorkerProperties;
+import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
 import com.homes.zipsai.conversation.repository.ConversationRepository;
 import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
 import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.global.exception.ForbiddenException;
+import com.homes.zipsai.global.exception.InternalServerException;
 import com.homes.zipsai.global.exception.NotFoundException;
 import com.homes.zipsai.global.exception.ValidationFailedException;
 import com.homes.zipsai.global.util.TextUtils;
@@ -55,11 +66,13 @@ import com.homes.zipsai.migration.domain.OutboxOperation;
 import com.homes.zipsai.migration.service.OutboxRecorder;
 
 import lombok.RequiredArgsConstructor;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 @RequiredArgsConstructor
 public class ConversationService {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(ConversationService.class);
     private static final int TITLE_MAX_LENGTH = 30;
     private static final String IMAGE_ONLY_TITLE = "사진 문의";
     private static final Set<String> IMAGE_TYPES = Set.of("jpg", "jpeg", "png", "webp");
@@ -72,6 +85,10 @@ public class ConversationService {
     private final S3StorageService s3StorageService;
     private final StorageProperties storageProperties;
     private final OutboxRecorder outboxRecorder;
+    private final ChatbotReplyOutboxRepository chatbotReplyOutboxRepository;
+    private final ConversationReplyLock conversationReplyLock;
+    private final ChatbotReplyWorkerProperties chatbotReplyWorkerProperties;
+    private final ObjectMapper objectMapper;
 
     @Transactional(readOnly = true)
     public ConversationListResponse getConversations(Long userId, String keyword, String cursor, int size) {
@@ -154,37 +171,106 @@ public class ConversationService {
             .type(ConversationType.INQUIRY)
             .title(content.isEmpty() ? IMAGE_ONLY_TITLE : TextUtils.truncate(content, TITLE_MAX_LENGTH))
             .build());
+        String lockToken = conversationReplyLock.acquire(conversation.getId());
         Message residentMessage = saveResidentMessage(conversation, content);
         List<AttachmentResponse> attachments = attachImages(residentMessage, images);
+        String traceId = MDC.get("traceId");
+        AiConverseRequest aiRequest = aiRequest(room, residentMessage, attachments, true, traceId);
+        ChatbotReplyOutbox outbox = chatbotReplyOutboxRepository.save(ChatbotReplyOutbox.startFirstMessage(
+            residentMessage, userId, traceId, lockToken, objectMapper.writeValueAsString(aiRequest),
+            LocalDateTime.now()));
 
-        AiConverseRequest aiRequest = AiConverseRequest.of(room, conversation, residentMessage,
-            messageImages(attachments), List.of(), MDC.get("traceId"));
-        return new PendingAiReply(conversation, MessageResponse.of(residentMessage, attachments), true, null,
+        return PendingAiReply.of(outbox, lockToken, conversation, MessageResponse.of(residentMessage, attachments),
             aiRequest);
     }
 
     @Transactional
     public PendingAiReply saveNextMessage(Long userId, Long conversationId, String content,
-                                          List<Long> attachmentIds) {
+                                          List<Long> attachmentIds, String lockToken) {
         Conversation conversation = getOwnedConversation(userId, conversationId);
         conversation.verifyCanSendMessage(LocalDateTime.now());
         Room room = residentRoomService.getLivingRoom(userId);
         List<File> images = getAttachableImages(userId, attachmentIds);
-        List<HistoryMessage> history = getHistory(conversationId);
         LocalDateTime previousLastMessageAt = conversation.getLastMessageAt();
 
         Message residentMessage = saveResidentMessage(conversation, content);
         List<AttachmentResponse> attachments = attachImages(residentMessage, images);
+        String traceId = MDC.get("traceId");
+        AiConverseRequest aiRequest = aiRequest(room, residentMessage, attachments, false, traceId);
+        ChatbotReplyOutbox outbox = chatbotReplyOutboxRepository.save(ChatbotReplyOutbox.startNextMessage(
+            residentMessage, userId, traceId, lockToken, previousLastMessageAt,
+            objectMapper.writeValueAsString(aiRequest), LocalDateTime.now()));
 
-        AiConverseRequest aiRequest = AiConverseRequest.of(room, conversation, residentMessage,
-            messageImages(attachments), history, MDC.get("traceId"));
-        return new PendingAiReply(conversation, MessageResponse.of(residentMessage, attachments), false,
-            previousLastMessageAt, aiRequest);
+        return PendingAiReply.of(outbox, lockToken, conversation, MessageResponse.of(residentMessage, attachments),
+            aiRequest);
     }
 
     @Transactional
-    public ConversationReplyResponse saveAiReply(PendingAiReply pendingReply, AiConverseResponse aiResponse) {
-        Conversation conversation = conversationRepository.getReferenceById(pendingReply.conversation().getId());
+    public void markReplyPublished(Long eventId, int attempt) {
+        chatbotReplyOutboxRepository.findById(eventId).orElseThrow().markPublished(attempt, LocalDateTime.now());
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<Duration> remainingReplyTime(PendingAiReply pendingReply) {
+        ChatbotReplyOutbox outbox = chatbotReplyOutboxRepository.findById(pendingReply.eventId()).orElseThrow();
+        if (!outbox.isProcessingBy(pendingReply.attempt(), pendingReply.lockToken())) {
+            return Optional.empty();
+        }
+        Conversation conversation = messageRepository.findById(outbox.getMessageId()).orElseThrow().getConversation();
+        LocalDateTime now = chatbotReplyOutboxRepository.currentTime();
+        if (!isReplyWithinDeadline(outbox, conversation, now)) {
+            throw new InternalServerException();
+        }
+        LocalDateTime deadline = outbox.processingDeadline(chatbotReplyWorkerProperties.attemptTimeout(),
+            chatbotReplyWorkerProperties.requestTimeout(), conversation);
+        return Optional.of(Duration.between(now, deadline));
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<PendingAiReply> prepareReply(Long eventId, int attempt, String lockToken,
+                                                 AiConverseRequest request) {
+        ChatbotReplyOutbox outbox = chatbotReplyOutboxRepository.findById(eventId).orElseThrow();
+        return findReplyMessage(outbox, attempt, lockToken).map(residentMessage -> {
+            residentRoomService.getLivingRoom(outbox.getUserId());
+            return PendingAiReply.of(outbox, lockToken, residentMessage.getConversation(),
+                MessageResponse.of(residentMessage, List.of()), request);
+        });
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<PendingAiReply> prepareBatchReply(Long eventId, int attempt, String lockToken) {
+        ChatbotReplyOutbox outbox = chatbotReplyOutboxRepository.findById(eventId).orElseThrow();
+        return findReplyMessage(outbox, attempt, lockToken).map(residentMessage -> {
+            Room room = residentRoomService.getLivingRoom(outbox.getUserId());
+            List<AttachmentResponse> attachments =
+                findAttachments(List.of(residentMessage)).getOrDefault(residentMessage.getId(), List.of());
+            return prepareReply(outbox, lockToken, room, residentMessage, attachments);
+        });
+    }
+
+    private Optional<Message> findReplyMessage(ChatbotReplyOutbox outbox, int attempt, String lockToken) {
+        if (!outbox.isProcessingBy(attempt, lockToken)) {
+            warnHandledByAnotherAttempt(outbox, attempt);
+            return Optional.empty();
+        }
+
+        Message residentMessage = messageRepository.findById(outbox.getMessageId()).orElseThrow();
+        verifyReplyDeadline(outbox, residentMessage.getConversation());
+        return Optional.of(residentMessage);
+    }
+
+    @Transactional
+    public Optional<ConversationReplyResponse> saveAiReply(PendingAiReply pendingReply,
+                                                           AiConverseResponse aiResponse) {
+        ChatbotReplyOutbox outbox = getOutboxForUpdate(pendingReply.eventId());
+        if (!outbox.isProcessingBy(pendingReply.attempt(), pendingReply.lockToken())) {
+            warnHandledByAnotherAttempt(outbox, pendingReply.attempt());
+            return Optional.empty();
+        }
+
+        Conversation conversation = conversationRepository
+            .findByResidentMessageForUpdate(outbox.getMessageId(), outbox.getUserId()).orElseThrow();
+        verifyReplyDeadline(outbox, conversation);
         conversation.applyAiResponse(aiResponse);
         saveImageAnalysis(pendingReply.residentMessage().messageId(), aiResponse.imageObservations());
         MessageType messageType = MessageType.TEXT;
@@ -196,7 +282,9 @@ public class ConversationService {
         Message assistantMessage = saveMessage(conversation, reply, SenderType.ASSISTANT, messageType, turnId);
         MessageResponse assistantReply =
             MessageResponse.of(assistantMessage, List.of(), summaryCardOf(conversation, List.of(assistantMessage)));
-        return new ConversationReplyResponse(conversation.getId(), assistantReply, conversation.closesAt());
+        outbox.complete();
+        return Optional.of(
+            new ConversationReplyResponse(conversation.getId(), assistantReply, conversation.closesAt()));
     }
 
     @Transactional
@@ -211,17 +299,86 @@ public class ConversationService {
     }
 
     @Transactional
-    public void discardUnansweredMessage(PendingAiReply pendingReply) {
-        Long conversationId = pendingReply.conversation().getId();
-        Long residentMessageId = pendingReply.residentMessage().messageId();
-        messageFileGroupRepository.deleteAllByMessageId(residentMessageId);
-        messageRepository.deleteById(residentMessageId);
-        if (pendingReply.newConversation()) {
-            conversationRepository.deleteById(conversationId);
-            return;
+    public Optional<DiscardedMessage> discardUnansweredMessage(Long eventId, int attempt, String lockToken) {
+        ChatbotReplyOutbox outbox = getOutboxForUpdate(eventId);
+        boolean processing = outbox.isProcessingBy(attempt, lockToken);
+        boolean pending = outbox.getStatus() == ChatbotReplyOutboxStatus.PENDING
+            && outbox.getAttemptCount() == attempt && outbox.getLockToken().equals(lockToken);
+        if (!processing && !pending) {
+            warnHandledByAnotherAttempt(outbox, attempt);
+            return Optional.empty();
         }
-        conversationRepository.findById(conversationId)
-            .ifPresent(conversation -> conversation.updateLastMessageAt(pendingReply.previousLastMessageAt()));
+
+        Long conversationId;
+        if (pending) {
+            Conversation conversation = conversationRepository
+                .findByResidentMessageForUpdate(outbox.getMessageId(), outbox.getUserId()).orElseThrow();
+            LocalDateTime now = chatbotReplyOutboxRepository.currentTime();
+            if (conversation.statusAt(now) == ConversationStatus.ACTIVE
+                    && now.isBefore(outbox.requestDeadline(chatbotReplyWorkerProperties.requestTimeout(),
+                        conversation))) {
+                return Optional.empty();
+            }
+            conversationId = conversation.getId();
+        } else {
+            conversationId = messageRepository.findById(outbox.getMessageId()).orElseThrow().getConversation().getId();
+        }
+        deleteUnansweredMessage(outbox, conversationId);
+        return Optional.of(new DiscardedMessage(outbox.getUserId(), conversationId));
+    }
+
+    @Transactional
+    public ChatbotReplyOutboxStatus retryReply(PendingAiReply pendingReply, RetryPolicy policy) {
+        ChatbotReplyOutbox outbox = getOutboxForUpdate(pendingReply.eventId());
+        if (!outbox.isProcessingBy(pendingReply.attempt(), pendingReply.lockToken())) {
+            warnHandledByAnotherAttempt(outbox, pendingReply.attempt());
+            return outbox.getStatus();
+        }
+        if (policy == RetryPolicy.LIMITED) {
+            outbox.recordFailure();
+        }
+        outbox.retry(outbox.getAttemptCount());
+        return outbox.getStatus();
+    }
+
+    @Transactional
+    public Optional<DiscardedMessage> handleAiReplyFailure(PendingAiReply pendingReply,
+                                                          AiConverseErrorType errorType) {
+        ChatbotReplyOutbox outbox = getOutboxForUpdate(pendingReply.eventId());
+        if (!outbox.isProcessingBy(pendingReply.attempt(), pendingReply.lockToken())) {
+            warnHandledByAnotherAttempt(outbox, pendingReply.attempt());
+            return Optional.empty();
+        }
+
+        Conversation conversation = conversationRepository
+            .findByResidentMessageForUpdate(outbox.getMessageId(), outbox.getUserId()).orElseThrow();
+        RetryPolicy policy = errorType.getRetryPolicy();
+        if (policy == RetryPolicy.LIMITED) {
+            outbox.recordFailure();
+        }
+        if (policy.shouldRetry(outbox.getAttemptCount()) && isReplyWithinDeadline(outbox, conversation)) {
+            outbox.retry(outbox.getAttemptCount());
+            return Optional.empty();
+        }
+        deleteUnansweredMessage(outbox, conversation.getId());
+        return Optional.of(new DiscardedMessage(outbox.getUserId(), conversation.getId()));
+    }
+
+    private void verifyReplyDeadline(ChatbotReplyOutbox outbox, Conversation conversation) {
+        if (!isReplyWithinDeadline(outbox, conversation)) {
+            throw new InternalServerException();
+        }
+    }
+
+    private boolean isReplyWithinDeadline(ChatbotReplyOutbox outbox, Conversation conversation) {
+        return isReplyWithinDeadline(outbox, conversation, chatbotReplyOutboxRepository.currentTime());
+    }
+
+    private boolean isReplyWithinDeadline(ChatbotReplyOutbox outbox, Conversation conversation, LocalDateTime now) {
+        return outbox.getDeletedAt() == null && conversation.getDeletedAt() == null
+            && conversation.statusAt(now) == ConversationStatus.ACTIVE
+            && now.isBefore(outbox.processingDeadline(chatbotReplyWorkerProperties.attemptTimeout(),
+                chatbotReplyWorkerProperties.requestTimeout(), conversation));
     }
 
     @Transactional(readOnly = true)
@@ -296,8 +453,47 @@ public class ConversationService {
         }
     }
 
-    private List<HistoryMessage> getHistory(Long conversationId) {
-        List<Message> messages = messageRepository.findAllByConversationId(conversationId);
+    private void deleteUnansweredMessage(ChatbotReplyOutbox outbox, Long conversationId) {
+        outbox.fail();
+        messageFileGroupRepository.deleteAllByMessageId(outbox.getMessageId());
+        messageRepository.deleteById(outbox.getMessageId());
+        if (outbox.isNewConversation()) {
+            conversationRepository.deleteById(conversationId);
+            return;
+        }
+        conversationRepository.findById(conversationId)
+            .ifPresent(conversation -> conversation.updateLastMessageAt(outbox.getPreviousLastMessageAt()));
+    }
+
+    private ChatbotReplyOutbox getOutboxForUpdate(Long eventId) {
+        return chatbotReplyOutboxRepository.findByIdForUpdate(eventId).orElseThrow();
+    }
+
+    private void warnHandledByAnotherAttempt(ChatbotReplyOutbox outbox, int attempt) {
+        LOGGER.warn("다른 시도가 맡은 답변 이벤트라 처리하지 않습니다. eventId={}, attempt={}, currentAttempt={}, status={}",
+            outbox.getId(), attempt, outbox.getAttemptCount(), outbox.getStatus());
+    }
+
+    private PendingAiReply prepareReply(ChatbotReplyOutbox outbox, String lockToken, Room room,
+                                        Message residentMessage, List<AttachmentResponse> attachments) {
+        AiConverseRequest aiRequest = aiRequest(room, residentMessage, attachments, outbox.isNewConversation(),
+            outbox.getTraceId());
+        return PendingAiReply.of(outbox, lockToken, residentMessage.getConversation(),
+            MessageResponse.of(residentMessage, attachments), aiRequest);
+    }
+
+    private AiConverseRequest aiRequest(Room room, Message residentMessage, List<AttachmentResponse> attachments,
+                                        boolean newConversation, String traceId) {
+        Conversation conversation = residentMessage.getConversation();
+        List<HistoryMessage> history = newConversation
+            ? List.of()
+            : getHistory(conversation.getId(), residentMessage.getId());
+        return AiConverseRequest.of(room, conversation, residentMessage, messageImages(attachments), history,
+            traceId);
+    }
+
+    private List<HistoryMessage> getHistory(Long conversationId, Long beforeMessageId) {
+        List<Message> messages = messageRepository.findAllByConversationIdBefore(conversationId, beforeMessageId);
         List<Long> messageIds = messages.stream().map(message -> message.getId()).toList();
 
         Map<Long, List<HistoryImage>> images = new HashMap<>();
