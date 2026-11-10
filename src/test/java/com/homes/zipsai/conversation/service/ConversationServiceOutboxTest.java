@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 
 import java.time.Duration;
@@ -29,6 +30,7 @@ import com.homes.zipsai.building.service.ResidentRoomService;
 import com.homes.zipsai.common.config.StorageProperties;
 import com.homes.zipsai.common.repository.FileRepository;
 import com.homes.zipsai.common.service.S3StorageService;
+import com.homes.zipsai.conversation.ai.AiConverseRequest;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
 import com.homes.zipsai.conversation.domain.Conversation;
 import com.homes.zipsai.conversation.domain.ConversationType;
@@ -158,7 +160,7 @@ class ConversationServiceOutboxTest {
         given(messageRepository.findById(MESSAGE_ID)).willReturn(Optional.of(storedResidentMessage()));
         given(chatbotReplyOutboxRepository.currentTime()).willReturn(outbox.getProcessingStartedAt());
 
-        PendingAiReply pendingReply = conversationService.prepareReply(EVENT_ID, 1, "retry-token").orElseThrow();
+        PendingAiReply pendingReply = conversationService.prepareBatchReply(EVENT_ID, 1, "retry-token").orElseThrow();
 
         assertThat(pendingReply)
             .hasFieldOrPropertyWithValue("eventId", EVENT_ID)
@@ -178,7 +180,8 @@ class ConversationServiceOutboxTest {
     void preparesNothingWhenAnotherAttemptOwnsEvent() {
         givenStoredEvent(2);
 
-        assertThat(conversationService.prepareReply(EVENT_ID, 1, "retry-token")).isEmpty();
+        assertThat(conversationService.prepareReply(EVENT_ID, 1, "retry-token", mock(AiConverseRequest.class)))
+            .isEmpty();
 
         then(messageRepository).should(never()).findById(any());
     }
@@ -190,7 +193,7 @@ class ConversationServiceOutboxTest {
         outbox.retry(1);
         outbox.claim("retry-token", outbox.getProcessingStartedAt().plusSeconds(1));
 
-        assertThat(conversationService.prepareReply(EVENT_ID, 1, "old-token")).isEmpty();
+        assertThat(conversationService.prepareReply(EVENT_ID, 1, "old-token", mock(AiConverseRequest.class))).isEmpty();
 
         then(messageRepository).shouldHaveNoInteractions();
     }

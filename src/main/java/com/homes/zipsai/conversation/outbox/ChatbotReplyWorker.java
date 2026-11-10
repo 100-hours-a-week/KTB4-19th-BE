@@ -6,6 +6,7 @@ import java.util.Optional;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 
+import com.homes.zipsai.conversation.ai.AiConverseRequest;
 import com.homes.zipsai.conversation.ai.error.AiConverseErrorType.RetryPolicy;
 import com.homes.zipsai.conversation.outbox.ChatbotReplyClaimService.Claim;
 import com.homes.zipsai.conversation.service.ConversationReplyService;
@@ -24,11 +25,11 @@ public class ChatbotReplyWorker {
     private final ConversationReplyService replyService;
     private final StructuredLogger structuredLogger;
 
-    public Optional<PendingAiReply> claimAndPrepareReply(Long eventId) {
+    public Optional<PendingAiReply> claimAndPrepareReply(Long eventId, AiConverseRequest request) {
         try {
             return claimService.claim(eventId)
                 .flatMap(claim -> conversationService.prepareReply(claim.eventId(), claim.attempt(),
-                    claim.lockToken()));
+                    claim.lockToken(), request));
         } catch (RuntimeException exception) {
             structuredLogger.chatbotReplyFailed(eventId, null, null, exception);
             throw exception;
@@ -65,7 +66,7 @@ public class ChatbotReplyWorker {
             return;
         }
         try {
-            conversationService.prepareReply(claim.eventId(), claim.attempt(), claim.lockToken())
+            conversationService.prepareBatchReply(claim.eventId(), claim.attempt(), claim.lockToken())
                 .ifPresent(pendingReply -> {
                     MDC.put("traceId", pendingReply.aiRequest().traceId());
                     replyService.reply(pendingReply);

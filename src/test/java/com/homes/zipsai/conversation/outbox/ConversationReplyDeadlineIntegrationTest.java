@@ -181,7 +181,8 @@ class ConversationReplyDeadlineIntegrationTest {
         room.moveIn(job.pending().conversation().getUser());
         given(residentRoomService.getLivingRoom(job.pending().userId())).willReturn(room);
 
-        PendingAiReply pendingReply = worker.claimAndPrepareReply(job.eventId()).orElseThrow();
+        PendingAiReply pendingReply =
+            worker.claimAndPrepareReply(job.eventId(), job.pending().aiRequest()).orElseThrow();
         ChatbotReplyOutbox saved = outbox(job);
 
         assertThat(saved.getProcessingStartedAt()).isEqualTo(claimedAt);
@@ -202,7 +203,7 @@ class ConversationReplyDeadlineIntegrationTest {
             .isInstanceOf(ApiException.class);
 
         assertThatThrownBy(() -> conversationService.prepareReply(pendingReply.eventId(), pendingReply.attempt(),
-            pendingReply.lockToken()))
+            pendingReply.lockToken(), pendingReply.aiRequest()))
             .isInstanceOf(ApiException.class);
     }
 
@@ -273,7 +274,8 @@ class ConversationReplyDeadlineIntegrationTest {
         Job job = job(startedOffset, lastMessageOffset);
         checkedAt(CREATED_AT.plusSeconds(deadlineOffset));
 
-        assertThatThrownBy(() -> conversationService.prepareReply(job.eventId(), 0, job.token()))
+        assertThatThrownBy(() -> conversationService.prepareReply(job.eventId(), 0, job.token(),
+            job.pending().aiRequest()))
             .isInstanceOf(ApiException.class);
 
         assertThat(outbox(job).getStatus()).isEqualTo(ChatbotReplyOutboxStatus.PROCESSING);

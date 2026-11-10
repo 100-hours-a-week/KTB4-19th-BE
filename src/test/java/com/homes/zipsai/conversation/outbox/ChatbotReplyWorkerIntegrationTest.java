@@ -8,11 +8,12 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -55,10 +56,12 @@ import com.homes.zipsai.building.domain.Building;
 import com.homes.zipsai.building.domain.Room;
 import com.homes.zipsai.building.service.ResidentRoomService;
 import com.homes.zipsai.common.service.RedisMessagePublisher;
+import com.homes.zipsai.conversation.ai.AiComplaintState;
 import com.homes.zipsai.conversation.ai.AiConverseClient;
 import com.homes.zipsai.conversation.ai.AiConverseRequest;
 import com.homes.zipsai.conversation.ai.AiConverseResponse;
 import com.homes.zipsai.conversation.ai.AiRoute;
+import com.homes.zipsai.conversation.ai.AiTurnRole;
 import com.homes.zipsai.conversation.ai.error.AiConverseErrorType;
 import com.homes.zipsai.conversation.ai.error.AiConverseException;
 import com.homes.zipsai.conversation.consumer.ChatbotReplyRequestListener;
@@ -71,6 +74,7 @@ import com.homes.zipsai.conversation.domain.MessageType;
 import com.homes.zipsai.conversation.domain.SenderType;
 import com.homes.zipsai.conversation.event.ChatbotReplyEvent;
 import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
+import com.homes.zipsai.conversation.repository.MessageFileGroupRepository;
 import com.homes.zipsai.conversation.repository.MessageRepository;
 import com.homes.zipsai.conversation.service.ConversationReplyService;
 import com.homes.zipsai.conversation.service.ConversationService;
@@ -80,6 +84,8 @@ import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.domain.UserRole;
 import com.rabbitmq.client.Channel;
+
+import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest
 @DirtiesContext
@@ -126,7 +132,13 @@ class ChatbotReplyWorkerIntegrationTest {
     StringRedisTemplate redis;
 
     @Autowired
+    ObjectMapper objectMapper;
+
+    @MockitoSpyBean
     MessageRepository messageRepository;
+
+    @MockitoSpyBean
+    MessageFileGroupRepository messageFileGroupRepository;
 
     @MockitoSpyBean
     ChatbotReplyOutboxRepository outboxRepository;
@@ -196,7 +208,7 @@ class ChatbotReplyWorkerIntegrationTest {
             return response(invocation.getArgument(0));
         }).when(aiConverseClient).converse(any(), any());
 
-        replyService.reply(conversationService.prepareReply(job.eventId(), 0, job.token()).orElseThrow());
+        replyService.reply(conversationService.prepareBatchReply(job.eventId(), 0, job.token()).orElseThrow());
 
         assertState(job, ChatbotReplyOutboxStatus.PENDING, 1);
 
@@ -231,7 +243,7 @@ class ChatbotReplyWorkerIntegrationTest {
             NOW.minusSeconds(131), job.eventId());
         LocalDateTime createdAt = outbox(job).getCreatedAt();
 
-        PendingAiReply pending = worker.claimAndPrepareReply(job.eventId()).orElseThrow();
+        PendingAiReply pending = worker.claimAndPrepareReply(job.eventId(), receivedRequest(job)).orElseThrow();
 
         assertThat(pending.attempt()).isEqualTo(failureCount);
 
@@ -245,7 +257,7 @@ class ChatbotReplyWorkerIntegrationTest {
 
         assertThat(outbox(job).getCreatedAt()).isEqualTo(createdAt);
 
-        assertThat(worker.claimAndPrepareReply(job.eventId())).isEmpty();
+        assertThat(worker.claimAndPrepareReply(job.eventId(), receivedRequest(job))).isEmpty();
 
         then(aiConverseClient).should().converse(any(), any());
     }
@@ -406,9 +418,10 @@ class ChatbotReplyWorkerIntegrationTest {
     }
 
     @Test
-    @DisplayName("요청 수신은 AI 답변 한 건을 커밋한 뒤 ACK한다")
+    @DisplayName("받은 request로 AI를 호출하고 저장용 사용자 메시지와 선점 정보를 유지해 커밋한 뒤 ACK한다")
     void consumesPendingReplyAndAcknowledgesCommittedAnswer() throws Exception {
         Job requested = job("PENDING", 0);
+        AiConverseRequest request = receivedRequest(requested);
         Channel channel = mock(Channel.class);
         doAnswer(invocation -> {
             assertCompleted(requested, 0);
@@ -421,7 +434,33 @@ class ChatbotReplyWorkerIntegrationTest {
 
         then(channel).shouldHaveNoMoreInteractions();
 
-        then(aiConverseClient).should().converse(any(), any());
+        ArgumentCaptor<AiConverseRequest> aiInput = ArgumentCaptor.forClass(AiConverseRequest.class);
+        then(aiConverseClient).should().converse(aiInput.capture(), any());
+
+        assertThat(aiInput.getValue()).isEqualTo(request);
+
+        ArgumentCaptor<PendingAiReply> saved = ArgumentCaptor.forClass(PendingAiReply.class);
+        then(conversationService).should().saveAiReply(saved.capture(), any());
+
+        assertThat(saved.getValue().eventId()).isEqualTo(requested.eventId());
+
+        assertThat(saved.getValue().attempt()).isZero();
+
+        assertThat(saved.getValue().lockToken()).isEqualTo(outbox(requested).getLockToken());
+
+        assertThat(saved.getValue().lockToken()).isNotEqualTo(requested.token());
+
+        assertThat(saved.getValue().userId()).isEqualTo(requested.userId());
+
+        assertThat(saved.getValue().conversation().getId()).isEqualTo(requested.conversationId());
+
+        assertThat(saved.getValue().residentMessage().messageId()).isEqualTo(requested.messageId());
+
+        then(residentRoomService).should().getLivingRoom(requested.userId());
+
+        then(messageRepository).should(never()).findAllByConversationIdBefore(any(), any());
+
+        then(messageFileGroupRepository).should(never()).findAllByMessageIds(any());
     }
 
     @Test
@@ -456,12 +495,24 @@ class ChatbotReplyWorkerIntegrationTest {
         assertThat(requests.getAllValues()).extracting(AiConverseRequest::turnId).containsOnly(job.turnId());
     }
 
-    private static org.springframework.amqp.core.Message delivery(Job job) {
+    private org.springframework.amqp.core.Message delivery(Job job) {
         MessageProperties properties = new MessageProperties();
         properties.setContentType(MessageProperties.CONTENT_TYPE_JSON);
         properties.setDeliveryTag(37L);
-        return new org.springframework.amqp.core.Message(
-            ("{\"eventId\":" + job.eventId() + "}").getBytes(StandardCharsets.UTF_8), properties);
+        byte[] body = objectMapper.writeValueAsBytes(
+            Map.of("eventId", job.eventId(), "request", receivedRequest(job)));
+        return new org.springframework.amqp.core.Message(body, properties);
+    }
+
+    private static AiConverseRequest receivedRequest(Job job) {
+        return new AiConverseRequest(77L, "101", job.userId().toString(), job.conversationId().toString(),
+            job.turnId(), job.traceId(), AiRoute.COMPLAINT, AiComplaintState.COLLECTING,
+            new AiConverseRequest.MessagePayload(job.messageId().toString(), "발행 당시 저장된 보일러 문의",
+                List.of(new AiConverseRequest.MessageImage(11L, "https://files.example.com/published-image"))),
+            List.of(new AiConverseRequest.HistoryMessage("701", AiTurnRole.USER, "발행 당시의 이전 문의",
+                List.of(new AiConverseRequest.HistoryImage(10L, "보일러 사진", "E01")))),
+            new AiConverseRequest.ComplaintDraftPayload("FACILITY", "주방", "온수가 나오지 않음",
+                OffsetDateTime.parse("2026-10-27T11:50:00+09:00"), List.of(11L)));
     }
 
     private Job job(String status, int failureCount) {

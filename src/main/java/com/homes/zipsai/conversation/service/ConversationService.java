@@ -227,8 +227,28 @@ public class ConversationService {
     }
 
     @Transactional(readOnly = true)
-    public Optional<PendingAiReply> prepareReply(Long eventId, int attempt, String lockToken) {
+    public Optional<PendingAiReply> prepareReply(Long eventId, int attempt, String lockToken,
+                                                 AiConverseRequest request) {
         ChatbotReplyOutbox outbox = chatbotReplyOutboxRepository.findById(eventId).orElseThrow();
+        return findReplyMessage(outbox, attempt, lockToken).map(residentMessage -> {
+            residentRoomService.getLivingRoom(outbox.getUserId());
+            return PendingAiReply.of(outbox, lockToken, residentMessage.getConversation(),
+                MessageResponse.of(residentMessage, List.of()), request);
+        });
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<PendingAiReply> prepareBatchReply(Long eventId, int attempt, String lockToken) {
+        ChatbotReplyOutbox outbox = chatbotReplyOutboxRepository.findById(eventId).orElseThrow();
+        return findReplyMessage(outbox, attempt, lockToken).map(residentMessage -> {
+            Room room = residentRoomService.getLivingRoom(outbox.getUserId());
+            List<AttachmentResponse> attachments =
+                findAttachments(List.of(residentMessage)).getOrDefault(residentMessage.getId(), List.of());
+            return prepareReply(outbox, lockToken, room, residentMessage, attachments);
+        });
+    }
+
+    private Optional<Message> findReplyMessage(ChatbotReplyOutbox outbox, int attempt, String lockToken) {
         if (!outbox.isProcessingBy(attempt, lockToken)) {
             warnHandledByAnotherAttempt(outbox, attempt);
             return Optional.empty();
@@ -236,10 +256,7 @@ public class ConversationService {
 
         Message residentMessage = messageRepository.findById(outbox.getMessageId()).orElseThrow();
         verifyReplyDeadline(outbox, residentMessage.getConversation());
-        Room room = residentRoomService.getLivingRoom(outbox.getUserId());
-        List<AttachmentResponse> attachments =
-            findAttachments(List.of(residentMessage)).getOrDefault(residentMessage.getId(), List.of());
-        return Optional.of(prepareReply(outbox, lockToken, room, residentMessage, attachments));
+        return Optional.of(residentMessage);
     }
 
     @Transactional
