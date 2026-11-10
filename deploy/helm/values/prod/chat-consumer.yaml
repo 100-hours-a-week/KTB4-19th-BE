@@ -1,0 +1,103 @@
+workload: chat-consumer
+environment: prod
+component: consumer
+image:
+  repository: 929368845727.dkr.ecr.ap-northeast-2.amazonaws.com/zipsai-backend
+  tag: ''
+command: []
+args: []
+replicaCount: 1
+containerPort: 8080
+service:
+  enabled: false
+  port: 8080
+  annotations: {}
+env:
+  APP_RUNTIME_MODE: consumer
+  SPRING_MAIN_WEB_APPLICATION_TYPE: servlet
+  AWS_REGION: ap-northeast-2
+  AWS_DEFAULT_REGION: ap-northeast-2
+  AI_CLIENT: http
+  AI_API_URL: http://ai-api.prod.svc.cluster.local:8000
+  REDIS_HOST: redis.prod.svc.cluster.local
+  REDIS_PORT: '6379'
+  REDIS_USERNAME: zipsai_app
+  REDIS_TLS: 'false'
+  REDIS_NOTIFICATION_PUBSUB_CHANNEL: notification-events
+  REDIS_CHATBOT_REPLY_PUBSUB_CHANNEL: chatbot-reply-events
+  COMPLAINT_AI_FEEDBACK_SCHEDULER_ENABLED: 'false'
+  RABBITMQ_HOST: rabbitmq.prod.svc.cluster.local
+  RABBITMQ_PORT: '5672'
+  RABBITMQ_VHOST: zipsai
+  RABBITMQ_USERNAME: zipsai_app
+  RABBITMQ_REPLY_QUEUE: chatbot.reply.request
+  RABBITMQ_REPLY_DLQ: chatbot.reply.request.dlq
+  RABBITMQ_PREFETCH: '1'
+  RABBITMQ_CONSUMER_CONCURRENCY: '8'
+  RABBITMQ_DLQ_CONSUMER_CONCURRENCY: '1'
+  MANAGEMENT_HEALTH_REDIS_ENABLED: 'true'
+  MANAGEMENT_HEALTH_RABBIT_ENABLED: 'true'
+  MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: 'true'
+  MANAGEMENT_ENDPOINT_HEALTH_GROUP_LIVENESS_INCLUDE: livenessState
+  MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: readinessState,db,redis,rabbit
+externalSecret:
+  enabled: true
+  forceSync: '1'
+  parameters:
+    DB_URL: shared/mysql-url
+    DB_USERNAME: shared/mysql-username
+    DB_PASSWORD: shared/mysql-password
+    AI_API_KEY: shared/ai-api-key
+    JWT_SECRET: shared/jwt-secret
+    REDIS_PASSWORD: shared/redis-password
+    RABBITMQ_PASSWORD: shared/rabbitmq-password
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: '1'
+    memory: 1Gi
+nodeSelector:
+  kubernetes.io/os: linux
+  kubernetes.io/arch: amd64
+  environment: prod
+  role: general
+tolerations: []
+spread:
+  enabled: false
+hpa:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 12
+  targetCPUUtilizationPercentage: 70
+pdb:
+  enabled: false
+  minAvailable: 1
+rollingUpdate:
+  maxSurge: 1
+  maxUnavailable: 0
+terminationGracePeriodSeconds: 150
+preStopSeconds: 0
+probes:
+  startup:
+    httpGet:
+      path: /api/actuator/health/liveness
+      port: http
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 12
+  readiness:
+    httpGet:
+      path: /api/actuator/health/readiness
+      port: http
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  liveness:
+    httpGet:
+      path: /api/actuator/health/liveness
+      port: http
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
