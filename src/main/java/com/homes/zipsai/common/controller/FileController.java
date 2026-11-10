@@ -53,7 +53,9 @@ public class FileController {
 
     @GetMapping("/{attachmentId}")
     @Operation(summary = "첨부파일 조회 URL 발급", description = "짧은 시간 동안 유효한 Presigned GET URL을 발급한다.")
-    public ApiResponse<FileDownloadResponse> createDownloadUrl(@PathVariable long attachmentId) {
-        return ApiResponse.data(fileService.createDownloadUrl(attachmentId));
+    public ApiResponse<FileDownloadResponse> createDownloadUrl(
+            @AuthenticationPrincipal AuthPrincipal principal,
+            @PathVariable long attachmentId) {
+        return ApiResponse.data(fileService.createDownloadUrl(principal, attachmentId));
     }
 }
