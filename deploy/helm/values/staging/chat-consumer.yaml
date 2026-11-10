@@ -3,7 +3,7 @@ environment: staging
 component: consumer
 image:
   repository: 929368845727.dkr.ecr.ap-northeast-2.amazonaws.com/zipsai-backend
-  tag: ''
+  tag: 'e6c734f'
 command: []
 args: []
 replicaCount: 1
