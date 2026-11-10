@@ -25,11 +25,15 @@ public class ChatbotReplyConsumerConfiguration {
     SimpleMessageListenerContainer chatbotReplyRequestContainer(ConnectionFactory connectionFactory,
             ChatbotReplyRequestListener listener, ChatbotReplyWorkerProperties workerProperties,
             DefaultLifecycleProcessor lifecycleProcessor,
-            @Value("${app.conversation.reply-consumer.queue}") String queue) {
+            @Value("${app.conversation.reply-consumer.queue}") String queue,
+            @Value("${app.conversation.reply-consumer.prefetch}") int prefetch,
+            @Value("${app.conversation.reply-consumer.concurrency}") int concurrency) {
         SimpleMessageListenerContainer container = new SimpleMessageListenerContainer(connectionFactory);
         container.setQueueNames(queue);
         container.setMessageListener(listener);
         container.setAcknowledgeMode(AcknowledgeMode.MANUAL);
+        container.setPrefetchCount(prefetch);
+        container.setConcurrentConsumers(concurrency);
         long shutdownTimeout = workerProperties.requestTimeout().toMillis();
         container.setShutdownTimeout(shutdownTimeout);
         lifecycleProcessor.setTimeoutForShutdownPhase(container.getPhase(), shutdownTimeout);
