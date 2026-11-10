@@ -53,7 +53,7 @@ public interface ChatbotReplyOutboxRepository extends JpaRepository<ChatbotReply
         WHERE o.event_id = :eventId
             AND o.deleted_at IS NULL AND m.deleted_at IS NULL AND c.deleted_at IS NULL
             AND o.status IN ('PENDING', 'PROCESSING')
-            AND (o.attempt_count >= 3 OR o.created_at <= :requestExpiredBefore OR c.conversation_status <> 'ACTIVE'
+            AND (o.created_at <= :requestExpiredBefore OR c.conversation_status <> 'ACTIVE'
                 OR ((c.ai_conversation_state IS NULL OR c.ai_conversation_state <> 'READY_TO_CONFIRM')
                     AND c.last_message_at <= :conversationExpiredBefore))
         """, nativeQuery = true)

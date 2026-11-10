@@ -162,8 +162,8 @@ class ChatbotReplyClaimIntegrationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {0, 1})
-    @DisplayName("130초 넘게 대기한 지정 이벤트는 선점 시각을 갱신하고 실패 횟수와 다른 이벤트를 보존한다")
+    @ValueSource(ints = {0, 1, 3, 5})
+    @DisplayName("지정한 PENDING 작업은 DB 실패 횟수가 3회 이상이어도 새로 선점하고 다른 작업은 보존한다")
     void claimsOnlyRequestedPendingEvent(int failureCount) {
         Job first = job("PENDING", 0);
         Job requested = job("PENDING", failureCount);
@@ -274,6 +274,36 @@ class ChatbotReplyClaimIntegrationTest {
             .isEmpty();
 
         assertOwnedBy(job, claims.getFirst(), 1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {3, 5})
+    @DisplayName("시도 마감이 지난 작업은 DB 실패 횟수가 3회 이상이어도 새 토큰·시작 시각으로 다시 선점한다")
+    void recoversSingleEventWithoutDatabaseFailureLimit(int failureCount) {
+        Job job = job("PROCESSING", failureCount);
+        LocalDateTime createdAt = outbox(job).getCreatedAt();
+        LocalDateTime before = databaseTime();
+
+        Claim claim = claimService.claim(job.eventId()).orElseThrow();
+
+        assertOwnedBy(job, claim, failureCount);
+
+        assertThat(claim.lockToken()).isNotEqualTo(job.token());
+
+        assertThat(outbox(job).getProcessingStartedAt()).isBetween(before, databaseTime());
+
+        assertThat(outbox(job).getCreatedAt()).isEqualTo(createdAt);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {3, 5})
+    @DisplayName("전체 요청 마감 전에는 DB 실패 횟수가 3회 이상이어도 최종 실패 대상으로 조회하지 않는다")
+    void doesNotSelectConsumerCleanupByFailureCount(int failureCount) {
+        Job job = job("PENDING", failureCount);
+        LocalDateTime now = databaseTime();
+
+        assertThat(outboxRepository.findCleanupCandidate(job.eventId(), now.minusSeconds(280),
+            now.minus(Conversation.IDLE_TIME_TO_CLOSE))).isEmpty();
     }
 
     @Test

@@ -328,6 +328,20 @@ public class ConversationService {
     }
 
     @Transactional
+    public ChatbotReplyOutboxStatus retryReply(PendingAiReply pendingReply, RetryPolicy policy) {
+        ChatbotReplyOutbox outbox = getOutboxForUpdate(pendingReply.eventId());
+        if (!outbox.isProcessingBy(pendingReply.attempt(), pendingReply.lockToken())) {
+            warnHandledByAnotherAttempt(outbox, pendingReply.attempt());
+            return outbox.getStatus();
+        }
+        if (policy == RetryPolicy.LIMITED) {
+            outbox.recordFailure();
+        }
+        outbox.retry(outbox.getAttemptCount());
+        return outbox.getStatus();
+    }
+
+    @Transactional
     public Optional<DiscardedMessage> handleAiReplyFailure(PendingAiReply pendingReply,
                                                           AiConverseErrorType errorType) {
         ChatbotReplyOutbox outbox = getOutboxForUpdate(pendingReply.eventId());

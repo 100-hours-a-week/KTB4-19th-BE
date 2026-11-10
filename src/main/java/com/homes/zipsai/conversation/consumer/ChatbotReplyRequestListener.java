@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.TransactionException;
 
 import com.homes.zipsai.conversation.ai.AiConverseRequest;
+import com.homes.zipsai.conversation.ai.error.AiConverseErrorType.RetryPolicy;
 import com.homes.zipsai.conversation.ai.error.AiConverseException;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutbox;
 import com.homes.zipsai.conversation.domain.ChatbotReplyOutboxStatus;
@@ -22,9 +23,7 @@ import com.homes.zipsai.conversation.outbox.ChatbotReplyWorkerProperties;
 import com.homes.zipsai.conversation.repository.ChatbotReplyOutboxRepository;
 import com.homes.zipsai.conversation.service.ConversationReplyService;
 import com.homes.zipsai.conversation.service.ConversationService;
-import com.homes.zipsai.conversation.service.DiscardedMessage;
 import com.homes.zipsai.conversation.service.PendingAiReply;
-import com.homes.zipsai.global.exception.InternalServerException;
 import com.homes.zipsai.global.logging.StructuredLogger;
 import com.rabbitmq.client.Channel;
 
@@ -87,10 +86,11 @@ public class ChatbotReplyRequestListener implements ChannelAwareMessageListener 
                 channel.basicReject(deliveryTag, false);
                 return;
             }
-            if (process(request.eventId(), request.request())) {
-                channel.basicAck(deliveryTag, false);
-            } else {
-                channel.basicNack(deliveryTag, false, true);
+            switch (process(request.eventId(), request.request())) {
+                case ACK -> channel.basicAck(deliveryTag, false);
+                case NACK -> channel.basicNack(deliveryTag, false, true);
+                case REJECT_REQUEUE -> channel.basicReject(deliveryTag, true);
+                case REJECT -> channel.basicReject(deliveryTag, false);
             }
         } finally {
             if (previousMdc == null) {
@@ -113,74 +113,102 @@ public class ChatbotReplyRequestListener implements ChannelAwareMessageListener 
                 .readValue(body.get("request")));
     }
 
-    private boolean process(long eventId, AiConverseRequest request) {
-        ChatbotReplyOutbox outbox;
+    private DeliveryAction process(long eventId, AiConverseRequest request) {
+        Long conversationId = null;
+        String turnId = request.turnId();
         try {
-            outbox = chatbotReplyOutboxRepository.findById(eventId).orElseThrow();
-        } catch (DataAccessException | TransactionException exception) {
-            structuredLogger.chatbotReplyFailed(eventId, null, null, exception);
-            return false;
+            conversationId = Long.valueOf(request.conversationId());
+        } catch (NumberFormatException ignored) {
+
         }
+        Optional<ChatbotReplyOutbox> result;
+        try {
+            result = chatbotReplyOutboxRepository.findById(eventId);
+        } catch (DataAccessException | TransactionException exception) {
+            structuredLogger.chatbotReplyFailed(eventId, conversationId, turnId, exception);
+            return DeliveryAction.REJECT_REQUEUE;
+        }
+        if (result.isEmpty()) {
+            structuredLogger.chatbotReplyFailed(eventId, conversationId, turnId,
+                new IllegalArgumentException("Chatbot reply outbox not found"));
+            return DeliveryAction.REJECT;
+        }
+        ChatbotReplyOutbox outbox = result.orElseThrow();
         MDC.put("traceId", outbox.getTraceId());
-        if (isTerminal(outbox)) {
-            return true;
+        if (isTerminal(outbox.getStatus())) {
+            return DeliveryAction.ACK;
         }
         Optional<PendingAiReply> prepared;
         try {
             prepared = chatbotReplyWorker.claimAndPrepareReply(eventId, request);
         } catch (DataAccessException | TransactionException exception) {
-            return false;
-        } catch (InternalServerException exception) {
-            return cleanupUnclaimed(eventId);
+            return DeliveryAction.REJECT_REQUEUE;
+        } catch (RuntimeException exception) {
+            return unclaimedAction(eventId, conversationId, turnId, DeliveryAction.REJECT_REQUEUE);
         }
         if (prepared.isEmpty()) {
-            return cleanupUnclaimed(eventId);
+            return unclaimedAction(eventId, conversationId, turnId, DeliveryAction.NACK);
         }
         PendingAiReply pending = prepared.orElseThrow();
         try {
             if (conversationReplyService.replySynchronously(pending).isPresent()) {
-                return true;
-            }
-        } catch (DataAccessException | TransactionException exception) {
-            structuredLogger.chatbotReplyFailed(eventId, pending.conversation().getId(),
-                pending.aiRequest().turnId(), exception);
-            return false;
-        } catch (AiConverseException exception) {
-            structuredLogger.chatbotReplyFailed(eventId, pending.conversation().getId(),
-                pending.aiRequest().turnId(), exception);
-            Optional<DiscardedMessage> discardedMessage =
-                conversationService.handleAiReplyFailure(pending, exception.getErrorType());
-            if (discardedMessage.isPresent()) {
-                conversationReplyService.publishFailure(discardedMessage.orElseThrow(), pending.lockToken(), exception);
-                return true;
+                return DeliveryAction.ACK;
             }
         } catch (RuntimeException exception) {
-            structuredLogger.chatbotReplyFailed(eventId, pending.conversation().getId(),
-                pending.aiRequest().turnId(), exception);
-            conversationReplyService.failReply(eventId, pending.attempt(), pending.lockToken());
+            return failureAction(pending, exception);
         }
-        return isTerminal(chatbotReplyOutboxRepository.findById(eventId).orElseThrow());
+        return unclaimedAction(eventId, conversationId, turnId, DeliveryAction.NACK);
     }
 
-    private boolean cleanupUnclaimed(long eventId) {
-        Optional<ChatbotReplyOutbox> candidate;
+    private DeliveryAction unclaimedAction(long eventId, Long conversationId, String turnId, DeliveryAction fallback) {
         try {
-            LocalDateTime now = chatbotReplyOutboxRepository.currentTime();
-            candidate = chatbotReplyOutboxRepository.findCleanupCandidate(eventId,
-                now.minus(chatbotReplyWorkerProperties.requestTimeout()),
-                now.minus(Conversation.IDLE_TIME_TO_CLOSE));
+            Optional<ChatbotReplyOutbox> result = chatbotReplyOutboxRepository.findById(eventId);
+            if (result.isEmpty()) {
+                structuredLogger.chatbotReplyFailed(eventId, conversationId, turnId,
+                    new IllegalArgumentException("Chatbot reply outbox not found"));
+                return DeliveryAction.REJECT;
+            }
+            if (isTerminal(result.orElseThrow().getStatus())) {
+                return DeliveryAction.ACK;
+            }
+            return isExpired(eventId) ? DeliveryAction.REJECT : fallback;
         } catch (DataAccessException | TransactionException exception) {
-            structuredLogger.chatbotReplyFailed(eventId, null, null, exception);
-            return false;
+            structuredLogger.chatbotReplyFailed(eventId, conversationId, turnId, exception);
+            return DeliveryAction.REJECT_REQUEUE;
         }
-        candidate.ifPresent(outbox ->
-            conversationReplyService.failReply(eventId, outbox.getAttemptCount(), outbox.getLockToken()));
-        return isTerminal(chatbotReplyOutboxRepository.findById(eventId).orElseThrow());
     }
 
-    private boolean isTerminal(ChatbotReplyOutbox outbox) {
-        return outbox.getStatus() == ChatbotReplyOutboxStatus.COMPLETED
-            || outbox.getStatus() == ChatbotReplyOutboxStatus.FAILED;
+    private DeliveryAction failureAction(PendingAiReply pending, RuntimeException exception) {
+        structuredLogger.chatbotReplyFailed(pending.eventId(), pending.conversation().getId(),
+            pending.aiRequest().turnId(), exception);
+        RetryPolicy policy = exception instanceof AiConverseException aiException
+            ? aiException.getErrorType().getRetryPolicy() : RetryPolicy.UNLIMITED;
+        try {
+            if (policy == RetryPolicy.NONE || isExpired(pending.eventId())) {
+                return DeliveryAction.REJECT;
+            }
+            ChatbotReplyOutboxStatus status = conversationService.retryReply(pending, policy);
+            return isTerminal(status) ? DeliveryAction.ACK : DeliveryAction.REJECT_REQUEUE;
+        } catch (DataAccessException | TransactionException retryException) {
+            structuredLogger.chatbotReplyFailed(pending.eventId(), pending.conversation().getId(),
+                pending.aiRequest().turnId(), retryException);
+            return DeliveryAction.REJECT_REQUEUE;
+        }
+    }
+
+    private boolean isExpired(long eventId) {
+        LocalDateTime now = chatbotReplyOutboxRepository.currentTime();
+        return chatbotReplyOutboxRepository.findCleanupCandidate(eventId,
+            now.minus(chatbotReplyWorkerProperties.requestTimeout()),
+            now.minus(Conversation.IDLE_TIME_TO_CLOSE)).isPresent();
+    }
+
+    private boolean isTerminal(ChatbotReplyOutboxStatus status) {
+        return status == ChatbotReplyOutboxStatus.COMPLETED || status == ChatbotReplyOutboxStatus.FAILED;
+    }
+
+    private enum DeliveryAction {
+        ACK, NACK, REJECT_REQUEUE, REJECT
     }
 
     private record RequestMessage(long eventId, AiConverseRequest request) {

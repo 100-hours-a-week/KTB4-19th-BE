@@ -131,9 +131,10 @@ class ChatbotReplyOutboxTest {
     }
 
     @Test
-    @DisplayName("재시도로 대기 상태가 되면 발행 시각을 비워 다시 발행 대상이 된다")
-    void clearsPublishedAtOnRetry() {
+    @DisplayName("PROCESSING에서 PENDING으로 돌아갈 때 발행 시각·생성 시각·기존 토큰·처리 시작 시각을 보존한다")
+    void preservesPublicationAndOwnershipOnRetry() {
         ChatbotReplyOutbox outbox = pendingOutbox(0);
+        ReflectionTestUtils.setField(outbox, "createdAt", NOW);
         outbox.markPublished(0, NOW);
         outbox.claim("lock-2", NOW.plusSeconds(1));
         outbox.recordFailure();
@@ -141,8 +142,16 @@ class ChatbotReplyOutboxTest {
         outbox.retry(outbox.getAttemptCount());
 
         assertThat(outbox.getStatus()).isEqualTo(ChatbotReplyOutboxStatus.PENDING);
+
         assertThat(outbox.getAttemptCount()).isEqualTo(1);
-        assertThat(outbox.getPublishedAt()).isNull();
+
+        assertThat(outbox.getPublishedAt()).isEqualTo(NOW);
+
+        assertThat(outbox.getCreatedAt()).isEqualTo(NOW);
+
+        assertThat(outbox.getLockToken()).isEqualTo("lock-2");
+
+        assertThat(outbox.getProcessingStartedAt()).isEqualTo(NOW.plusSeconds(1));
     }
 
     private static ChatbotReplyOutbox pendingOutbox(int attempt) {
