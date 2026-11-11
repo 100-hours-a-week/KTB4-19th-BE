@@ -420,7 +420,9 @@ class ChatbotReplySaveRetryIntegrationTest {
         lockKeys.add(key(job));
         redis.opsForValue().set(key(job), job.token(), LOCK_TTL);
         AiConverseResponse response = new AiConverseResponse(AiConverseResponse.SUCCESS_CODE,
-            job.pending().aiRequest().turnId(), new AiConverseResponse.Data(AiRoute.KNOWLEDGE, null, ANSWER, null));
+            job.pending().aiRequest().turnId(), new AiConverseResponse.Data(AiRoute.KNOWLEDGE, null, ANSWER, AiConverseResponse.Result.builder()
+                .qaCardDraft(new AiConverseResponse.QaCardDraft("분리수거 요일 문의"))
+                .build()));
         given(aiConverseClient.converse(eq(job.pending().aiRequest()), any())).willReturn(response);
         return job;
     }

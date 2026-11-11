@@ -141,7 +141,7 @@ class ConversationServiceAiReplyTest {
         givenReplySaved();
 
         ConversationReplyResponse reply =
-            conversationService.saveAiReply(pendingAiReply(), knowledge("답변드리기 어렵습니다.", List.of()))
+            conversationService.saveAiReply(pendingAiReply(), unansweredKnowledge("답변드리기 어렵습니다."))
                 .orElseThrow();
 
         assertThat(reply.assistantMessage().messageType()).isEqualTo(MessageType.SUMMARY_CARD);
@@ -167,7 +167,7 @@ class ConversationServiceAiReplyTest {
         givenReplySaved();
 
         ConversationReplyResponse reply =
-            conversationService.saveAiReply(pendingAiReply(), knowledge("답변드리기 어렵습니다.", List.of()))
+            conversationService.saveAiReply(pendingAiReply(), unansweredKnowledge("답변드리기 어렵습니다."))
                 .orElseThrow();
 
         assertThat(reply.closesAt()).isNull();
@@ -428,6 +428,13 @@ class ConversationServiceAiReplyTest {
                     .missingFields(List.of("location"))
                     .imageAnalysis(imageAnalysis)
                     .build()));
+    }
+
+    private static AiConverseResponse unansweredKnowledge(String reply) {
+        return new AiConverseResponse(AiConverseResponse.SUCCESS_CODE, "turn",
+            new AiConverseResponse.Data(AiRoute.KNOWLEDGE, null, reply, AiConverseResponse.Result.builder()
+                .qaCardDraft(new AiConverseResponse.QaCardDraft("분리수거 요일 문의"))
+                .build()));
     }
 
     private static AiConverseResponse knowledge(String reply, List<AiConverseResponse.Citation> citations) {
