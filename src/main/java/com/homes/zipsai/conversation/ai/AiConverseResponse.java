@@ -8,6 +8,7 @@ import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.util.StringUtils;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonFormat;
@@ -71,7 +72,7 @@ public record AiConverseResponse(String code, String turnId, Data data) {
     public boolean isConversationComplete() {
         return switch (data.route()) {
             case COMPLAINT -> data.result().missingFields().isEmpty();
-            case KNOWLEDGE -> data.result().citations().isEmpty();
+            case KNOWLEDGE -> data.result().citations().isEmpty() && StringUtils.hasText(qaCardQuestion());
             case CLARIFY -> false;
         };
     }

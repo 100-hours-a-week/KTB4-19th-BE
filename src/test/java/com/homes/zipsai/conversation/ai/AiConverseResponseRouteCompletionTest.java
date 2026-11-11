@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import com.homes.zipsai.conversation.ai.AiConverseResponse.Citation;
 import com.homes.zipsai.conversation.ai.AiConverseResponse.Data;
+import com.homes.zipsai.conversation.ai.AiConverseResponse.QaCardDraft;
 import com.homes.zipsai.conversation.ai.AiConverseResponse.Result;
 
 class AiConverseResponseRouteCompletionTest {
@@ -28,13 +29,25 @@ class AiConverseResponseRouteCompletionTest {
     @Test
     @DisplayName("질의는 답변 근거가 있으면 대화를 이어간다")
     void keepsKnowledgeOpenWhileCitationsExist() {
-        assertThat(knowledge(List.of(citation())).isConversationComplete()).isFalse();
+        assertThat(knowledge(List.of(citation()), "엘리베이터 점검 일정 문의").isConversationComplete()).isFalse();
     }
 
     @Test
-    @DisplayName("질의는 답변 근거가 없으면 종료한다")
-    void completesKnowledgeWhenNoCitation() {
-        assertThat(knowledge(List.of()).isConversationComplete()).isTrue();
+    @DisplayName("질의는 답변 근거가 없고 질문 내용이 있으면 종료한다")
+    void completesKnowledgeWhenNoCitationAndQuestionExists() {
+        assertThat(knowledge(List.of(), "엘리베이터 점검 일정 문의").isConversationComplete()).isTrue();
+    }
+
+    @Test
+    @DisplayName("질의는 답변 근거가 없어도 질문 내용이 없으면 대화를 이어간다")
+    void keepsKnowledgeOpenWithoutQuestion() {
+        assertThat(knowledge(List.of(), null).isConversationComplete()).isFalse();
+    }
+
+    @Test
+    @DisplayName("질의는 질문 내용이 공백뿐이면 대화를 이어간다")
+    void keepsKnowledgeOpenWithBlankQuestion() {
+        assertThat(knowledge(List.of(), " ").isConversationComplete()).isFalse();
     }
 
     @Test
@@ -55,8 +68,11 @@ class AiConverseResponseRouteCompletionTest {
         return response(AiRoute.COMPLAINT, Result.builder().missingFields(missingFields).build());
     }
 
-    private static AiConverseResponse knowledge(List<Citation> citations) {
-        return response(AiRoute.KNOWLEDGE, Result.builder().citations(citations).build());
+    private static AiConverseResponse knowledge(List<Citation> citations, String question) {
+        return response(AiRoute.KNOWLEDGE, Result.builder()
+            .citations(citations)
+            .qaCardDraft(question == null ? null : new QaCardDraft(question))
+            .build());
     }
 
     private static AiConverseResponse clarify() {
