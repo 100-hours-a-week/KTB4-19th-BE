@@ -89,7 +89,7 @@ class ComplaintServicePhotoUrlTest {
         givenPresignedUrls();
 
         ComplaintListResponse response = complaintService.getManagerComplaints(
-            MANAGER_ID, null, null, false, 0, 20);
+            MANAGER_ID, null, null, false, null, 0, 20);
 
         assertThat(response.complaints().getFirst().fileUrl()).isEqualTo("https://s3.test/key-4");
     }
@@ -112,7 +112,7 @@ class ComplaintServicePhotoUrlTest {
         givenManagerComplaints(complaint(null));
 
         ComplaintListResponse response = complaintService.getManagerComplaints(
-            MANAGER_ID, null, null, false, 0, 20);
+            MANAGER_ID, null, null, false, null, 0, 20);
 
         assertThat(response.complaints().getFirst().fileUrl()).isNull();
     }
@@ -122,7 +122,7 @@ class ComplaintServicePhotoUrlTest {
     void doesNotPresignWhenNoRepresentative() {
         givenManagerComplaints(complaint(null));
 
-        complaintService.getManagerComplaints(MANAGER_ID, null, null, false, 0, 20);
+        complaintService.getManagerComplaints(MANAGER_ID, null, null, false, null, 0, 20);
 
         then(s3StorageService).should(never()).prepareDownload(anyString(), any());
     }
@@ -175,7 +175,7 @@ class ComplaintServicePhotoUrlTest {
     }
 
     private void givenManagerComplaints(Complaint complaint) {
-        given(complaintRepository.findManagerComplaints(any(), any(), any(), anyBoolean(), any()))
+        given(complaintRepository.findManagerComplaints(any(), any(), any(), anyBoolean(), any(), any(), any()))
             .willReturn(page(complaint));
     }
 
