@@ -85,14 +85,15 @@ public class ManagerComplaintController {
     }
 
     @Operation(summary = "민원 목록 조회",
-        description = "관리자가 관리 대상 건물의 민원 목록을 조회. 처리 상태, 긴급 여부에 대한 필터 지원.")
+        description = "관리자가 관리 대상 건물의 민원 목록을 조회. 처리 상태, AI 긴급 여부, 긴급도 등급 필터 지원.")
     @GetMapping
     public ResponseEntity<ApiResponse<ComplaintListResponse>> getComplaints(
             @Parameter(hidden = true) @AuthenticationPrincipal AuthPrincipal principal,
             @ParameterObject @Valid ManagerComplaintListRequest request
     ) {
         ComplaintListResponse response = complaintService.getManagerComplaints(principal.userId(),
-            request.keyword(), request.status(), request.urgentOnly(), request.page(), request.size());
+            request.keyword(), request.status(), request.urgentOnly(), request.urgencyLevel(),
+            request.page(), request.size());
         return ResponseEntity.ok(ApiResponse.data(response));
     }
 }

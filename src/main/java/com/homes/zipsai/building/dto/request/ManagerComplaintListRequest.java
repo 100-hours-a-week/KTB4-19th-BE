@@ -5,6 +5,8 @@ import java.util.List;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 
+import com.homes.zipsai.building.domain.ComplaintUrgencyLevel;
+
 import io.swagger.v3.oas.annotations.media.Schema;
 
 public record ManagerComplaintListRequest(
@@ -16,6 +18,9 @@ public record ManagerComplaintListRequest(
 
     @Schema(description = "긴급 민원만 조회", defaultValue = "false")
     Boolean urgentOnly,
+
+    @Schema(description = "긴급도 등급 필터 (URGENT, PRIORITY, NORMAL)")
+    ComplaintUrgencyLevel urgencyLevel,
 
     @Schema(description = "페이지 번호 (0부터)", defaultValue = "0")
     @Min(value = 0, message = "0 이상이어야 합니다.")

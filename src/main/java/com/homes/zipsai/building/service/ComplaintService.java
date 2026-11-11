@@ -19,6 +19,7 @@ import com.homes.zipsai.building.domain.ComplaintContent;
 import com.homes.zipsai.building.domain.ComplaintDetail;
 import com.homes.zipsai.building.domain.ComplaintStatus;
 import com.homes.zipsai.building.domain.ComplaintType;
+import com.homes.zipsai.building.domain.ComplaintUrgencyLevel;
 import com.homes.zipsai.building.domain.Room;
 import com.homes.zipsai.building.dto.request.ComplaintCommentUpdateRequest;
 import com.homes.zipsai.building.dto.request.ComplaintCreateRequest;
@@ -149,14 +150,17 @@ public class ComplaintService {
             String keyword,
             List<String> statusValues,
             boolean urgentOnly,
+            ComplaintUrgencyLevel urgencyLevel,
             int page,
             int size
     ) {
         String normalizedKeyword = normalizeKeyword(keyword);
         List<ComplaintStatus> statuses = normalizeStatuses(statusValues);
         Pageable pageable = PageRequest.of(page, size, MANAGER_COMPLAINT_SORT);
+        Integer minUrgency = urgencyLevel == null ? null : urgencyLevel.getMinScore();
+        Integer maxUrgency = urgencyLevel == null ? null : urgencyLevel.getMaxScore();
         Slice<Complaint> complaints = complaintRepository.findManagerComplaints(
-            managerId, normalizedKeyword, statuses, urgentOnly, pageable);
+            managerId, normalizedKeyword, statuses, urgentOnly, minUrgency, maxUrgency, pageable);
         if (complaints.isEmpty()) {
             verifyManagesBuilding(managerId);
         }
