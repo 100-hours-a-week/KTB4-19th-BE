@@ -3,7 +3,7 @@ environment: prod
 component: batch
 image:
   repository: 929368845727.dkr.ecr.ap-northeast-2.amazonaws.com/zipsai-backend
-  tag: '2f7b30a'
+  tag: '460df2a'
 command: []
 args: []
 replicaCount: 1
