@@ -75,7 +75,8 @@ class ComplaintServiceManagerListTest {
     void skipsBuildingCheckWhenComplaintsFound() {
         givenManagerComplaints(List.of(complaint()));
 
-        ComplaintListResponse response = complaintService.getManagerComplaints(MANAGER_ID, null, null, false, 0, 20);
+        ComplaintListResponse response = complaintService.getManagerComplaints(
+            MANAGER_ID, null, null, false, null, 0, 20);
 
         assertThat(response.complaints()).hasSize(1);
         then(buildingRepository).should(never()).existsByManager_IdAndDeletedAtIsNull(anyLong());
@@ -87,7 +88,7 @@ class ComplaintServiceManagerListTest {
         givenManagerComplaints(List.of());
         given(buildingRepository.existsByManager_IdAndDeletedAtIsNull(MANAGER_ID)).willReturn(false);
 
-        assertThatThrownBy(() -> complaintService.getManagerComplaints(MANAGER_ID, null, null, false, 0, 20))
+        assertThatThrownBy(() -> complaintService.getManagerComplaints(MANAGER_ID, null, null, false, null, 0, 20))
             .isInstanceOf(NotFoundException.class)
             .hasFieldOrPropertyWithValue("code", "BUILDING_NOT_FOUND");
     }
@@ -98,13 +99,15 @@ class ComplaintServiceManagerListTest {
         givenManagerComplaints(List.of());
         given(buildingRepository.existsByManager_IdAndDeletedAtIsNull(MANAGER_ID)).willReturn(true);
 
-        ComplaintListResponse response = complaintService.getManagerComplaints(MANAGER_ID, null, null, false, 0, 20);
+        ComplaintListResponse response = complaintService.getManagerComplaints(
+            MANAGER_ID, null, null, false, null, 0, 20);
 
         assertThat(response.complaints()).isEmpty();
     }
 
     private void givenManagerComplaints(List<Complaint> complaints) {
-        given(complaintRepository.findManagerComplaints(eq(MANAGER_ID), any(), any(), anyBoolean(), any()))
+        given(complaintRepository.findManagerComplaints(
+            eq(MANAGER_ID), any(), any(), anyBoolean(), any(), any(), any()))
             .willReturn(new SliceImpl<>(complaints, PageRequest.of(0, 20), false));
     }
 

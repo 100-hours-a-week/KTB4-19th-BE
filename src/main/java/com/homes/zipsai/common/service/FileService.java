@@ -83,9 +83,12 @@ public class FileService {
     }
 
     @Transactional(readOnly = true)
-    public FileDownloadResponse createDownloadUrl(long attachmentId) {
+    public FileDownloadResponse createDownloadUrl(AuthPrincipal principal, long attachmentId) {
         File file = fileRepository.findById(attachmentId)
                 .orElseThrow(() -> new NotFoundException(NotFoundException.Resource.ATTACHMENT));
+        if (file.getOwner() == null || !file.getOwner().getId().equals(principal.userId())) {
+            throw new ForbiddenException();
+        }
         if (file.getStatus() != FileStatus.UPLOADED) {
             throw new ConflictException(ConflictException.Reason.UPLOAD_NOT_COMPLETED);
         }

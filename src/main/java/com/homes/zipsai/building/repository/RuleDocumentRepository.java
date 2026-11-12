@@ -28,7 +28,7 @@ public interface RuleDocumentRepository extends JpaRepository<RuleDocument, Long
     @Query("select d from RuleDocument d where d.id = :id")
     Optional<RuleDocument> findWithAttachmentById(@Param("id") Long id);
 
-    @Modifying(clearAutomatically = true)
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""
             update RuleDocument d
             set d.indexingStatus = :status, d.indexingError = :error

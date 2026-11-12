@@ -7,6 +7,8 @@ on:
     branches: [staging, main]
   push:
     branches: [staging]
+    paths-ignore:
+      - 'deploy/helm/values/staging/**'
 
 permissions:
   contents: read

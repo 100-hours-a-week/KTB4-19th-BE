@@ -17,6 +17,7 @@ public interface RuleDocumentIndexingOutboxRepository extends JpaRepository<Rule
             select o.id from RuleDocumentIndexingOutbox o
             where o.status = com.homes.zipsai.building.domain.RuleDocumentIndexingOutboxStatus.PENDING
                 and o.nextRetryAt <= :now
+                and o.deletedAt is null
             order by o.id
             """)
     List<Long> findDueIds(@Param("now") LocalDateTime now, Pageable pageable);

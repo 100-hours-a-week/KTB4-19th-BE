@@ -116,7 +116,7 @@ class ComplaintRepositoryTest {
         entityManager.clear();
 
         Slice<Complaint> found = complaintRepository.findManagerComplaints(manager.getId(), null,
-            List.of(ComplaintStatus.PENDING), true, PageRequest.of(0, 10));
+            List.of(ComplaintStatus.PENDING), true, null, null, PageRequest.of(0, 10));
 
         assertThat(found.getContent()).singleElement()
             .extracting(Complaint::getUrgent)
@@ -125,7 +125,7 @@ class ComplaintRepositoryTest {
 
     private Slice<Complaint> findManagerComplaints() {
         return complaintRepository.findManagerComplaints(manager.getId(), null, List.of(ComplaintStatus.PENDING),
-            false, PageRequest.of(0, 10));
+            false, null, null, PageRequest.of(0, 10));
     }
 
     private void saveComplaint(File attachment) {

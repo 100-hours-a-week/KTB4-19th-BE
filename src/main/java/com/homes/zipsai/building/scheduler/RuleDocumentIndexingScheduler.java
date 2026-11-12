@@ -19,7 +19,7 @@ public class RuleDocumentIndexingScheduler {
     private final RuleDocumentIndexingWorker ruleDocumentIndexingWorker;
 
     @Scheduled(fixedDelay = 5, timeUnit = TimeUnit.SECONDS)
-    @SchedulerLock(name = "ruleDocumentIndexingOutbox", lockAtMostFor = "15m")
+    @SchedulerLock(name = "ruleDocumentIndexingOutbox", lockAtMostFor = "20m")
     public void sendPendingIndexing() {
         ruleDocumentIndexingWorker.processDue();
     }

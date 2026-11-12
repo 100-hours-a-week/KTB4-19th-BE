@@ -14,7 +14,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -47,6 +46,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.homes.zipsai.building.client.KakaoAddressClient;
+import com.homes.zipsai.building.client.KakaoAddressErrorType;
+import com.homes.zipsai.building.client.KakaoAddressResult;
 import com.homes.zipsai.building.domain.Building;
 import com.homes.zipsai.building.repository.BuildingLocationRepository;
 import com.homes.zipsai.building.repository.BuildingRepository;
@@ -71,13 +72,13 @@ class BuildingRegistrationCoordinatesApiTest {
     private static final GeometryFactory GEOMETRY_FACTORY = new GeometryFactory(new PrecisionModel(), 4326);
 
     @Autowired
-    MockMvc mvc;
+    MockMvc mockMvc;
 
     @Autowired
     EntityManager entityManager;
 
     @Autowired
-    TransactionTemplate transactions;
+    TransactionTemplate transactionTemplate;
 
     @Autowired
     BuildingRepository buildingRepository;
@@ -95,13 +96,14 @@ class BuildingRegistrationCoordinatesApiTest {
 
     @BeforeEach
     void setUp() {
-        manager = transactions.execute(transaction -> {
+        manager = transactionTemplate.execute(transaction -> {
             User user = new User(UUID.randomUUID() + "@example.com", "password", "관리자", null);
             user.selectRole(UserRole.MANAGER);
             entityManager.persist(user);
             return user;
         });
-        when(kakaoAddressClient.findCoordinates(anyString())).thenReturn(Optional.empty());
+        when(kakaoAddressClient.findCoordinates(anyString()))
+            .thenReturn(new KakaoAddressResult.Failure(KakaoAddressErrorType.NETWORK_ERROR));
     }
 
     @Test
@@ -109,60 +111,75 @@ class BuildingRegistrationCoordinatesApiTest {
     void registersBuildingWithCoordinatesOutsideTransaction() throws Exception {
         doAnswer(invocation -> {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
-            return Optional.of(point());
+            return new KakaoAddressResult.Success(point());
         }).when(kakaoAddressClient).findCoordinates(ADDRESS);
 
-        mvc.perform(post("/api/v1/managers/me/building").with(as(manager))
+        mockMvc.perform(post("/api/v1/managers/me/building").with(as(manager))
                 .contentType("application/json").content(requestBody()))
+
             .andExpect(status().isCreated())
+
             .andExpect(jsonPath("$.data.buildingId").isNumber())
+
             .andExpect(jsonPath("$.data.buildingName").value("테스트빌"))
+
             .andExpect(jsonPath("$.data.roadAddress").value(ADDRESS))
+
             .andExpect(jsonPath("$.data.location").doesNotExist())
+
             .andExpect(jsonPath("$.data.latitude").doesNotExist())
+
             .andExpect(jsonPath("$.data.longitude").doesNotExist());
 
         Building building = buildingRepository.findByManager_IdAndDeletedAtIsNull(manager.getId()).orElseThrow();
+
         assertThat(locationCount()).isEqualTo(1);
+
         assertThat(jdbcTemplate.queryForObject(
             "SELECT ST_Longitude(location) FROM Building_locations WHERE building_id = ?",
             Double.class, building.getId())).isEqualTo(127.0276);
+
         assertThat(jdbcTemplate.queryForObject(
             "SELECT ST_Latitude(location) FROM Building_locations WHERE building_id = ?",
             Double.class, building.getId())).isEqualTo(37.4979);
+
         verify(kakaoAddressClient).findCoordinates(ADDRESS);
     }
 
     @Test
-    @DisplayName("좌표 조회 결과가 없으면 건물만 저장하고 201로 응답한다")
+    @DisplayName("좌표 조회 통신 오류가 발생해도 건물 등록은 201로 응답한다")
     void registersBuildingWithoutCoordinates() throws Exception {
         register(manager).andExpect(status().isCreated());
 
         assertThat(buildingRepository.existsByManager_Id(manager.getId())).isTrue();
+
         assertThat(locationCount()).isZero();
+
         verify(kakaoAddressClient).findCoordinates(ADDRESS);
     }
 
     @Test
     @DisplayName("위치 저장의 DB 오류는 건물까지 롤백하며 좌표 조회 실패로 처리하지 않는다")
     void rollsBackBuildingWhenLocationStorageFails() throws Exception {
-        when(kakaoAddressClient.findCoordinates(ADDRESS)).thenReturn(Optional.of(point()));
+        when(kakaoAddressClient.findCoordinates(ADDRESS)).thenReturn(new KakaoAddressResult.Success(point()));
         doThrow(new DataIntegrityViolationException("test location storage failure"))
             .when(buildingLocationRepository).saveAndFlush(any());
 
         register(manager).andExpect(status().isInternalServerError());
 
         assertThat(buildingRepository.existsByManager_Id(manager.getId())).isFalse();
+
         assertThat(locationCount()).isZero();
     }
 
     @Test
     @DisplayName("이미 건물이 있는 관리자의 중복 등록은 좌표 조회 없이 409를 반환한다")
     void rejectsDuplicateBeforeGeocoding() throws Exception {
-        transactions.executeWithoutResult(transaction -> entityManager.persist(
+        transactionTemplate.executeWithoutResult(transaction -> entityManager.persist(
             new Building(manager, ADDRESS, "기존빌")));
 
         register(manager).andExpect(status().isConflict())
+
             .andExpect(jsonPath("$.error.code").value("BUILDING_ALREADY_EXISTS"));
 
         verifyNoInteractions(kakaoAddressClient);
@@ -171,18 +188,20 @@ class BuildingRegistrationCoordinatesApiTest {
     @Test
     @DisplayName("인증 권한 또는 입력 검증 실패 시 좌표 API를 호출하지 않는다")
     void rejectsUnauthorizedForbiddenAndInvalidRequestsBeforeGeocoding() throws Exception {
-        mvc.perform(post("/api/v1/managers/me/building")
+        mockMvc.perform(post("/api/v1/managers/me/building")
                 .contentType("application/json").content(requestBody()))
+
             .andExpect(status().isUnauthorized());
-        User resident = transactions.execute(transaction -> {
+        User resident = transactionTemplate.execute(transaction -> {
             User user = new User(UUID.randomUUID() + "@example.com", "password", "입주민", null);
             user.selectRole(UserRole.RESIDENT);
             entityManager.persist(user);
             return user;
         });
         register(resident).andExpect(status().isForbidden());
-        mvc.perform(post("/api/v1/managers/me/building").with(as(manager))
+        mockMvc.perform(post("/api/v1/managers/me/building").with(as(manager))
                 .contentType("application/json").content("{}"))
+
             .andExpect(status().isBadRequest());
 
         verifyNoInteractions(kakaoAddressClient);
@@ -191,10 +210,11 @@ class BuildingRegistrationCoordinatesApiTest {
     @Test
     @DisplayName("존재하지 않는 인증 사용자는 좌표 조회 없이 401을 반환한다")
     void rejectsMissingUserBeforeGeocoding() throws Exception {
-        mvc.perform(post("/api/v1/managers/me/building").with(authentication(
+        mockMvc.perform(post("/api/v1/managers/me/building").with(authentication(
                 new UsernamePasswordAuthenticationToken(new AuthPrincipal(Long.MAX_VALUE), null,
                     List.of(new SimpleGrantedAuthority("ROLE_MANAGER")))))
                 .contentType("application/json").content(requestBody()))
+
             .andExpect(status().isUnauthorized());
 
         verifyNoInteractions(kakaoAddressClient);
@@ -208,8 +228,9 @@ class BuildingRegistrationCoordinatesApiTest {
         doAnswer(invocation -> {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
             entered.countDown();
+
             assertThat(release.await(10, TimeUnit.SECONDS)).isTrue();
-            return Optional.of(point());
+            return new KakaoAddressResult.Success(point());
         }).when(kakaoAddressClient).findCoordinates(ADDRESS);
 
         try (var executor = Executors.newFixedThreadPool(2)) {
@@ -222,18 +243,22 @@ class BuildingRegistrationCoordinatesApiTest {
             }
             MvcResult firstResult = first.get(15, TimeUnit.SECONDS);
             MvcResult secondResult = second.get(15, TimeUnit.SECONDS);
+
             assertThat(List.of(firstResult.getResponse().getStatus(), secondResult.getResponse().getStatus()))
                 .containsExactlyInAnyOrder(201, 409);
             MvcResult conflict = firstResult.getResponse().getStatus() == 409 ? firstResult : secondResult;
+
             assertThat(conflict.getResponse().getContentAsString()).contains("BUILDING_ALREADY_EXISTS");
         }
+
         assertThat(jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM Buildings WHERE user_id = ?", Long.class, manager.getId())).isEqualTo(1);
+
         assertThat(locationCount()).isEqualTo(1);
     }
 
     private ResultActions register(User user) throws Exception {
-        return mvc.perform(post("/api/v1/managers/me/building").with(as(user))
+        return mockMvc.perform(post("/api/v1/managers/me/building").with(as(user))
             .contentType("application/json").content(requestBody()));
     }
 

@@ -1,0 +1,71 @@
+workload: ''
+environment: ''
+component: api
+image:
+  repository: 929368845727.dkr.ecr.ap-northeast-2.amazonaws.com/zipsai-backend
+  tag: ''
+command: []
+args: []
+replicaCount: 1
+containerPort: 8080
+service:
+  enabled: true
+  port: 8080
+  annotations:
+    alb.ingress.kubernetes.io/healthcheck-path: /api/actuator/health/readiness
+    alb.ingress.kubernetes.io/target-group-attributes: deregistration_delay.timeout_seconds=30
+env: {}
+externalSecret:
+  enabled: true
+  forceSync: '1'
+  parameters: {}
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: '1'
+    memory: 2Gi
+nodeSelector:
+  kubernetes.io/os: linux
+  kubernetes.io/arch: amd64
+  environment: staging
+  role: general
+tolerations: []
+spread:
+  enabled: false
+hpa:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70
+pdb:
+  enabled: false
+  minAvailable: 1
+rollingUpdate:
+  maxSurge: 1
+  maxUnavailable: 0
+terminationGracePeriodSeconds: 60
+preStopSeconds: 30
+probes:
+  startup:
+    httpGet:
+      path: /api/actuator/health/liveness
+      port: http
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 12
+  readiness:
+    httpGet:
+      path: /api/actuator/health/readiness
+      port: http
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  liveness:
+    httpGet:
+      path: /api/actuator/health/liveness
+      port: http
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3

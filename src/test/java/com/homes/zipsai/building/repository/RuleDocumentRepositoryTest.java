@@ -122,4 +122,44 @@ class RuleDocumentRepositoryTest {
         assertThat(ids).containsExactly(first.getId(), second.getId());
         assertThat(ids).doesNotContain(later.getId(), done.getId());
     }
+
+    @Test
+    @DisplayName("색인 아웃박스는 생성·수정 시각을 남기고 상태가 바뀌면 수정 시각을 갱신한다")
+    void recordsOutboxTimestamps() throws InterruptedException {
+        Long id = outboxRepository.saveAndFlush(
+            RuleDocumentIndexingOutbox.cleanup(building.getId(), "trace-1", LocalDateTime.now())).getId();
+        entityManager.clear();
+        RuleDocumentIndexingOutbox outbox = outboxRepository.findById(id).orElseThrow();
+        LocalDateTime createdAt = outbox.getCreatedAt();
+        LocalDateTime firstUpdatedAt = outbox.getUpdatedAt();
+        Thread.sleep(5);
+
+        outbox.markDone(LocalDateTime.now());
+        outboxRepository.saveAndFlush(outbox);
+        entityManager.clear();
+
+        RuleDocumentIndexingOutbox reloaded = outboxRepository.findById(outbox.getId()).orElseThrow();
+        assertThat(reloaded.getCreatedAt()).isEqualTo(createdAt);
+        assertThat(reloaded.getUpdatedAt()).isAfter(firstUpdatedAt);
+        assertThat(reloaded.getDeletedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("삭제 표시된 색인 아웃박스는 보낼 대상으로 조회하지 않는다")
+    void excludesSoftDeletedOutbox() {
+        LocalDateTime now = LocalDateTime.of(2026, 10, 20, 12, 0);
+        RuleDocumentIndexingOutbox kept = outboxRepository.save(
+            RuleDocumentIndexingOutbox.cleanup(building.getId(), "trace-1", now.minusMinutes(1)));
+        RuleDocumentIndexingOutbox deleted = outboxRepository.save(
+            RuleDocumentIndexingOutbox.cleanup(building.getId(), "trace-2", now.minusMinutes(1)));
+        entityManager.flush();
+        entityManager.getEntityManager().createQuery(
+                "update RuleDocumentIndexingOutbox o set o.deletedAt = :now where o.id = :id")
+            .setParameter("now", now)
+            .setParameter("id", deleted.getId())
+            .executeUpdate();
+        entityManager.clear();
+
+        assertThat(outboxRepository.findDueIds(now, PageRequest.of(0, 10))).containsExactly(kept.getId());
+    }
 }

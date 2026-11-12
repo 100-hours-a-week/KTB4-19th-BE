@@ -1,0 +1,174 @@
+package com.homes.zipsai.conversation.domain;
+
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.util.Objects;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
+import com.homes.zipsai.global.domain.BaseTimeEntity;
+
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
+@Entity
+@Table(name = "Chatbot_reply_outbox")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class ChatbotReplyOutbox extends BaseTimeEntity {
+
+    private static final int FIRST_ATTEMPT = 0;
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "event_id")
+    private Long id;
+
+    @Column(name = "message_id", nullable = false)
+    private Long messageId;
+
+    @Column(name = "user_id", nullable = false)
+    private Long userId;
+
+    @Column(name = "trace_id", nullable = false, length = 36)
+    private String traceId;
+
+    @Column(name = "lock_token", nullable = false, length = 36)
+    private String lockToken;
+
+    @Column(name = "new_conversation", nullable = false)
+    private boolean newConversation;
+
+    @Column(name = "previous_last_message_at")
+    private LocalDateTime previousLastMessageAt;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "message_data")
+    private String messageData;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private ChatbotReplyOutboxStatus status;
+
+    @Column(name = "attempt_count", nullable = false)
+    private int attemptCount;
+
+    @Column(name = "published_at")
+    private LocalDateTime publishedAt;
+
+    @Column(name = "processing_started_at", nullable = false)
+    private LocalDateTime processingStartedAt;
+
+    private ChatbotReplyOutbox(Long messageId, Long userId, String traceId, String lockToken, boolean newConversation,
+                               LocalDateTime previousLastMessageAt, String messageData,
+                               LocalDateTime processingStartedAt) {
+        this.messageId = messageId;
+        this.userId = userId;
+        this.traceId = traceId;
+        this.lockToken = lockToken;
+        this.newConversation = newConversation;
+        this.previousLastMessageAt = previousLastMessageAt;
+        this.messageData = messageData;
+        this.status = ChatbotReplyOutboxStatus.PENDING;
+        this.attemptCount = FIRST_ATTEMPT;
+        this.processingStartedAt = processingStartedAt;
+    }
+
+    public static ChatbotReplyOutbox startFirstMessage(Message residentMessage, Long userId, String traceId,
+                                                       String lockToken, String messageData, LocalDateTime now) {
+        return new ChatbotReplyOutbox(residentMessage.getId(), userId, traceId, lockToken, true, null, messageData,
+            now);
+    }
+
+    public static ChatbotReplyOutbox startNextMessage(Message residentMessage, Long userId, String traceId,
+                                                      String lockToken, LocalDateTime previousLastMessageAt,
+                                                      String messageData, LocalDateTime now) {
+        return new ChatbotReplyOutbox(residentMessage.getId(), userId, traceId, lockToken, false,
+            previousLastMessageAt, messageData, now);
+    }
+
+    public boolean isProcessingBy(int attempt) {
+        return status == ChatbotReplyOutboxStatus.PROCESSING && attemptCount == attempt;
+    }
+
+    public boolean isProcessingBy(int attempt, String lockToken) {
+        return isProcessingBy(attempt) && this.lockToken.equals(lockToken);
+    }
+
+    public void recordFailure() {
+        if (status != ChatbotReplyOutboxStatus.PROCESSING) {
+            throw new IllegalStateException("Reply is not processing");
+        }
+        this.attemptCount++;
+    }
+
+    public void retry(int attemptCount) {
+        if (status != ChatbotReplyOutboxStatus.PROCESSING) {
+            throw new IllegalStateException("Reply is not processing");
+        }
+        if (attemptCount < 0 || attemptCount < this.attemptCount) {
+            throw new IllegalArgumentException("Failure count cannot be negative or decrease");
+        }
+        this.attemptCount = attemptCount;
+        this.status = ChatbotReplyOutboxStatus.PENDING;
+    }
+
+    public boolean markPublished(LocalDateTime now) {
+        return markPublished(attemptCount, now);
+    }
+
+    public boolean markPublished(int attempt, LocalDateTime now) {
+        if (status != ChatbotReplyOutboxStatus.PENDING || attemptCount != attempt || publishedAt != null) {
+            return false;
+        }
+        this.publishedAt = Objects.requireNonNull(now, "now");
+        return true;
+    }
+
+    public void claim(String lockToken, LocalDateTime now) {
+        if (status != ChatbotReplyOutboxStatus.PENDING) {
+            throw new IllegalStateException("Reply is not pending");
+        }
+        Objects.requireNonNull(lockToken, "lockToken");
+        Objects.requireNonNull(now, "now");
+        this.lockToken = lockToken;
+        this.processingStartedAt = now;
+        this.status = ChatbotReplyOutboxStatus.PROCESSING;
+    }
+
+    public LocalDateTime requestDeadline(Duration requestTimeout, Conversation conversation) {
+        LocalDateTime deadline = getCreatedAt().plus(requestTimeout);
+        OffsetDateTime closesAt = conversation.closesAt();
+        if (closesAt != null && closesAt.toLocalDateTime().isBefore(deadline)) {
+            return closesAt.toLocalDateTime();
+        }
+        return deadline;
+    }
+
+    public LocalDateTime processingDeadline(Duration attemptTimeout, Duration requestTimeout,
+                                             Conversation conversation) {
+        LocalDateTime deadline = requestDeadline(requestTimeout, conversation);
+        LocalDateTime processingDeadline = processingStartedAt.plus(attemptTimeout);
+        return processingDeadline.isBefore(deadline) ? processingDeadline : deadline;
+    }
+
+    public void complete() {
+        this.status = ChatbotReplyOutboxStatus.COMPLETED;
+    }
+
+    public void fail() {
+        this.status = ChatbotReplyOutboxStatus.FAILED;
+    }
+}

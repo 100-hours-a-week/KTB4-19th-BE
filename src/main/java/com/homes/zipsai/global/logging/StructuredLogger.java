@@ -10,6 +10,8 @@ import org.slf4j.MDC;
 import org.springframework.core.NestedExceptionUtils;
 import org.springframework.stereotype.Component;
 
+import com.homes.zipsai.conversation.ai.error.AiConverseException;
+import com.homes.zipsai.global.exception.ApiException;
 import com.homes.zipsai.global.exception.InvalidPubSubFieldException;
 
 import tools.jackson.core.JacksonException;
@@ -55,6 +57,61 @@ public class StructuredLogger {
             Map<String, Object> pubSubFailure = event("redis_pubsub_error", traceId, null, fields);
             pubSubFailure.put("level", "WARN");
             log(pubSubFailure);
+        } catch (RuntimeException ignored) {
+
+        }
+    }
+
+    public void coordinateRetryResult(long buildingId, long claimVersion, String status, short retryFailureCount,
+                                      String errorType, String failureReason) {
+        try {
+            Map<String, Object> fields = new LinkedHashMap<>();
+            fields.put("building_id", buildingId);
+            fields.put("claim_version", claimVersion);
+            fields.put("status", status);
+            fields.put("retry_failure_count", retryFailureCount);
+            fields.put("error_type", errorType);
+            fields.put("failure_reason", failureReason);
+            fields.put("outcome", errorType == null ? "ok" : "fail");
+            fields.put("level", errorType == null ? "INFO" : "WARN");
+            log(event("building_coordinate_retry_result", MDC.get("traceId"), null, fields));
+        } catch (RuntimeException ignored) {
+
+        }
+    }
+
+    public void coordinateRetryFailed(Long buildingId, Long claimVersion, Throwable exception) {
+        try {
+            Map<String, Object> fields = new LinkedHashMap<>();
+            fields.put("building_id", buildingId);
+            fields.put("claim_version", claimVersion);
+            fields.put("outcome", "fail");
+            fields.put("exception_type", exception.getClass().getName());
+            fields.put("root_cause_type", NestedExceptionUtils.getMostSpecificCause(exception).getClass().getName());
+            fields.put("level", "ERROR");
+            log(event("building_coordinate_retry_error", MDC.get("traceId"), null, fields));
+        } catch (RuntimeException ignored) {
+
+        }
+    }
+
+    public void chatbotReplyFailed(Long eventId, Long conversationId, String turnId, Throwable exception) {
+        try {
+            Map<String, Object> fields = new LinkedHashMap<>();
+            fields.put("event_id", eventId);
+            fields.put("conversation_id", conversationId);
+            fields.put("turn_id", turnId);
+            fields.put("outcome", "fail");
+            fields.put("error_code", exception instanceof ApiException apiException
+                ? apiException.code : "INTERNAL_SERVER_ERROR");
+            if (exception instanceof AiConverseException aiException) {
+                fields.put("error_type", aiException.getErrorType().name());
+                fields.put("retry_policy", aiException.getErrorType().getRetryPolicy().name());
+            }
+            fields.put("exception_type", exception.getClass().getName());
+            fields.put("root_cause_type", NestedExceptionUtils.getMostSpecificCause(exception).getClass().getName());
+            fields.put("level", "ERROR");
+            log(event("chatbot_reply_error", MDC.get("traceId"), null, fields));
         } catch (RuntimeException ignored) {
 
         }
@@ -118,7 +175,9 @@ public class StructuredLogger {
     private void log(Map<String, Object> event) {
         try {
             String logMessage = objectMapper.writeValueAsString(event);
-            if ("WARN".equals(event.get("level"))) {
+            if ("ERROR".equals(event.get("level"))) {
+                LOGGER.error(logMessage);
+            } else if ("WARN".equals(event.get("level"))) {
                 LOGGER.warn(logMessage);
             } else {
                 LOGGER.info(logMessage);

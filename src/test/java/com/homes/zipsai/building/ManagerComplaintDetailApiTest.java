@@ -1,6 +1,8 @@
 package com.homes.zipsai.building;
 
+import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.nullValue;
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
@@ -14,7 +16,10 @@ import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -22,6 +27,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import com.homes.zipsai.ZipsaiBackendApplication;
@@ -55,7 +61,8 @@ class ManagerComplaintDetailApiTest {
             new S3StorageService.PresignedDownload("https://s3.test/" + invocation.getArgument(0)));
     }
 
-    private static final String COMPLAINTS = "/api/v1/managers/me/complaints/";
+    private static final String COMPLAINT_LIST_PATH = "/api/v1/managers/me/complaints";
+    private static final String COMPLAINTS = COMPLAINT_LIST_PATH + "/";
 
     @Autowired
     MockMvc mvc;
@@ -79,6 +86,7 @@ class ManagerComplaintDetailApiTest {
     ComplaintDetailRepository complaintDetailRepository;
 
     @Test
+    @DisplayName("담당 건물의 민원 상세는 점수 등급과 AI 긴급 판정을 각각 반환한다")
     void returnsComplaintDetailForTheAuthenticatedManagersBuilding() throws Exception {
         ManagerBuilding owner = managerBuilding();
         Complaint complaint = complaint(owner.building(), owner.room(), "천장 누수", 9, true);
@@ -96,6 +104,7 @@ class ManagerComplaintDetailApiTest {
             .andExpect(jsonPath("$.data.statusLabel").value("처리전"))
             .andExpect(jsonPath("$.data.urgency").value(9))
             .andExpect(jsonPath("$.data.isUrgent").value(true))
+            .andExpect(jsonPath("$.data.urgencyLevel").value("NORMAL"))
             .andExpect(jsonPath("$.data.location").value("안방 천장"))
             .andExpect(jsonPath("$.data.symptom").value("물이 떨어짐"))
             .andExpect(jsonPath("$.data.aiSummary").value("안방 천장에서 물이 떨어지는 민원"))
@@ -103,6 +112,50 @@ class ManagerComplaintDetailApiTest {
             .andExpect(jsonPath("$.data.attachments.length()").value(0))
             .andExpect(jsonPath("$.data.createdAt").isNotEmpty())
             .andExpect(jsonPath("$.data.resolvedAt").value(nullValue()));
+    }
+
+    @ParameterizedTest(name = "점수 {0}, AI 판정 {1}, 예상 등급 {2}")
+    @CsvSource(nullValues = "NULL", value = {
+        "0, false, NORMAL",
+        "39, false, NORMAL",
+        "40, false, PRIORITY",
+        "79, true, PRIORITY",
+        "80, false, URGENT",
+        "100, true, URGENT",
+        "NULL, true, NORMAL",
+        "-1, true, NORMAL",
+        "101, true, NORMAL"
+    })
+    @DisplayName("관리자 목록과 상세는 점수 등급과 AI 긴급 판정을 각각 반환한다")
+    void returnsSameUrgencyInListAndDetail(Integer score, Boolean aiUrgent, String level)
+            throws Exception {
+        ManagerBuilding owner = managerBuilding();
+        Complaint complaint = complaint(owner.building(), owner.room(), "천장 누수", score, aiUrgent);
+        detail(complaint);
+        RequestPostProcessor principal = manager(owner.manager().getId());
+
+        ResultActions list = mvc.perform(get(COMPLAINT_LIST_PATH).with(principal));
+        ResultActions detail = mvc.perform(get(COMPLAINTS + complaint.getId()).with(principal));
+
+        assertAll(
+            () -> list.andExpectAll(
+                status().isOk(),
+
+                jsonPath("$.data.complaints[0].urgency").value(is(score)),
+
+                jsonPath("$.data.complaints[0].urgencyLevel").value(is(level)),
+
+                jsonPath("$.data.complaints[0].isUrgent").value(is(aiUrgent))),
+
+            () -> detail.andExpectAll(
+                status().isOk(),
+
+                jsonPath("$.data.urgency").value(is(score)),
+
+                jsonPath("$.data.urgencyLevel").value(is(level)),
+
+                jsonPath("$.data.isUrgent").value(is(aiUrgent)))
+        );
     }
 
     @Test
@@ -153,7 +206,7 @@ class ManagerComplaintDetailApiTest {
         return new ManagerBuilding(manager, building, room);
     }
 
-    private Complaint complaint(Building building, Room room, String title, int urgency, Boolean urgent) {
+    private Complaint complaint(Building building, Room room, String title, Integer urgency, Boolean urgent) {
         User resident = user(UserRole.RESIDENT);
         Conversation conversation = conversationRepository.save(Conversation.builder()
             .user(resident)

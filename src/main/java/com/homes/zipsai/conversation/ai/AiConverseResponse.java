@@ -8,10 +8,14 @@ import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.util.StringUtils;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.homes.zipsai.conversation.ai.error.AiConverseErrorType;
+import com.homes.zipsai.conversation.ai.error.AiConverseException;
+import com.homes.zipsai.global.exception.InternalServerException;
 
 import lombok.Builder;
 import tools.jackson.databind.PropertyNamingStrategies;
@@ -27,6 +31,16 @@ public record AiConverseResponse(String code, String turnId, Data data) {
 
     public boolean isSuccess() {
         return SUCCESS_CODE.equals(code) && data != null;
+    }
+
+    public void validateFor(String requestTurnId) {
+        if (!isSuccess() || turnId == null || turnId.isBlank() || data.route() == null
+                || data.reply() == null || data.reply().isBlank()) {
+            throw new AiConverseException(AiConverseErrorType.INVALID_RESPONSE, new InternalServerException(), null);
+        }
+        if (!turnId.equals(requestTurnId)) {
+            throw new AiConverseException(AiConverseErrorType.TURN_ID_MISMATCH, new InternalServerException(), null);
+        }
     }
 
     public AiRoute route() {
@@ -58,7 +72,7 @@ public record AiConverseResponse(String code, String turnId, Data data) {
     public boolean isConversationComplete() {
         return switch (data.route()) {
             case COMPLAINT -> data.result().missingFields().isEmpty();
-            case KNOWLEDGE -> data.result().citations().isEmpty();
+            case KNOWLEDGE -> data.result().citations().isEmpty() && StringUtils.hasText(qaCardQuestion());
             case CLARIFY -> false;
         };
     }

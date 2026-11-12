@@ -2,7 +2,7 @@ package com.homes.zipsai.conversation.ai;
 
 public interface AiComplaintFeedbackClient {
 
-    void send(AiComplaintFeedbackBatchRequest request);
+    AiComplaintFeedbackResponse send(AiComplaintFeedbackBatchRequest request);
 
-    void delete(AiComplaintFeedbackDeleteRequest request);
+    AiComplaintFeedbackResponse delete(AiComplaintFeedbackDeleteRequest request);
 }

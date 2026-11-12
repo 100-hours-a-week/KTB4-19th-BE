@@ -45,7 +45,16 @@ public record AiIndexingResponse(
             String kind,
             String docId,
             String status,
-            String reasonCode
+            String reasonCode,
+            Boolean retryable
     ) {
+
+        public Result(String kind, String docId, String status, String reasonCode) {
+            this(kind, docId, status, reasonCode, null);
+        }
+
+        public boolean isRetryable() {
+            return Boolean.TRUE.equals(retryable);
+        }
     }
 }

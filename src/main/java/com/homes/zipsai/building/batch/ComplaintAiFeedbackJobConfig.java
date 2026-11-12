@@ -2,9 +2,12 @@ package com.homes.zipsai.building.batch;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,9 +21,13 @@ import org.springframework.batch.infrastructure.item.Chunk;
 import org.springframework.batch.infrastructure.item.ItemProcessor;
 import org.springframework.batch.infrastructure.item.ItemReader;
 import org.springframework.batch.infrastructure.item.ItemWriter;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.retry.RetryPolicy;
+import org.springframework.core.task.SimpleAsyncTaskExecutor;
+import org.springframework.core.task.SyncTaskExecutor;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import com.homes.zipsai.building.domain.Complaint;
@@ -34,6 +41,8 @@ import com.homes.zipsai.conversation.ai.AiComplaintFeedbackBatchRequest;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackClient;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackDeleteRequest;
 import com.homes.zipsai.conversation.ai.AiComplaintFeedbackRequest;
+import com.homes.zipsai.conversation.ai.AiComplaintFeedbackResponse;
+import com.homes.zipsai.conversation.ai.AiRetryLaterException;
 import com.homes.zipsai.global.exception.AiUnavailableException;
 import com.homes.zipsai.global.util.TimeUtils;
 
@@ -49,6 +58,7 @@ public class ComplaintAiFeedbackJobConfig {
     private static final Duration INITIAL_DELAY = Duration.ofSeconds(1);
     private static final double DELAY_MULTIPLIER = 2.0;
     private static final Duration MAX_DELAY = Duration.ofSeconds(4);
+    private static final Duration MAX_RETRY_AFTER_WAIT = Duration.ofSeconds(30);
 
     @Bean
     public Job complaintAiFeedbackJob(JobRepository jobRepository, Step complaintAiFeedbackStep,
@@ -76,10 +86,36 @@ public class ComplaintAiFeedbackJobConfig {
     @Bean
     public Step complaintAiFeedbackStep(
             JobRepository jobRepository,
+            Step complaintAiFeedbackWorkerStep,
+            ComplaintDetailRepository complaintDetailRepository,
+            @Value("${app.complaint.ai-feedback.concurrency:1}") int concurrency) {
+        int gridSize = Math.max(1, concurrency);
+        return new StepBuilder("complaintAiFeedbackStep", jobRepository)
+                .partitioner("complaintAiFeedbackWorkerStep",
+                        new ComplaintAiFeedbackPartitioner(complaintDetailRepository, MAX_BATCH_SIZE))
+                .step(complaintAiFeedbackWorkerStep)
+                .gridSize(gridSize)
+                .taskExecutor(partitionTaskExecutor(gridSize))
+                .build();
+    }
+
+    private static TaskExecutor partitionTaskExecutor(int concurrency) {
+        if (concurrency == 1) {
+            return new SyncTaskExecutor();
+        }
+        SimpleAsyncTaskExecutor taskExecutor = new SimpleAsyncTaskExecutor("complaint-ai-feedback-");
+        taskExecutor.setVirtualThreads(true);
+        taskExecutor.setConcurrencyLimit(concurrency);
+        return taskExecutor;
+    }
+
+    @Bean
+    public Step complaintAiFeedbackWorkerStep(
+            JobRepository jobRepository,
             PlatformTransactionManager transactionManager,
             ItemReader<ComplaintDetail> complaintAiFeedbackReader,
             ItemWriter<FeedbackItem> complaintAiFeedbackWriter) {
-        return new StepBuilder("complaintAiFeedbackStep", jobRepository)
+        return new StepBuilder("complaintAiFeedbackWorkerStep", jobRepository)
                 .<ComplaintDetail, FeedbackItem>chunk(CHUNK_SIZE)
                 .reader(complaintAiFeedbackReader)
                 .processor(complaintAiFeedbackProcessor())
@@ -92,8 +128,12 @@ public class ComplaintAiFeedbackJobConfig {
 
     @Bean
     @StepScope
-    public ItemReader<ComplaintDetail> complaintAiFeedbackReader(ComplaintDetailRepository complaintDetailRepository) {
-        return new ComplaintAiFeedbackItemReader(complaintDetailRepository, MAX_BATCH_SIZE);
+    public ItemReader<ComplaintDetail> complaintAiFeedbackReader(
+            ComplaintDetailRepository complaintDetailRepository,
+            @Value("#{stepExecutionContext['" + ComplaintAiFeedbackPartitioner.MIN_ID + "']}") long minId,
+            @Value("#{stepExecutionContext['" + ComplaintAiFeedbackPartitioner.MAX_ID + "']}") long maxId,
+            @Value("#{stepExecutionContext['" + ComplaintAiFeedbackPartitioner.LIMIT + "']}") int limit) {
+        return new ComplaintAiFeedbackItemReader(complaintDetailRepository, minId, maxId, limit);
     }
 
     private ItemProcessor<ComplaintDetail, FeedbackItem> complaintAiFeedbackProcessor() {
@@ -129,12 +169,16 @@ public class ComplaintAiFeedbackJobConfig {
                 requests.add(item.request());
             }
             String traceId = UUID.randomUUID().toString();
-            client.send(new AiComplaintFeedbackBatchRequest(traceId, requests));
+            AiComplaintFeedbackResponse response = waitIfAskedToRetryLater(
+                    () -> client.send(new AiComplaintFeedbackBatchRequest(traceId, requests)));
 
+            ResultTally tally = new ResultTally();
             for (FeedbackItem item : chunk) {
-                complaintDetailRepository.markAiFeedbackSent(item.id(), item.updatedAt());
+                if (tally.handled(response, item.id(), item.updatedAt(), traceId, "전송")) {
+                    complaintDetailRepository.markAiFeedbackSent(item.id(), item.updatedAt());
+                }
             }
-            LOGGER.info("민원 답변 피드백을 AI에 전송했습니다. traceId={}, items={}", traceId, requests.size());
+            LOGGER.info("민원 답변 피드백을 AI에 전송했습니다. traceId={}, items={}, {}", traceId, requests.size(), tally);
         };
     }
 
@@ -171,15 +215,21 @@ public class ComplaintAiFeedbackJobConfig {
                         TimeUtils.toOffsetDateTime(target.updatedAt())));
             }
             String traceId = UUID.randomUUID().toString();
-            client.delete(new AiComplaintFeedbackDeleteRequest(traceId, items));
+            AiComplaintFeedbackResponse response = waitIfAskedToRetryLater(
+                    () -> client.delete(new AiComplaintFeedbackDeleteRequest(traceId, items)));
 
+            ResultTally tally = new ResultTally();
+            int handled = 0;
             int marked = 0;
             for (AiFeedbackDeletionTarget target : chunk) {
-                marked += complaintDetailRepository.markAiFeedbackDeleted(
-                        target.complaintDetailId(), target.updatedAt());
+                if (tally.handled(response, target.complaintDetailId(), target.updatedAt(), traceId, "삭제")) {
+                    handled++;
+                    marked += complaintDetailRepository.markAiFeedbackDeleted(
+                            target.complaintDetailId(), target.updatedAt());
+                }
             }
-            LOGGER.info("삭제된 민원 답변을 AI에서 제거했습니다. traceId={}, items={}, changedDuringDelete={}",
-                    traceId, items.size(), items.size() - marked);
+            LOGGER.info("삭제된 민원 답변을 AI에서 제거했습니다. traceId={}, items={}, changedDuringDelete={}, {}",
+                    traceId, items.size(), handled - marked, tally);
         };
     }
 
@@ -194,5 +244,86 @@ public class ComplaintAiFeedbackJobConfig {
     }
 
     private record FeedbackItem(Long id, LocalDateTime updatedAt, AiComplaintFeedbackRequest request) {
+    }
+
+    private static AiComplaintFeedbackResponse waitIfAskedToRetryLater(
+            Supplier<AiComplaintFeedbackResponse> call) {
+        try {
+            return call.get();
+        } catch (AiRetryLaterException exception) {
+            Duration retryAfter = exception.retryAfter();
+            if (retryAfter != null && !retryAfter.isZero()) {
+                Duration wait = retryAfter.compareTo(MAX_RETRY_AFTER_WAIT) > 0 ? MAX_RETRY_AFTER_WAIT : retryAfter;
+                LOGGER.warn("AI가 잠시 뒤 다시 보내라고 응답해 {}초 기다린 뒤 재시도합니다.", wait.toSeconds());
+                try {
+                    Thread.sleep(wait);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            throw exception;
+        }
+    }
+
+    private static final class ResultTally {
+
+        private int succeeded;
+        private int skipped;
+        private int failed;
+        private int missing;
+        private int versionMismatch;
+        private int acceptedWithoutResult;
+
+        boolean handled(AiComplaintFeedbackResponse response, long complaintDetailId, LocalDateTime sentVersion,
+                        String traceId, String action) {
+            if (response == null || response.results().isEmpty()) {
+                acceptedWithoutResult++;
+                return true;
+            }
+            Optional<AiComplaintFeedbackResponse.Result> found = response.find(complaintDetailId);
+            if (found.isEmpty()) {
+                missing++;
+                LOGGER.warn("AI 응답에 민원 답변 {} 결과가 없어 다음 실행에서 다시 보냅니다. traceId={}, complaintDetailId={}",
+                        action, traceId, complaintDetailId);
+                return false;
+            }
+            AiComplaintFeedbackResponse.Result result = found.get();
+            OffsetDateTime expected = TimeUtils.toOffsetDateTime(sentVersion);
+            if (result.updatedAt() != null && !result.updatedAt().isEqual(expected)) {
+                versionMismatch++;
+                LOGGER.warn("AI 응답의 민원 답변 {} 버전이 보낸 버전과 달라 다음 실행에서 다시 보냅니다. traceId={}, "
+                                + "complaintDetailId={}, sent={}, received={}",
+                        action, traceId, complaintDetailId, expected, result.updatedAt());
+                return false;
+            }
+            if (AiComplaintFeedbackResponse.STATUS_SUCCEEDED.equals(result.status())) {
+                succeeded++;
+                return true;
+            }
+            if (AiComplaintFeedbackResponse.STATUS_SKIPPED.equals(result.status())) {
+                skipped++;
+                LOGGER.info("AI가 민원 답변 {} 요청을 반영하지 않았습니다. traceId={}, complaintDetailId={}, reasonCode={}",
+                        action, traceId, complaintDetailId, result.reasonCode());
+                return true;
+            }
+            if (Boolean.FALSE.equals(result.retryable())) {
+                skipped++;
+                LOGGER.warn("AI가 다시 보내도 같은 결과라고 알려 와 민원 답변 {} 요청을 다시 보내지 않습니다. traceId={}, "
+                                + "complaintDetailId={}, status={}, reasonCode={}",
+                        action, traceId, complaintDetailId, result.status(), result.reasonCode());
+                return true;
+            }
+            failed++;
+            LOGGER.warn("AI가 민원 답변 {} 처리에 실패해 다음 실행에서 다시 보냅니다. traceId={}, complaintDetailId={}, "
+                            + "status={}, reasonCode={}",
+                    action, traceId, complaintDetailId, result.status(), result.reasonCode());
+            return false;
+        }
+
+        @Override
+        public String toString() {
+            return "succeeded=" + succeeded + ", skipped=" + skipped + ", failed=" + failed + ", missing=" + missing
+                    + ", versionMismatch=" + versionMismatch + ", acceptedWithoutResult=" + acceptedWithoutResult;
+        }
     }
 }

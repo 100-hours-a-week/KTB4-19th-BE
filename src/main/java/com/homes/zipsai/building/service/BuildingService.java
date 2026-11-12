@@ -5,16 +5,17 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.temporal.TemporalAdjusters;
 import java.util.List;
-import java.util.Optional;
 
-import org.locationtech.jts.geom.Point;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.homes.zipsai.building.client.KakaoAddressClient;
+import com.homes.zipsai.building.client.KakaoAddressErrorType;
+import com.homes.zipsai.building.client.KakaoAddressResult;
 import com.homes.zipsai.building.domain.Building;
+import com.homes.zipsai.building.domain.BuildingCoordinateRetryJob;
 import com.homes.zipsai.building.domain.BuildingLocation;
 import com.homes.zipsai.building.domain.Room;
 import com.homes.zipsai.building.domain.RoomStatus;
@@ -24,6 +25,7 @@ import com.homes.zipsai.building.dto.response.ManagerComplaintSummaryResponse;
 import com.homes.zipsai.building.dto.response.ManagerRoomItemResponse;
 import com.homes.zipsai.building.dto.response.ManagerRoomListResponse;
 import com.homes.zipsai.building.dto.response.ManagerRoomSummaryResponse;
+import com.homes.zipsai.building.repository.BuildingCoordinateRetryJobRepository;
 import com.homes.zipsai.building.repository.BuildingLocationRepository;
 import com.homes.zipsai.building.repository.BuildingRepository;
 import com.homes.zipsai.building.repository.ComplaintRepository;
@@ -31,6 +33,7 @@ import com.homes.zipsai.building.repository.RoomRepository;
 import com.homes.zipsai.global.exception.ConflictException;
 import com.homes.zipsai.global.exception.NotFoundException;
 import com.homes.zipsai.global.exception.UnauthorizedException;
+import com.homes.zipsai.global.exception.ValidationFailedException;
 import com.homes.zipsai.user.domain.User;
 import com.homes.zipsai.user.repository.UserRepository;
 
@@ -43,6 +46,7 @@ public class BuildingService {
     private final RoomRepository roomRepository;
     private final UserRepository userRepository;
     private final BuildingLocationRepository buildingLocationRepository;
+    private final BuildingCoordinateRetryJobRepository buildingCoordinateRetryJobRepository;
     private final KakaoAddressClient kakaoAddressClient;
     private final TransactionTemplate transactionTemplate;
 
@@ -52,6 +56,7 @@ public class BuildingService {
             RoomRepository roomRepository,
             UserRepository userRepository,
             BuildingLocationRepository buildingLocationRepository,
+            BuildingCoordinateRetryJobRepository buildingCoordinateRetryJobRepository,
             KakaoAddressClient kakaoAddressClient,
             TransactionTemplate transactionTemplate
     ) {
@@ -60,6 +65,7 @@ public class BuildingService {
         this.roomRepository = roomRepository;
         this.userRepository = userRepository;
         this.buildingLocationRepository = buildingLocationRepository;
+        this.buildingCoordinateRetryJobRepository = buildingCoordinateRetryJobRepository;
         this.kakaoAddressClient = kakaoAddressClient;
         this.transactionTemplate = transactionTemplate;
     }
@@ -69,15 +75,31 @@ public class BuildingService {
         if (buildingRepository.existsByManager_Id(manager.getId())) {
             throw new ConflictException(ConflictException.Reason.BUILDING_ALREADY_EXISTS);
         }
-        Optional<Point> coordinates = kakaoAddressClient.findCoordinates(roadAddress);
+        KakaoAddressResult result = kakaoAddressClient.findCoordinates(roadAddress);
+        if (result instanceof KakaoAddressResult.Failure failure
+                && (failure.errorType() == KakaoAddressErrorType.ADDRESS_NOT_FOUND
+                    || failure.errorType() == KakaoAddressErrorType.AMBIGUOUS_ADDRESS
+                    || failure.errorType() == KakaoAddressErrorType.NON_BUILDING_ADDRESS)) {
+            throw new ValidationFailedException("roadAddress", ValidationFailedException.Reason.INVALID_ROAD_ADDRESS);
+        }
         try {
             return transactionTemplate.execute(transaction -> {
                 if (buildingRepository.existsByManager_Id(userId)) {
                     throw new ConflictException(ConflictException.Reason.BUILDING_ALREADY_EXISTS);
                 }
                 Building saved = buildingRepository.saveAndFlush(new Building(manager, roadAddress, buildingName));
-                coordinates.ifPresent(point ->
-                    buildingLocationRepository.saveAndFlush(new BuildingLocation(saved, point)));
+                switch (result) {
+                    case KakaoAddressResult.Success success -> buildingLocationRepository.saveAndFlush(
+                        new BuildingLocation(saved, success.coordinates()));
+                    case KakaoAddressResult.Failure failure -> {
+                        KakaoAddressErrorType errorType = failure.errorType();
+                        buildingCoordinateRetryJobRepository.saveAndFlush(
+                            errorType.getRetryPolicy() == KakaoAddressErrorType.RetryPolicy.NONE
+                                ? BuildingCoordinateRetryJob.failed(saved, errorType.name())
+                                : new BuildingCoordinateRetryJob(saved, errorType.name(),
+                                    LocalDateTime.now().plusHours(1)));
+                    }
+                }
                 return new BuildingResponse(saved.getId(), saved.getBuildingName(), saved.getRoadAddress());
             });
         } catch (DataIntegrityViolationException exception) {

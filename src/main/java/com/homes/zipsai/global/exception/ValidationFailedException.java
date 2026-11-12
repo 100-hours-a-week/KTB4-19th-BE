@@ -26,6 +26,7 @@ public class ValidationFailedException extends UnprocessableEntityException {
         INVALID_USER_ROLE("허용되지 않은 역할입니다."),
         BUILDING_NAME_TOO_LONG("건물명은 20자 이하여야 합니다."),
         ROAD_ADDRESS_TOO_LONG("주소는 200자 이하여야 합니다."),
+        INVALID_ROAD_ADDRESS("건물 주소를 확인해 주세요."),
         EMPTY_ROOM_NO("호실 번호는 비워둘 수 없습니다."),
         ROOM_NO_TOO_LONG("호실 번호는 5자 이하여야 합니다."),
         INVALID_FILE_TYPE("허용되지 않은 파일 형식입니다."),
