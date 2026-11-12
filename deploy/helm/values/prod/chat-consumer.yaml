@@ -3,7 +3,7 @@ environment: prod
 component: consumer
 image:
   repository: 929368845727.dkr.ecr.ap-northeast-2.amazonaws.com/zipsai-backend
-  tag: ''
+  tag: '2f7b30a'
 command: []
 args: []
 replicaCount: 1
@@ -25,6 +25,7 @@ env:
   REDIS_TLS: 'false'
   REDIS_NOTIFICATION_PUBSUB_CHANNEL: notification-events
   REDIS_CHATBOT_REPLY_PUBSUB_CHANNEL: chatbot-reply-events
+  CHATBOT_REPLY_DEAD_LETTER_ENABLED: "true"
   COMPLAINT_AI_FEEDBACK_SCHEDULER_ENABLED: 'false'
   RABBITMQ_HOST: rabbitmq.prod.svc.cluster.local
   RABBITMQ_PORT: '5672'
@@ -86,7 +87,7 @@ probes:
       port: http
     periodSeconds: 10
     timeoutSeconds: 5
-    failureThreshold: 12
+    failureThreshold: 30
   readiness:
     httpGet:
       path: /api/actuator/health/readiness
