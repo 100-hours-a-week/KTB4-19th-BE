@@ -9,6 +9,7 @@ import org.springframework.data.domain.Slice;
 import com.homes.zipsai.building.domain.Complaint;
 import com.homes.zipsai.building.domain.ComplaintStatus;
 import com.homes.zipsai.building.domain.ComplaintType;
+import com.homes.zipsai.building.domain.ComplaintUrgencyLevel;
 import com.homes.zipsai.common.domain.File;
 
 public record ComplaintListResponse(
@@ -36,6 +37,7 @@ public record ComplaintListResponse(
             ComplaintStatus statusCode,
             String statusLabel,
             Integer urgency,
+            ComplaintUrgencyLevel urgencyLevel,
             Boolean isUrgent,
             String fileUrl,
             LocalDateTime createdAt
@@ -51,6 +53,7 @@ public record ComplaintListResponse(
                 complaint.getStatus(),
                 complaint.getStatus().getLabel(),
                 complaint.getUrgency(),
+                ComplaintUrgencyLevel.fromScore(complaint.getUrgency()),
                 complaint.getUrgent(),
                 fileUrl.apply(complaint.getAttachment()),
                 complaint.getCreatedAt()

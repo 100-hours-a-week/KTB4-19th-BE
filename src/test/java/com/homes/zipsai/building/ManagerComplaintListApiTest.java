@@ -102,10 +102,13 @@ class ManagerComplaintListApiTest {
     }
 
     @Test
+    @DisplayName("관리자 목록은 검색·상태 필터와 담당 건물의 AI 긴급 판정 필터를 적용한다")
     void appliesKeywordStatusUrgencyAndBlankKeywordRules() throws Exception {
         ManagerBuilding owner = managerBuilding();
         complaint(owner.building(), owner.firstRoom(), "천장 누수", ComplaintStatus.PENDING, 9, true);
         complaint(owner.building(), owner.secondRoom(), "현관 전등", ComplaintStatus.IN_PROGRESS, 5, false);
+        ManagerBuilding other = managerBuilding();
+        complaint(other.building(), other.firstRoom(), "다른 건물 민원", ComplaintStatus.PENDING, 100, true);
 
         mvc.perform(get(COMPLAINTS).param("keyword", "  누수  ").with(manager(owner.manager().getId())))
             .andExpect(status().isOk())
@@ -129,6 +132,7 @@ class ManagerComplaintListApiTest {
         mvc.perform(get(COMPLAINTS).param("urgentOnly", "true").with(manager(owner.manager().getId())))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.complaints.length()").value(1))
+            .andExpect(jsonPath("$.data.complaints[0].title").value("천장 누수"))
             .andExpect(jsonPath("$.data.complaints[0].isUrgent").value(true));
 
     }
@@ -170,9 +174,11 @@ class ManagerComplaintListApiTest {
         mvc.perform(get(COMPLAINTS).param("page", "-1").with(manager(owner.manager().getId())))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error.code").value("INVALID_QUERY_PARAMETER"));
+
         mvc.perform(get(COMPLAINTS).param("size", "101").with(manager(owner.manager().getId())))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error.code").value("INVALID_QUERY_PARAMETER"));
+
         mvc.perform(get(COMPLAINTS).param("status", "UNKNOWN").with(manager(owner.manager().getId())))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.error.code").value("INVALID_QUERY_PARAMETER"));

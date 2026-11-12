@@ -76,7 +76,8 @@ class ComplaintServiceUrgencyTest {
     void listsAiUrgentJudgement() {
         givenManagerComplaints(complaint(80, true));
 
-        ComplaintListResponse response = complaintService.getManagerComplaints(MANAGER_ID, null, null, false, 0, 20);
+        ComplaintListResponse response = complaintService.getManagerComplaints(
+            MANAGER_ID, null, null, false, null, 0, 20);
 
         assertThat(response.complaints()).singleElement()
             .satisfies(item -> {
@@ -90,7 +91,8 @@ class ComplaintServiceUrgencyTest {
     void listsEmptyUrgencyWhenNotScored() {
         givenManagerComplaints(complaint(null, null));
 
-        ComplaintListResponse response = complaintService.getManagerComplaints(MANAGER_ID, null, null, false, 0, 20);
+        ComplaintListResponse response = complaintService.getManagerComplaints(
+            MANAGER_ID, null, null, false, null, 0, 20);
 
         assertThat(response.complaints()).singleElement()
             .satisfies(item -> {
@@ -115,7 +117,8 @@ class ComplaintServiceUrgencyTest {
     }
 
     private void givenManagerComplaints(Complaint complaint) {
-        given(complaintRepository.findManagerComplaints(eq(MANAGER_ID), any(), any(), anyBoolean(), any()))
+        given(complaintRepository.findManagerComplaints(
+            eq(MANAGER_ID), any(), any(), anyBoolean(), any(), any(), any()))
             .willReturn(new SliceImpl<>(List.of(complaint), PageRequest.of(0, 20), false));
     }
 

@@ -49,12 +49,19 @@ public interface ComplaintRepository extends JpaRepository<Complaint, Long> {
                 and (:keyword is null or lower(c.title) like lower(concat('%', :keyword, '%')))
                 and c.status in :statuses
                 and (:urgentOnly = false or c.urgent = true)
+                and (
+                    :minUrgency is null
+                    or c.urgency between :minUrgency and :maxUrgency
+                    or (:minUrgency = 0 and (c.urgency is null or c.urgency not between 0 and 100))
+                )
             """)
     Slice<Complaint> findManagerComplaints(
             @Param("managerId") Long managerId,
             @Param("keyword") String keyword,
             @Param("statuses") List<ComplaintStatus> statuses,
             @Param("urgentOnly") boolean urgentOnly,
+            @Param("minUrgency") Integer minUrgency,
+            @Param("maxUrgency") Integer maxUrgency,
             Pageable pageable
     );
 

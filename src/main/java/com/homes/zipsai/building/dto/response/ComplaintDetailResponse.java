@@ -10,6 +10,7 @@ import com.homes.zipsai.building.domain.Complaint;
 import com.homes.zipsai.building.domain.ComplaintDetail;
 import com.homes.zipsai.building.domain.ComplaintStatus;
 import com.homes.zipsai.building.domain.ComplaintType;
+import com.homes.zipsai.building.domain.ComplaintUrgencyLevel;
 import com.homes.zipsai.common.domain.File;
 
 public record ComplaintDetailResponse(
@@ -23,6 +24,7 @@ public record ComplaintDetailResponse(
         ComplaintStatus statusCode,
         String statusLabel,
         Integer urgency,
+        ComplaintUrgencyLevel urgencyLevel,
         Boolean isUrgent,
         String location,
         OffsetDateTime occurredTime,
@@ -49,6 +51,7 @@ public record ComplaintDetailResponse(
             complaint.getStatus(),
             complaint.getStatus().getLabel(),
             complaint.getUrgency(),
+            ComplaintUrgencyLevel.fromScore(complaint.getUrgency()),
             complaint.getUrgent(),
             detail.getLocation(),
             detail.getOccurredTime(),
