@@ -16,6 +16,7 @@ env:
   APP_RUNTIME_MODE: consumer
   SPRING_MAIN_WEB_APPLICATION_TYPE: servlet
   AWS_REGION: ap-northeast-2
+  TZ: Asia/Seoul
   AWS_DEFAULT_REGION: ap-northeast-2
   AI_CLIENT: http
   AI_API_URL: http://ai-api.staging.svc.cluster.local:8000
