@@ -3,7 +3,7 @@ environment: staging
 component: api
 image:
   repository: 929368845727.dkr.ecr.ap-northeast-2.amazonaws.com/zipsai-backend
-  tag: '460df2a'
+  tag: '9d3744c'
 command: []
 args: []
 replicaCount: 1
@@ -28,7 +28,7 @@ env:
   REDIS_TLS: 'false'
   REDIS_NOTIFICATION_PUBSUB_CHANNEL: notification-events
   REDIS_CHATBOT_REPLY_PUBSUB_CHANNEL: chatbot-reply-events
-  COMPLAINT_AI_FEEDBACK_SCHEDULER_ENABLED: 'false'
+  COMPLAINT_AI_FEEDBACK_SCHEDULER_ENABLED: 'true'
   CHATBOT_REPLY_RELAY_ENABLED: "true"
   APP_CONVERSATION_REPLYWORKER_ENABLED: "false"
   RABBITMQ_HOST: rabbitmq.staging.svc.cluster.local
